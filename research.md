@@ -32,7 +32,7 @@ Nothing here is benchmark data. No performance, compatibility, or cost figure ha
 | Packaging and auto-update | Partial (§5 RQ-7) |
 | Testing and game-server integration | Partial (§5 RQ-12) |
 | Infrastructure and bandwidth cost drivers | Partial (§5 RQ-8) |
-| Managed game server acquisition and supervision | Partial (§5 RQ-13.2, §5 RQ-13.3 — desk research only; AS-11/E-19 unread) |
+| Managed game server acquisition and supervision | Partial (§5 RQ-13.2, §5 RQ-13.3 — desk research only). **Licensing now answered** (§5 RQ-13.1b: EULA and Usage Guidelines read 2026-10-17; hosting permitted, six binding constraints found) |
 
 ## 2. Game networking research
 
@@ -341,7 +341,44 @@ Added 2026-10-17 for the scope change in `context.md` G-7. Scope agreed for the 
 | Minecraft Wiki, "Server/Requirements" | Community |
 | Minecraft Wiki, "Version_manifest.json" | Community |
 
-**Could not be read — the gating question is unresolved.** `minecraft.net` (both server download pages, `/en-us/eula`, `/en-us/usage-guidelines`) and `aka.ms/MinecraftEULA` **timed out or returned transport errors on every attempt** from this environment. The EULA and Usage Guidelines text was therefore **not read**, and no substitute was used in its place. **AS-11 and E-19 remain unverified.** Nothing in this document asserts that automated acquisition is permitted.
+#### RQ-13.1b The EULA and Usage Guidelines were read on 2026-10-17 — hosting is permitted, and six constraints are now binding
+
+**The blocker is cleared.** After repeated timeouts through the `webfetch` path, DNS and TCP 443 were confirmed reachable for `aka.ms`, `www.minecraft.net`, and `web.archive.org`, and a direct `Invoke-WebRequest` succeeded: `aka.ms/MinecraftEULA` → **HTTP 200, 35,444 bytes**, redirecting to `https://www.minecraft.net/en-us/eula`; `https://www.minecraft.net/en-us/usage-guidelines` → **HTTP 200, 407,376 bytes**. Both were read in full and the quotes below are verbatim. The earlier failures were a transport problem with one fetch path, not the sites being unavailable — worth recording, because "the site is down" and "my client cannot reach the site" are different claims and only one of them was ever true.
+
+**This is not legal advice.** What follows is what the documents say, quoted. Whether our specific implementation complies is a judgement the owner or their counsel must make, and `AS-11` is marked accordingly rather than simply ticked.
+
+**Permission is explicit, in three places. [V]**
+
+| Source | Quote |
+|---|---|
+| Usage Guidelines, "Servers and hosting" | "**You may host a server for Minecraft. You may even charge for access to the server** as long as you follow the guidelines in this section. By 'server,' we mean a single connecting address or IP number." |
+| EULA, "what you can and can't do with Minecraft software and content" | "For the server version of Minecraft: **Java Edition, you can install it on a server and host online play.**" |
+| EULA, Summary | "You may **develop tools, plug-ins and services** as long as they do not seem official or approved by us, such as by using our logos." |
+
+That last one is the clause that covers this entire product: a desktop application that provisions and tunnels Minecraft servers is a "service", and it is permitted provided it does not appear official.
+
+**"By 'server,' we mean a single connecting address or IP number" is load-bearing.** The product's core value is that a guest reaches the game through *our* relay address rather than the host's own IP. The Guidelines anticipate this and still permit it, because the unit of counting is the connecting address. **But it means per-connection-address obligations attach to us, not only to the host** — and one of them is privacy, below.
+
+**Six constraints are now binding engineering requirements, not background reading. [V] for the text; [A] for how each maps to our design.**
+
+| # | Constraint (verbatim) | What it requires of us |
+|---|---|---|
+| **C1** | Access to your server "**Must only be granted to users who have a genuine paid-for version of Minecraft**" | Guest admission must be gated to genuine purchasers. **Mojang publishes no API a third party can call to verify this.** See the open question below — this is the one requirement with no clean implementation |
+| **C2** | Access "**Can't be limited to or controlled, directly or indirectly, by a player owning or having access to out-of-game content, products, or services**" | **This puts ADR-007's guest model at risk.** If a guest must hold an account on our platform to obtain the relay address, that is out-of-game gating. Guest model **G2 (connect to the relay address, no client, no account)** is compatible; **G1 (guest installs our client and signs in) appears to conflict.** ADR-007 is open; this evidence bears directly on it and must be read before G1 is chosen |
+| **C3** | "You **don't hide or alter any of the dialogs or prompts** that are part of Minecraft (this includes the **End User License Agreement (EULA)**, warning messages, and error messages)" | Provisioning must not touch `eula.txt` or any Minecraft prompt. This **confirms** the design decision already recorded in T-027: the app never accepts the EULA on the host's behalf; the host does it deliberately |
+| **C4** | "You make it clear that **you are responsible for all end user data privacy and protection requirements**" | The **operator** carries end-user data privacy. This sharpens PRIV-002 and PRIV-003: guest source IPs are the operator's liability, not merely a data-minimisation choice. E-13's viability now has a legal dimension, not just a technical one |
+| **C5** | "You provide information to users on **all the content and pricing** applicable to your server **before a person joins**, signs up, or signs in" | Only bites if we monetise. Recorded so it is not discovered after launch |
+| **C6** | Monetisation conditions: equal cost for everyone; every payer gets all enabled mods; own and control the server while charging; **no entitlements that give a competitive advantage**; cosmetics only, **"except for capes"**; virtual currency with no real-world value | Any future paid tier must not sell game advantage. Directly constrains quota design: **a quota that lets a paying host admit more players is competitive advantage**, and would need to be structured so it does not |
+
+**Plus a branding requirement that is concrete and easy to miss. [V]** The Usage Guidelines' Essential guidelines require, prominently: **"NOT AN OFFICIAL MINECRAFT [PRODUCT/SERVICE/EVENT/etc.]. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT"** — on the product, listing, description, website, and all other related materials. They also require naming the publisher/owner and giving a contact method, and state that **"chat and forum links are not acceptable methods"**. That is a specific deliverable for `DESIGN.md` and the about screen, and it is currently in no requirement. Added as `SRV-012`.
+
+**What the documents do *not* resolve — recorded rather than guessed.**
+
+1. **C1 has no published verification mechanism.** No Mojang/Microsoft API is offered to third parties for confirming a player holds a genuine paid-for copy. In practice the host's own account and the guest's own client are the only evidence. **[X] This is an open design question, not a solved one.** A reasonable reading is that the obligation sits on the party running the server, so surfacing the rule to the host is the honest implementation — but that is `[A]`, and the owner should confirm it.
+2. **C2's exact reach is a judgement.** Whether "out-of-game content, products, or services" covers *any* account on the operator's platform, or only paid entitlements, is not spelled out. The safer reading is the strict one, and it happens to coincide with the design we already prefer (G2). Recorded as a constraint on ADR-007, not as a resolution of it.
+3. **Whether the operator can pass C4 to the host.** Our terms of service would need to allocate end-user data privacy explicitly. No document here governs our own relationship with the host, and that is ours to write.
+
+**Effect on the assumptions.** `AS-11` moves from `[X] unverified` to **answered by primary source, with a legal sign-off still outstanding** — the text permits what we do and imposes six constraints we had not captured. `E-19`'s licensing half is answered; its standard-user VM footprint half is **not** and still needs a real VM. `plan.md`'s stated risk that "game servers cannot be obtained or run legally" is **retired for Minecraft Java**: the remaining acquisition questions are technical (E-15), not licensing.
 
 #### RQ-13.2 Java Edition (`server.jar`)
 
@@ -442,7 +479,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-004 | Whether to add an end-to-end encryption layer between host and guest (depends on ADR-007) | Open | 2026-10-16 | n/a |
 | ADR-005 | Tauri 2 shell + Rust engine, engine as current-user in-process or child process, no Windows service | Proposed | 2026-10-16 | Low–medium |
 | ADR-006 | Per-user NSIS installer + signed Tauri updater; MSIX deferred | Proposed | 2026-10-16 | Low–medium |
-| ADR-007 | Guest model: guests install client (G1) vs connect to relay address (G2) | Open | 2026-10-16 | n/a |
+| ADR-007 | Guest model: guests install client (G1) vs connect to relay address (G2). **G1 now has a licensing obstacle** — see RQ-13.1b constraint C2 / `SRV-014` | Open, **narrowed by evidence** | 2026-10-16; evidence 2026-10-17 | n/a |
 | ADR-008 | Rust control plane (`axum`) + PostgreSQL (`sqlx`); relay state in memory | **Accepted 2026-10-17** by the product owner | 2026-10-16, recorded 2026-10-17 | Medium |
 | ADR-009 | System-browser OAuth (PKCE) + OS credential store; identity provider open | Proposed | 2026-10-16 | Medium (flow), none (provider) |
 | ADR-010 | `tracing` + optional OTLP; no default client telemetry | Proposed | 2026-10-16 | Medium |
@@ -714,7 +751,8 @@ Read and used — see §5 RQ-13.1 for how each was used and for what it does **n
 
 - https://www.minecraft.net/en-us/download/server/bedrock — Bedrock download page; **blocks SRV-002 for Bedrock**
 - https://www.minecraft.net/en-us/download/server/java — Java server download page
-- https://www.minecraft.net/en-us/eula — **the EULA. Not read. AS-11 / E-19 remain unverified**
+- https://www.minecraft.net/en-us/eula — **READ 2026-10-17** (`aka.ms/MinecraftEULA`, HTTP 200, 35,444 bytes, redirects here). Full findings in §5 RQ-13.1b
+- https://www.minecraft.net/en-us/usage-guidelines — **READ 2026-10-17** (HTTP 200, 407,376 bytes). Contains the "Servers and hosting" section and the Essential guidelines that `SRV-012`–`SRV-017` derive from
 - https://www.minecraft.net/en-us/usage-guidelines — not read
 - https://aka.ms/MinecraftEULA — not read
 

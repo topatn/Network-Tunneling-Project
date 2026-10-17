@@ -73,7 +73,7 @@ Secrets must never be committed or logged (`AGENTS.md` §7).
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass, zero warnings |
 | `cargo test --workspace --all-targets` | Pass under `stable-x86_64-pc-windows-gnu` — **0 tests**, the crates are empty skeletons |
 | `cargo deny check advisories bans licenses` | Pass, exit 0 — via the official prebuilt `cargo-deny` 0.20.2 binary, SHA-256 verified |
-| `python scripts/audit_traceability.py` | Pass — 110 requirements, 110 traceability rows, 86 tasks, 19 experiments, 19 ADR rows (6 with full records), 7 invariants, 12 model/DDL tables, 20 routes cross-checked, longest chain 23, **0 errors, 23 warnings** |
+| `python scripts/audit_traceability.py` | Pass — 116 requirements, 116 traceability rows, 86 tasks, 19 experiments, 19 ADR rows (6 with full records), 7 invariants, 12 model/DDL tables, 20 routes cross-checked, longest chain 23, **0 errors, 23 warnings** |
 | `python scripts/audit_traceability.py --self-test` | Pass — all **13** planted defects detected |
 | `python scripts/check_contrast.py` | Pass — all 22 DESIGN.md contrast pairs recomputed and matched; formula self-validated against 3 WCAG reference pairs |
 

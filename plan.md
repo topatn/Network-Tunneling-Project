@@ -18,7 +18,7 @@
 | M8 — Packaging, observability, deployment, operations | T-098–T-110 (12 tasks) | Gate G8: staging environment passes exercises for deploy, rollback, backup, alerts, and updates. |
 | M9 — Release readiness | T-120–T-122 (3 tasks) | Gate G9: go/no-go review. |
 
-Task counts are computed from `tasks.md` data. Total: 86 tasks, 110 requirements.
+Task counts are computed from `tasks.md` data. Total: 86 tasks, 116 requirements.
 
 ## Sequencing
 
@@ -60,7 +60,7 @@ Computed longest prerequisite chain, **verified by script 2026-10-17** (`scripts
 | Admin authentication undesigned | High-impact compromise | T-049 | Review before Beta |
 | Dependence on weak or secondary sources | Wrong ports or behavior | T-002 | Items still tagged `[R]` |
 | Tauri/WebView2 accessibility or update issues | UX and install problems | T-018, T-019 | Spike results |
-| Game servers cannot be obtained or run legally, without elevation, or on the host's terms | The provisioning feature loses its reason to exist | T-023, T-024, T-027 | E-15, E-16, E-19 results |
+| Game servers cannot be obtained or run legally, without elevation, or on the host's terms | The provisioning feature loses its reason to exist | T-023, T-024, T-027 | **Legally resolved for Minecraft Java, 2026-10-17** (`research.md` §5 RQ-13.1b): hosting and even charging for access are explicitly permitted. Remaining: E-15 technical acquisition, E-16 Bedrock, and the E-19 VM footprint |
 | A managed server exposes something by default (RCON, query, world list, IPv6 listener) | Host's machine or LAN compromised | T-035, T-093 | Generated-configuration review |
 | Managed server crash loop or disk growth degrades the host's PC | Users uninstall the app | T-025, T-026 | Restart limits and per-server footprint |
 | Generated game-server credential contradicts SEC-002 | Requirement conflict blocks G1 | T-022 (ADR-014) | Terms of the credential decision |

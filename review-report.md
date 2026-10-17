@@ -115,7 +115,7 @@ None is confirmed compatible. A game is called supported only after its real-cli
 6. Choose target regions and hosting provider; measure bytes per player-minute (E-10).
 7. Owner confirmation of provisional design choices and of the P0 scope (81 of 99 requirements are P0; **now 90 of 109** after the SRV additions).
 8. Confirm whether an existing repository or prior decisions must be reconciled.
-9. **Added 2026-10-17.** Confirm the host-local provisioning scope is wanted before the E-15 to E-19 experiments are invested in, and confirm AS-11: that the games' terms permit the host to download and operate these servers unattended.
+9. **Partly resolved 2026-10-17.** Confirm the host-local provisioning scope is wanted before the E-15 to E-19 experiments are invested in, and confirm AS-11. **AS-11 is now answered from the primary source**: `research.md` §5 RQ-13.1b reads the EULA and Usage Guidelines in full, finds hosting explicitly permitted including charging for access, and records six binding constraints as requirements `SRV-012`–`SRV-017`. **Still needed:** owner or legal confirmation that our implementation complies — the quoted text is not legal advice — and the E-19 standard-user VM footprint check.
 
 ## 8. Requirement-by-requirement documentation audit
 
