@@ -12,7 +12,10 @@ members = [
 [workspace.package]
 version = "0.0.0"
 edition = "2021"
-rust-version = "1.77"
+# MSRV 1.94, raised from 1.77 on 2026-10-17 because `sqlx` declares
+# rust-version 1.94.0 and ADR-008 accepted it as the PostgreSQL driver.
+# Note: this is only meaningful once that dependency is actually added (T-030).
+rust-version = "1.94"
 license = "UNLICENSED"
 publish = false
 

@@ -32,11 +32,11 @@ the tree, which §5.1 forbids.
 | Crate | For | Status |
 |---|---|---|
 | `quinn` | QUIC with datagram support for engine and relay (ADR-001) | Proposed; RQ-6 confidence medium on datagrams, low on production fitness until E-6 |
-| `serde`, `serde_json` | Protocol message encoding (contracts.md §10) | Proposed |
-| `tokio` | Async runtime for engine, relay, control plane | Proposed |
-| `axum` | Control-plane HTTP API (ADR-008) | Proposed — **ADR-008 confidence is low; backend stack is reasoning only** |
-| `sqlx` (0.9.0, **measured 2026-10-17**) | PostgreSQL access **and** `sqlx migrate` for T-003 | MIT OR Apache-2.0; `rust-version = 1.94.0`, above this repo's declared 1.77, so it forces an MSRV decision. **145 transitive crates.** Builds only on the GNU toolchain here. Both driver and migration tool are still unchosen — see `research.md` §5 RQ-14 and ADR-008 |
-| `tracing`, `tracing-subscriber` | Structured logging (ADR-010) | Proposed |
+| `serde`, `serde_json` | Protocol message encoding (contracts.md §10) | MIT/Apache-2.0; 1.0.229 and 1.0.154, both recent |
+| `tokio` | Async runtime for engine, relay, control plane | **1.53.3, MIT, repo pushed 2026-10-16, not archived.** Required by `axum`, so ADR-008 commits to it |
+| `axum` | Control-plane HTTP API (ADR-008) | **0.8.9, MIT, repo pushed 2026-10-15, not archived, 27.5k stars. Accepted by ADR-008 on 2026-10-17** |
+| `sqlx` | PostgreSQL driver, **and** `sqlx migrate` as the leading T-003 candidate | **0.9.0, Apache-2.0, repo pushed 2026-10-16, not archived. Accepted by ADR-008 on 2026-10-17.** `rust-version = 1.94.0`, verified on the released `v0.9.0` tag, which raised the workspace MSRV from 1.77 to 1.94. **145 transitive crates**, measured here. Builds only on the GNU toolchain in this environment. **The migration tool is still unchosen** — see `research.md` §5 RQ-14 |
+| `tracing`, `tracing-subscriber` | Structured logging (ADR-010) | `tracing` 0.1.44, MIT |
 | `keyring` | OS credential store (SEC-002) | Proposed |
 | `cargo-deny` | Licences, advisories, and bans (SEC-017) | Dev/CI tool; policy file at `deny.toml`. **Use the official prebuilt binary**, not `cargo install` — compiling it needs a linker this environment lacks (see the T-001 verification section) |
 
@@ -140,6 +140,14 @@ them, and are worth remembering:
 ## Open items
 
 - Identity provider and admin authentication: unreached, ADR-009 and SEC-018 open.
-- Whether `Cargo.lock` is committed: **it must be**, for a binary-producing
-  workspace, so builds are reproducible. Deferred to T-030.
+- Whether `Cargo.lock` is committed: **it is**, and it should stay committed, for a
+  binary-producing workspace, so builds are reproducible. `Cargo.lock` was added to the
+  repository on 2026-10-17 (6 crates, the workspace itself).
 - Licence compatibility review is blocked on the project's own licence decision.
+  `deny.toml` currently ignores private crates, so this remains deferred deliberately.
+- **ADR-008 was Accepted 2026-10-17** (Rust control plane with `axum`, PostgreSQL via
+  `sqlx`). That unblocks T-003's migration-tool choice and T-030's register work, and it
+  raised the workspace MSRV from 1.77 to 1.94. `axum`, `tokio`, and `sqlx` still need
+  `Cargo.toml` entries in T-030, each with its own row here.
+- No PostgreSQL instance is available in this environment, so the migration tool has
+  not been exercised against a real database.

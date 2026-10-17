@@ -229,11 +229,21 @@ Recommendation (ADR-009, proposed for the flow; provider open): system-browser a
 
 ### RQ-10: Backend framework and database
 
-I gathered **no external evidence** for this question, so everything here is reasoning [A], not research. Candidates: Rust (axum-style) service; TypeScript on Node; C# on ASP.NET; Go.
+**Updated 2026-10-17.** This section previously carried no external evidence at all — every claim was reasoning, and ADR-008 was logged at *low* confidence because of that. Candidates surveyed: a Rust (axum-style) service, TypeScript on Node, C# on ASP.NET, Go.
 
-Criteria: shares protocol and token-validation code with the Rust relay and client engine; operational simplicity for a small team; maturity of Postgres drivers and migration tooling; ability to run the control plane as one deployable.
+Evidence now gathered (2026-10-17), all `[V]` for existence and maintenance status, **not** for fitness:
 
-Reasoned recommendation (ADR-008, proposed): Rust control plane sharing a protocol crate with the engine and relay, PostgreSQL for durable state, relay session state in memory only. Confidence: **low**. Before accepting it I still need to check maintenance status of the specific web framework, database driver, and migration tool, and to weigh team familiarity. If the team is stronger in TypeScript, a TypeScript control plane with a shared schema package is a reasonable alternative; the relay stays Rust either way.
+| Candidate | Latest | Last release | Licence | Repo activity | Notes |
+|---|---|---|---|---|---|
+| `axum` | 0.8.9 | 2026-04-14 | MIT | pushed 2026-10-15, not archived, 27.5k stars | Actively maintained |
+| `tokio` | 1.53.3 | 2026-10-13 | MIT | pushed 2026-10-16, not archived | Actively maintained |
+| `sqlx` | 0.9.0 | 2026-05-21 | Apache-2.0 | pushed 2026-10-16, not archived | See RQ-14; **145 transitive crates**, measured |
+| `serde` / `serde_json` | 1.0.229 / 1.0.154 | 2026-07-18 / 2026-10-11 | MIT/Apache-2.0 | — | Both licences permitted by `deny.toml` |
+| `tracing` | 0.1.44 | 2025-12-18 | MIT | — | Matches ADR-010 |
+
+**What this evidence does and does not establish.** It shows the Rust stack is alive, permissively licensed, and compatible with the existing `deny.toml` allowlist. It does **not** show that the stack is *right for this project* — that turns on team familiarity and on `quinn` (ADR-001/RQ-6), which is a separate dependency and a separate risk. No TypeScript, C#, or Go option has been measured or costed, so this table cannot be read as a head-to-head comparison.
+
+Reasoned recommendation (ADR-008): Rust control plane sharing the protocol crate with the engine and relay, PostgreSQL for durable state, relay session state in memory only. Confidence moves **low → medium** on the strength of the maintenance and licensing evidence, and **not higher**, because the decisive input — team familiarity — has still not been supplied by the owner.
 
 ### RQ-11: Logging and observability
 
@@ -402,7 +412,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-005 | Tauri 2 shell + Rust engine, engine as current-user in-process or child process, no Windows service | Proposed | 2026-10-16 | Low–medium |
 | ADR-006 | Per-user NSIS installer + signed Tauri updater; MSIX deferred | Proposed | 2026-10-16 | Low–medium |
 | ADR-007 | Guest model: guests install client (G1) vs connect to relay address (G2) | Open | 2026-10-16 | n/a |
-| ADR-008 | Rust control plane + PostgreSQL; relay state in memory | Proposed (reasoning only) | 2026-10-16 | Low |
+| ADR-008 | Rust control plane (`axum`) + PostgreSQL (`sqlx`); relay state in memory | **Accepted 2026-10-17** by the product owner | 2026-10-16, recorded 2026-10-17 | Medium |
 | ADR-009 | System-browser OAuth (PKCE) + OS credential store; identity provider open | Proposed | 2026-10-16 | Medium (flow), none (provider) |
 | ADR-010 | `tracing` + optional OTLP; no default client telemetry | Proposed | 2026-10-16 | Medium |
 | ADR-011 | Compatibility test levels L0–L2; "supported" requires L2 | Proposed | 2026-10-16 | Medium |
@@ -425,6 +435,37 @@ Each ADR still needs full context, options, rationale, and consequences sections
 3. The defect class is named so it can be recognised: **an internally self-consistent document set can still be wrong.** Identifier and count checks cannot catch a file that was never authored, because the identifier is spelled consistently everywhere.
 
 **Consequences.** T-031's "Done when" is now known to be unachievable as written and was corrected. `contracts.md` records itself as the only wire-format source of truth that exists. The audit's self-test gained a sixth planted defect (a cited path that does not exist) so the new check cannot silently stop working.
+
+### ADR-008 (expanded) — Rust control plane with PostgreSQL
+
+**Status: Accepted, 2026-10-17, by the product owner.** Previously this ADR was a single table row at *low* confidence, recorded with no context, options, rationale, or consequences. It is now a full record, which is what the note under the ADR table requires of every entry.
+
+**Context.** The control plane is the authenticated HTTPS service owning identity, authorization, tunnel and invitation lifecycle, relay allocation, quotas, and audit. Three components interoperate over one wire protocol: the control plane, the relay, and the in-process client engine. The relay and engine are already settled as Rust (`architecture.md` §2, ADR-001, ADR-005). Choosing the control plane in another language therefore has a cost — duplicating protocol types and token validation in a second language, or introducing a code-generation step — which is a build-time and review burden, not just a preference.
+
+**Options considered.**
+
+| Option | Case for | Case against |
+|---|---|---|
+| **A. Rust (`axum`) + PostgreSQL (`sqlx`)** | Shares the protocol crate with the engine and relay; one language and one set of types across all three components; no code generation | Adds a substantial dependency tree to a component that currently has none; `sqlx` pulls 145 transitive crates and declares MSRV 1.94, forcing the workspace up from 1.77 |
+| B. TypeScript on Node | Faster iteration if the team is stronger there; a shared schema package could carry the contract | Protocol types exist in two languages with nothing enforcing agreement; the relay stays Rust regardless, so a toolchain split persists anyway |
+| C. C# on ASP.NET | Mature, good tooling | Same duplication problem, plus a third runtime |
+| D. Go | Strong concurrency story for a network service | Same duplication problem; weakest case for protocol sharing |
+
+**Evidence gathered 2026-10-17** (§5 RQ-10): `axum` 0.8.9 MIT, repo pushed 2026-10-15; `tokio` 1.53.3 MIT, pushed 2026-10-16; `sqlx` 0.9.0 Apache-2.0, pushed 2026-10-16. None archived. All licences are already permitted by `deny.toml`. `sqlx` compiled in this environment on the GNU toolchain and `cargo deny` passed on its real 145-crate graph. **This table is not a head-to-head benchmark:** options B, C and D were not measured or costed at all.
+
+**Decision.** Option A. Rust control plane using `axum`, PostgreSQL via `sqlx`, durable state in PostgreSQL, relay session state in memory only.
+
+**Rationale.** Protocol sharing is the deciding factor. The control plane issues the signed allocation tokens the relay verifies offline (`architecture.md` §6) and the engine presents them, so token parsing, claim validation, and message types must not be able to drift between three components. One shared crate removes that class of bug and removes any code-generation step from the build.
+
+**Consequences, accepted deliberately.**
+
+1. **The workspace MSRV rises from 1.77 to 1.94**, because `sqlx` declares `rust-version = "1.94.0"`. Recorded rather than discovered later.
+2. **The control plane gains a substantial dependency tree.** Every entry needs a dependency-register row in the same change (`AGENTS.md` §5.1). T-030, which builds that register, is unblocked by this decision.
+3. **The migration-tool choice becomes decidable** (RQ-14): `sqlx migrate` is no longer "a driver plus a separate tool" but one dependency. **The tool is still not chosen** — RQ-14 keeps `refinery` and hand-rolled SQL open, and choosing remains T-003's first deliverable.
+4. **If the team's TypeScript experience later turns out to dominate Rust experience, this should be revisited as a new ADR, not a silent migration.** The deciding factor would need re-evaluating against a concrete shared-schema-package design.
+5. **This says nothing about `quinn`** (ADR-001, RQ-6), the data plane's transport, which remains unproven until E-6.
+
+**Not settled here.** Identity provider (ADR-009) and the admin authentication model (SEC-018) are untouched; SEC-018 is still undesigned.
 
 ## 8. Open experiments
 

@@ -23,8 +23,8 @@ Constraints:
 | Tunnel engine | Rust library, in the app process | Proposed | Quinn exposes QUIC datagrams. Risk: unproven under game traffic (E-6) |
 | Transport | QUIC: streams for TCP, DATAGRAM frames for UDP | Proposed, ADR-001, low–medium | UDP over a reliable stream adds latency (research RQ-3) |
 | Relay | Rust service sharing the protocol crate | Proposed | Same code as engine |
-| Control plane | Rust HTTP API | Proposed, ADR-008, **low (no evidence gathered)** | Revisit if TypeScript fits the team better |
-| Database | PostgreSQL (durable state only) | Proposed, ADR-008 | Relay session state stays in memory |
+| Control plane | Rust HTTP API, `axum` | **Accepted 2026-10-17, ADR-008, medium confidence** | Shares the protocol crate with the engine and relay, so token and message types cannot drift. Maintenance and licensing verified; `axum` 0.8.9 MIT. Revisit as a new ADR if team fit changes |
+| Database | PostgreSQL (durable state only), driver `sqlx` | **Accepted 2026-10-17, ADR-008, medium** | `sqlx` 0.9.0 Apache-2.0, pushed 2026-10-16, not archived. Costs: 145 transitive crates and MSRV 1.94 (workspace must rise from 1.77). Relay session state stays in memory |
 | Auth | System-browser OAuth (PKCE), OS credential store | Proposed, ADR-009 | Identity provider undecided |
 | Observability | `tracing` + optional OTLP | Proposed, ADR-010 | OTel Rust traces are beta |
 | Packaging | Per-user NSIS + signed updater | Proposed, ADR-006 | Update/rollback untested (E-9) |
