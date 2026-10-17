@@ -3,6 +3,13 @@ name: ci
 # CI skeleton created by T-001. NOT YET RUN — see the warning at the bottom.
 # Gating requirements: TEST-007 (format, lint, tests, dependency scan, migration
 # apply) and SEC-017 (dependency inventory and vulnerability scan).
+#
+# ACTION VERSIONS. Pinned to the latest major of each first-party action, confirmed
+# 2026-10-17 against the GitHub API rather than from memory:
+#   actions/checkout@v7, actions/setup-python@v7, actions/cache@v6
+# These replace v4/v5/v4, which a runner reported as deprecated for targeting Node.js 20.
+# RE-VERIFY before assuming they are current: nothing in this repository checks action
+# versions, because such a check would need network access and would rot silently.
 
 on:
   push:
@@ -22,7 +29,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component rustfmt
       - name: Check formatting
@@ -32,11 +39,11 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --component clippy
       - name: Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -52,11 +59,11 @@ jobs:
     # Tooling-only checks above run on Linux, where they are cheaper.
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install toolchain
         run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
       - name: Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -71,8 +78,8 @@ jobs:
     # TEST-008. Added 2026-10-17 with scripts/audit_traceability.py.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       # Proves the checker itself still detects defects before trusting a pass.
@@ -88,8 +95,8 @@ jobs:
     # overstated ratio fails the build instead of rotting in the document.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
       - name: Verify colour tokens and contrast claims
@@ -99,7 +106,7 @@ jobs:
     name: Dependency scan (SEC-017)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install toolchain
         run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
       - name: Install cargo-deny
@@ -127,7 +134,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Apply all migrations to an empty database
         run: echo "Not implemented. Replaced by T-033."
 

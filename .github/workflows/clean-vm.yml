@@ -16,6 +16,16 @@ name: clean-vm
 # configured. Everything below is written against the documented behaviour of the runner
 # image and has NOT been observed to work. Do not treat the presence of this file as
 # evidence that anything was verified.
+#
+# ACTION VERSIONS. Pinned to the latest major of each first-party action, confirmed
+# 2026-10-17 against the GitHub API rather than from memory:
+#   actions/checkout@v7, actions/setup-python@v7, actions/upload-artifact@v7
+# These replace v4/v5/v4, which the runner reported as deprecated because they target
+# Node.js 20. The runner forces them onto Node 24 anyway, so the older versions still work
+# and this is not urgent -- but three majors of drift is worth closing.
+# RE-VERIFY these before assuming they are current. Nothing in this repository checks
+# action versions, because such a check would need network access and would rot silently.
+#
 
 on:
   # Manual dispatch only. A run downloads roughly 320 MB (62 MB server artifact plus a
@@ -44,9 +54,9 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -124,7 +134,7 @@ jobs:
 
       - name: Upload the verification log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: clean-vm-log
           # Forward slashes only. upload-artifact takes glob patterns, which do not
