@@ -74,7 +74,7 @@ Secrets must never be committed or logged (`AGENTS.md` §7).
 | `cargo test --workspace --all-targets` | Pass under `stable-x86_64-pc-windows-gnu` — **0 tests**, the crates are empty skeletons |
 | `cargo deny check advisories bans licenses` | Pass, exit 0 — via the official prebuilt `cargo-deny` 0.20.2 binary, SHA-256 verified |
 | `python scripts/audit_traceability.py` | Pass — 117 requirements, 117 traceability rows, 86 tasks, 19 experiments, 19 ADR rows (**7** with full records), 7 invariants, 12 model/DDL tables, 20 routes cross-checked, longest chain 23, **0 errors, 22 warnings** |
-| `python scripts/audit_traceability.py --self-test` | Pass — all **13** planted defects detected |
+| `python scripts/audit_traceability.py --self-test` | Pass — all **14** planted defects detected |
 | `python scripts/check_contrast.py` | Pass — all 22 DESIGN.md contrast pairs recomputed and matched; formula self-validated against 3 WCAG reference pairs |
 | `python scripts/verify_clean_vm.py --workdir <dir>` | **Requires a clean standard-user VM on Windows Pro/Enterprise/Education.** Host-JRE branch 11/11, fetched-JRE branch (`--simulate-no-host-java`) 12/12, both exit 0. Stops at the EULA gate (exit 10) because the script never accepts it on your behalf |
 | `.github/workflows/clean-vm.yml` | **Never executed** — no Git remote. Runs the same verification on a hosted Windows image |
@@ -101,7 +101,7 @@ run, because there is no application code.**
 What *has* been checked in the documentation set:
 
 - All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
-- The traceability audit passes and catches **13 of 13** planted defects, including two that verify every ADR in `research.md` §7 has a summary-table row — added after ADR-016 was found to have a full record but no row, while ADR-017 had both.
+- The traceability audit passes and catches **14 of 14** planted defects, including two that verify every ADR in `research.md` §7 has a summary-table row — added after ADR-016 was found to have a full record but no row, while ADR-017 had both.
 - **`data-model.md` and `schema-draft.sql` are compared mechanically** — all 12 tables, column by column. Added after `T-120` was found to name this as a standing gap.
 - **`api.md` and `contracts.md` are cross-checked route by route** — 20 routes, checking method, path, and success status, in both directions. This found a real gap: `contracts.md` §5.12 and §5.13 stated no success code at all while `api.md` asserted one.
 - **Colour contrast is recomputed, not asserted.** `scripts/check_contrast.py` re-derives all 22 ratios in `DESIGN.md` §3 from the token table in §2, after validating its own implementation against three WCAG reference pairs. All 22 matched, and it was confirmed to fail on a planted overstated ratio and a planted wrong threshold. Hover, disabled, and high-contrast states are still unchecked.

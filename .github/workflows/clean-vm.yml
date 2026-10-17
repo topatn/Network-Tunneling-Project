@@ -63,8 +63,16 @@ jobs:
         shell: pwsh
         run: |
           python scripts/verify_clean_vm.py --workdir "$env:RUNNER_TEMP\provision" --prepare
+          # Exit 10 is EXIT_OPERATOR: phase 1 completed and reached the EULA gate.
+          # Exit 1 means a check genuinely failed, which is a different problem and
+          # must not be reported as "wrong exit code" -- the first version of this step
+          # conflated the two and would have misattributed a real failure.
+          if ($LASTEXITCODE -eq 1) {
+            Write-Error "Phase 1 FAILED a verification check. See the log above."
+            exit 1
+          }
           if ($LASTEXITCODE -ne 10) {
-            Write-Error "Expected exit 10 (operator action required); got $LASTEXITCODE"
+            Write-Error "Expected exit 10 (reached the EULA gate); got $LASTEXITCODE"
             exit 1
           }
           Write-Host "Phase 1 reached the EULA gate as required (SRV-015)."
@@ -106,9 +114,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: clean-vm-log
+          # Forward slashes only. upload-artifact takes glob patterns, which do not
+          # treat a backslash as a separator, so a Windows-style path silently matches
+          # nothing and the run produces no artifact at all. Written with backslashes
+          # first and caught by scripts/audit_traceability.py, which now checks that
+          # every artifact path in this repository uses forward slashes.
           path: |
-            ${{ runner.temp }}\provision\verify.log
-            ${{ runner.temp }}\provision\server.properties
+            ${{ runner.temp }}/provision/verify.log
+            ${{ runner.temp }}/provision/server.properties
           retention-days: 14
           if-no-files-found: ignore
 

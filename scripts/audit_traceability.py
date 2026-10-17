@@ -560,6 +560,67 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                     f"but no api.md row cites it"
                 )
 
+    # 11. Workflows must agree with the tools they invoke.
+    #
+    #     Added 2026-10-17 after writing .github/workflows/clean-vm.yml and finding two
+    #     defects in it by reading rather than running: artifact paths used backslashes,
+    #     which upload-artifact's glob matcher does not treat as a separator, so the run
+    #     would have silently produced no artifact; and the phase-1 step conflated
+    #     "a check failed" with "wrong exit code", which would have misattributed a real
+    #     failure. Neither could run, so nothing else would have caught either.
+    workflow_dir = root / ".github" / "workflows"
+    verify_src = ""
+    verify_file = root / "scripts" / "verify_clean_vm.py"
+    if verify_file.exists():
+        verify_src = verify_file.read_text(encoding="utf-8-sig")
+
+    exit_codes: dict[str, str] = {}
+    # The constants are a tuple assignment, not one per line. An earlier version of this
+    # check used a per-line pattern, matched nothing, and reported agreement it had not
+    # actually verified.
+    tuple_assign = re.search(
+        r"^(EXIT_\w+(?:\s*,\s*EXIT_\w+)*)\s*=\s*([\d,\s]+)$", verify_src, re.M
+    )
+    if tuple_assign:
+        names = [n.strip() for n in tuple_assign.group(1).split(",")]
+        values = [v.strip() for v in tuple_assign.group(2).split(",")]
+        if len(names) == len(values):
+            exit_codes = dict(zip(names, values))
+
+    if workflow_dir.is_dir():
+        for wf in sorted(workflow_dir.glob("*.yml")):
+            text = read(root, f".github/workflows/{wf.name}")
+            # Artifact paths live inside a YAML literal block (`path: |`), so each entry
+            # is a bare indented line, NOT a "- " list item. The first version of this
+            # check matched a list prefix, never matched anything, and sat there passing
+            # silently -- a false pass in the checker written to catch a false pass.
+            for block in re.finditer(
+                r"^\s*path:\s*\|\s*\n((?:[ \t]+[^\n]*\n)+)", text, re.M
+            ):
+                for line in block.group(1).splitlines():
+                    entry = line.strip()
+                    if not entry or entry.startswith("#"):
+                        continue
+                    if "\\" in entry:
+                        errors.append(
+                            f"{wf.name}: artifact path {entry!r} uses a backslash. "
+                            f"upload-artifact takes glob patterns, which do not treat a "
+                            f"backslash as a separator, so this silently matches nothing"
+                        )
+            for cm in re.finditer(r"LASTEXITCODE -ne (\d+)", text):
+                asserted = cm.group(1)
+                expected = exit_codes.get("EXIT_OPERATOR")
+                if expected is None:
+                    warnings.append(
+                        f"{wf.name}: asserts exit {asserted} but EXIT_OPERATOR could "
+                        f"not be read from scripts/verify_clean_vm.py"
+                    )
+                elif asserted != expected:
+                    errors.append(
+                        f"{wf.name}: asserts exit {asserted} where "
+                        f"scripts/verify_clean_vm.py defines EXIT_OPERATOR={expected}"
+                    )
+
     # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
     if m:
@@ -800,6 +861,12 @@ def self_test(root: Path) -> int:
             ),
             "but no api.md row cites it",
         ),
+        (
+            "workflow asserting an exit code the tool does not define",
+            ".github/workflows/clean-vm.yml",
+            lambda t: t.replace("LASTEXITCODE -ne 10", "LASTEXITCODE -ne 99", 1),
+            "EXIT_OPERATOR=10",
+        ),
     ]
 
     failures = 0
@@ -813,6 +880,19 @@ def self_test(root: Path) -> int:
             ddl_src = root / "schema-draft.sql"
             if ddl_src.exists():
                 shutil.copy2(ddl_src, tree / ddl_src.name)
+            # The workflow and the verification tool are needed too: without them the
+            # workflow-consistency check skips itself and the planted exit-code defect
+            # would pass for the wrong reason, which is the failure mode this self-test
+            # exists to prevent.
+            wf_src = root / ".github" / "workflows"
+            if wf_src.is_dir():
+                (tree / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+                for f in wf_src.glob("*.yml"):
+                    shutil.copy2(f, tree / ".github" / "workflows" / f.name)
+            tool_src = root / "scripts" / "verify_clean_vm.py"
+            if tool_src.exists():
+                (tree / "scripts").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(tool_src, tree / "scripts" / tool_src.name)
             original = (tree / filename).read_text(encoding="utf-8-sig")
             (tree / filename).write_text(mutate(original), encoding="utf-8")
             errs, warns, _, _ = audit(tree)
