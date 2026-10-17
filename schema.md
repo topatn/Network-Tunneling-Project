@@ -59,4 +59,4 @@ This is an environment limitation, not a property of PostgreSQL or of the schema
 4. **Roll back:** deploy a compensating forward migration. Destructive steps (drop column/table) happen only in a later release after code stops using them.
 5. **Verify:** CI applies all migrations to an empty database and checks the result against the expected structure.
 
-The migration tool is not yet chosen; selecting it is an open decision recorded in `tasks.md`.
+The migration tool is **`sqlx migrate`** (ADR-017, accepted 2026-10-17). The driver is already `sqlx` (ADR-008), so this adds no further dependency. **`sqlx-cli` could not be executed in the authoring environment** — `dlltool.exe` is missing from the GNU toolchain, the MSVC toolchain has no Windows SDK, and no prebuilt Windows binary is published. T-033 must verify its behaviour rather than assume it, and must in particular confirm it parses statement boundaries correctly, since line-oriented submission is exactly what silently produced a zero-table schema during the manual verification above.

@@ -35,7 +35,7 @@ the tree, which §5.1 forbids.
 | `serde`, `serde_json` | Protocol message encoding (contracts.md §10) | MIT/Apache-2.0; 1.0.229 and 1.0.154, both recent |
 | `tokio` | Async runtime for engine, relay, control plane | **1.53.3, MIT, repo pushed 2026-10-16, not archived.** Required by `axum`, so ADR-008 commits to it |
 | `axum` | Control-plane HTTP API (ADR-008) | **0.8.9, MIT, repo pushed 2026-10-15, not archived, 27.5k stars. Accepted by ADR-008 on 2026-10-17** |
-| `sqlx` | PostgreSQL driver, **and** `sqlx migrate` as the leading T-003 candidate | **0.9.0, Apache-2.0, repo pushed 2026-10-16, not archived. Accepted by ADR-008 on 2026-10-17.** `rust-version = 1.94.0`, verified on the released `v0.9.0` tag, which raised the workspace MSRV from 1.77 to 1.94. **145 transitive crates**, measured here. Builds only on the GNU toolchain in this environment. **The migration tool is still unchosen** — see `research.md` §5 RQ-14 |
+| `sqlx` | PostgreSQL driver **and** the `sqlx migrate` migration tool (ADR-008, ADR-017) | **0.9.0, Apache-2.0, repo pushed 2026-10-16, not archived. Accepted by ADR-008 on 2026-10-17.** `rust-version = 1.94.0`, verified on the released `v0.9.0` tag, which raised the workspace MSRV from 1.77 to 1.94. **145 transitive crates**, measured here. Chosen as the migration tool too, so it is one dependency rather than driver-plus-tool. **`sqlx-cli` could not be executed in this environment** — `dlltool.exe` missing on GNU, no Windows SDK on MSVC, no prebuilt binary published — so T-033 must verify its behaviour rather than assume it |
 | `tracing`, `tracing-subscriber` | Structured logging (ADR-010) | `tracing` 0.1.44, MIT |
 | `keyring` | OS credential store (SEC-002) | Proposed |
 | `cargo-deny` | Licences, advisories, and bans (SEC-017) | Dev/CI tool; policy file at `deny.toml`. **Use the official prebuilt binary**, not `cargo install` — compiling it needs a linker this environment lacks (see the T-001 verification section) |
@@ -146,8 +146,13 @@ them, and are worth remembering:
 - Licence compatibility review is blocked on the project's own licence decision.
   `deny.toml` currently ignores private crates, so this remains deferred deliberately.
 - **ADR-008 was Accepted 2026-10-17** (Rust control plane with `axum`, PostgreSQL via
-  `sqlx`). That unblocks T-003's migration-tool choice and T-030's register work, and it
-  raised the workspace MSRV from 1.77 to 1.94. `axum`, `tokio`, and `sqlx` still need
-  `Cargo.toml` entries in T-030, each with its own row here.
-- No PostgreSQL instance is available in this environment, so the migration tool has
-  not been exercised against a real database.
+  `sqlx`), and **ADR-017 the same day** (`sqlx migrate` as the migration tool, adding no
+  further dependency). `axum`, `tokio`, and `sqlx` still need real `Cargo.toml` entries
+  in T-030.
+- **No Rust tooling can be compiled from source in this environment.** `cargo install`
+  fails on the GNU toolchain for want of `dlltool.exe`, and the MSVC toolchain has no
+  Windows SDK. This blocked `cargo-deny` (worked around with the official prebuilt
+  binary) and now blocks `sqlx-cli` as well, which publishes no prebuilt Windows binary.
+  **A Windows SDK would unblock both** and is the single highest-value environment fix.
+- PostgreSQL 16.10 and 17.6 **were** run successfully from EDB standalone binaries in a
+  temporary directory, so the schema itself is verified. No system install was made.

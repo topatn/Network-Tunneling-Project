@@ -286,12 +286,14 @@ Candidates
 | Candidate | Evidence read 2026-10-17 | Notes |
 |---|---|---|
 | **`sqlx-cli`** (`sqlx migrate`) | crates.io: latest **0.9.0**, published **2026-05-21**; licence `MIT OR Apache-2.0` per its own `sqlx-cli/Cargo.toml`; repo `launchbadge/sqlx`; workspace `rust-version = "1.94.0"`, edition 2021; has a `migrate` feature and reversible `.up.sql`/`.down.sql` pairs | Actively maintained and the default choice in Rust/PostgreSQL circles. **Cost: 145 transitive crates** for the CLI, measured here. Doubles as the query layer, so one dependency instead of two. Its MSRV (1.94) is above this repo's declared 1.77, which needs a decision |
-| **`refinery`** | Not examined | Common lightweight alternative, single binary, embeds migrations. Needs the same comparison before it can be preferred or dismissed |
+| **`refinery`** | **Not examined in depth.** Checked 2026-10-17 for prebuilt Windows binaries and GitHub releases: **none found**, so it would have to be compiled from source. Would also be a *second* migration dependency when the driver is already `sqlx` | A reasonable alternative, but the driver-plus-two-tools cost is the main argument against it |
 | **Hand-rolled numbered `.sql` files** | Already described in `schema.md` | Zero dependencies, fully under our control, and the documented workflow is already tool-neutral. But the bookkeeping (ordering, checksums, "applied" tracking) becomes ours to get right, and `data-model.md` §8 forbids editing history, which a naive runner may not enforce |
 
 **[A] Reasoning, not evidence:** given `SEC-017` (CI must fail on a known-vulnerable dependency) and a still-empty dependency graph, a zero-dependency option has a real advantage, but hand-rolling migration bookkeeping is exactly where subtle corruption bugs live. Do not pick the smallest dependency count as a tiebreaker without the ADR-008 decision first.
 
-**Open:** whether `sqlx` MSRV 1.94 forces the workspace `rust-version` up from 1.77; whether `refinery` is materially better; whether the project accepts a 145-crate CLI dependency.
+**Resolved 2026-10-17 — `sqlx migrate` chosen, see ADR-017.** The MSRV question is moot: ADR-008 already raised the workspace to 1.94. The 145-crate cost was measured and accepted as part of ADR-008.
+
+**What is still unverified about the chosen tool:** `sqlx-cli` **could not be executed in this environment.** Compiling it fails on the GNU toolchain because `dlltool.exe` is absent, and the MSVC toolchain has no Windows SDK; `sqlx` publishes no prebuilt Windows binaries, so there is no fallback. T-033 must therefore **verify migration behaviour rather than assume it** — specifically that statement boundaries are parsed correctly, which is the exact defect class that broke the first schema apply (see `schema.md`).
 
 ### RQ-13: Can the app safely provision and supervise a game server on the host's own PC?
 
@@ -420,6 +422,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-013 | First provisioning cut is **Minecraft Java Edition only**. Bedrock deferred pending a published integrity mechanism; Terraria, L4D and L4D2 stay manual | **Decided 2026-10-17** | 2026-10-17 | Medium. Based on documented behaviour, not on a run |
 | ADR-014 | Treatment of a generated game-server credential that the server must read from its configuration file | Open, **narrowed twice** — now Java-only (Bedrock has no RCON), and RQ-13.4 offers a better answer | 2026-10-17 | n/a |
 | ADR-015 | Prefer MSMP over RCON for Java server management; never enable RCON; let the server generate its own MSMP secret; pass the TLS keystore password by environment variable | Proposed | 2026-10-17 | Medium (documented behaviour read; not exercised) |
+| ADR-017 | `sqlx migrate` owns `migrations/`; no separate migration library | **Accepted 2026-10-17** | 2026-10-17 | Medium-high; tool not yet executed, T-033 must verify |
 
 Each ADR still needs full context, options, rationale, and consequences sections. Not yet written. **ADR-016 added 2026-10-17** (see below).
 
@@ -466,6 +469,31 @@ Each ADR still needs full context, options, rationale, and consequences sections
 5. **This says nothing about `quinn`** (ADR-001, RQ-6), the data plane's transport, which remains unproven until E-6.
 
 **Not settled here.** Identity provider (ADR-009) and the admin authentication model (SEC-018) are untouched; SEC-018 is still undesigned.
+
+### ADR-017 — `sqlx migrate` owns the migrations directory
+
+**Status: Accepted, 2026-10-17.** Decided by the product owner on the recommendation that `sqlx migrate` be used.
+
+**Context.** T-003 required a migration tool. `schema.md` fixes the workflow that the tool must implement: forward-only files, one migration step per deployment, never edit an applied migration, expand/contract column changes, and rollback by compensating forward migration rather than by history rewriting. The schema itself is now verified against PostgreSQL 16.10 and 17.6 (see `schema.md`), so the tool has a known-good target.
+
+**Options.**
+
+| Option | Case for | Case against |
+|---|---|---|
+| **`sqlx migrate`** | The driver is **already** `sqlx` (ADR-008), so this is one dependency rather than a driver plus a separate migration tool. Reversible `.up.sql`/`.down.sql` pairs, matching the rollback rule. Actively maintained, permissively licensed, MSRV already accepted | 145 transitive crates, already counted in ADR-008's cost. CLI not executable in the authoring environment |
+| `refinery` | Lighter, single binary, embeds migrations | A **second** migration dependency alongside an `sqlx` driver; no prebuilt Windows binaries, so it must be compiled from source |
+| Hand-rolled numbered `.sql` | Zero dependencies, full control, and `schema.md` already describes the workflow tool-neutrally | The bookkeeping — ordering, applied-tracking, checksums, and **enforcing that an applied migration is never edited** — becomes ours to get right. `data-model.md` §8 depends on that enforcement |
+
+**Decision.** `sqlx migrate`, from the `sqlx` dependency already accepted in ADR-008.
+
+**Rationale.** The deciding factor is that the driver decision has already been made. Choosing `sqlx migrate` costs **zero additional dependencies**, while `refinery` would mean two migration libraries in one service. The reversibility requirement in `schema.md` maps directly onto `sqlx`'s up/down pairs. Hand-rolling was rejected on the specific ground that `data-model.md` §8 forbids editing an applied migration — an invariant best enforced by a tool that tracks applied checksums rather than by convention.
+
+**Consequences.**
+
+1. **`schema-draft.sql` is retired in T-033**, replaced by `migrations/` files, exactly as `schema.md` rules 1 and 2 require. Until then the two must be kept in agreement.
+2. **T-033 must verify rather than assume.** `sqlx-cli` could not be run here — `dlltool.exe` is missing from the GNU toolchain, the MSVC toolchain has no Windows SDK, and no prebuilt binary is published. T-033's first check must be that `sqlx migrate` parses statement boundaries correctly, because that is the exact defect class which silently produced a **zero-table** schema on the first manual apply (recorded in `schema.md`).
+3. The migration tool ships with the dependency already counted in ADR-008; the register needs no new row beyond the existing `sqlx` entry.
+4. **`invitations`, `guest_admissions`, and `relay_allocations` all change shape** as experiment E-13 resolves, so early migrations are expected to be followed by compensating forward migrations. That is the documented workflow, not a failure mode, but T-033 should not treat the initial schema as immutable.
 
 ## 8. Open experiments
 
