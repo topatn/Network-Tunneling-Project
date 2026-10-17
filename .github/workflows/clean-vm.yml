@@ -53,8 +53,21 @@ jobs:
       - name: Record the runner image, for the report
         shell: pwsh
         run: |
-          "image: $env:ImageOS" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
-          "version: $env:ImageVersion" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
+          # Written to the log, NOT to $GITHUB_ENV.
+          #
+          # The first version of this step piped into `Out-File -Append -Encoding utf8`
+          # against $GITHUB_ENV. That emits a UTF-8 byte-order mark, which GitHub's
+          # env-file parser rejects, so the very first run failed with
+          #   Invalid format 'image: win22'
+          #   Unable to process file command 'env' successfully.
+          # A BOM is invisible in most editors, so this looked correct on every read.
+          #
+          # Nothing downstream consumes these values, so the honest fix is to stop
+          # writing them at all rather than to encode around a failure mode we do not
+          # need. scripts/audit_traceability.py now rejects any workflow that writes to
+          # $GITHUB_ENV with Out-File, Set-Content, Add-Content, or >> redirection.
+          Write-Host "runner image : $env:ImageOS"
+          Write-Host "runner version: $env:ImageVersion"
 
       # ---------------------------------------------------------------- phase 1
       # Acquisition and integrity only. This phase never starts the server and never

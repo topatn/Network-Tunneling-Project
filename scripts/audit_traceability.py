@@ -621,6 +621,26 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                         f"scripts/verify_clean_vm.py defines EXIT_OPERATOR={expected}"
                     )
 
+            # $GITHUB_ENV is parsed by GitHub, not by a shell, and it does not tolerate a
+            # byte-order mark. Every PowerShell cmdlet here emits one by default, and a
+            # BOM is invisible in an editor, so the mistake survives every local read and
+            # only appears as "Invalid format 'image: win22'" on a hosted runner.
+            # Proven the hard way: clean-vm.yml failed its first real run on exactly this.
+            for wm in re.finditer(
+                r"(Out-File|Set-Content|Add-Content)\b[^\n]*GITHUB_ENV", text
+            ):
+                errors.append(
+                    f"{wf.name}: writes to $GITHUB_ENV with {wm.group(1)}, which emits a "
+                    f"UTF-8 BOM that GitHub's env-file parser rejects. Use "
+                    f"[System.IO.File]::AppendAllText with an explicit "
+                    f"UTF8Encoding($false), or write to the log instead"
+                )
+            for rm in re.finditer(r">>\s*\"?\$\{?\{?\s*env:GITHUB_ENV", text):
+                errors.append(
+                    f"{wf.name}: appends to $GITHUB_ENV with shell redirection, whose "
+                    f"encoding depends on the shell. Use an explicit BOM-free write"
+                )
+
     # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
     if m:
@@ -866,6 +886,17 @@ def self_test(root: Path) -> int:
             ".github/workflows/clean-vm.yml",
             lambda t: t.replace("LASTEXITCODE -ne 10", "LASTEXITCODE -ne 99", 1),
             "EXIT_OPERATOR=10",
+        ),
+        (
+            "workflow writing a BOM into $GITHUB_ENV",
+            ".github/workflows/clean-vm.yml",
+            lambda t: t.replace(
+                "          Write-Host \"runner image : $env:ImageOS\"",
+                "          \"image: $env:ImageOS\" | Out-File -FilePath "
+                "\"$env:GITHUB_ENV\" -Append -Encoding utf8",
+                1,
+            ),
+            "emits a UTF-8 BOM",
         ),
     ]
 
