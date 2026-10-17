@@ -103,6 +103,47 @@ Added 2026-10-17 from the default `server.properties` files actually shipped wit
 
 **Cross-game note.** Both Minecraft editions state that `server.properties` is **regenerated on startup**, with missing or invalid keys reset to defaults, and that **changes require a restart**. Terraria's config is read via `-config`. So no game in the first cut supports a live configuration apply; the engine must always plan stop → write → start.
 
+### §2.2 Source-engine games identify players by IP — this breaks under a relay
+
+**The most consequential finding of T-002. Read this before designing the relay.**
+
+Source: the Left4DevOps `l4d2-docker` README (read 2026-10-17, community, actively maintained, and it builds images for **both** Left 4 Dead and Left 4 Dead 2). This is `[R]` — Valve's own wiki was **unreachable this session** (see §9) — but the claim is specific, operationally plausible, and testable.
+
+What the project documents:
+
+- Host networking is "the preferred networking method, as it allows the game server to **correctly identify the IP of connecting players** and can be used to ban players or **anyone on the net attempting to force access to RCON**".
+- Bridge networking is explicitly the mode where "the game server won't be able to correctly identify player's IP correctly".
+- Under bridge networking the game port must be published on **both TCP and UDP** (`-p 27015:27015/tcp -p 27015:27015/udp`), confirming game traffic uses both protocols.
+- **"Game traffic and RCON always operate on the same port number"** — 27015 by default, differing only by protocol. Confirms the `research.md` §2 RQ-1 conclusion about TCP and UDP sharing 27015.
+- A third management surface exists: **NET_CON_PORT**, a plaintext **telnet** network console (examples use 17017), separate from RCON. The README warns that without a password you should firewall it.
+- RCON is an in-game feature (logging in grants vote-kick immunity), and `srcds_run` bans an IP after a few failed attempts — with the warning that under bridge networking this "can have the unintended side effect of banning everyone".
+
+**The conflict.** Our relay accepts a guest connection and then opens a *new* local socket from the engine to the game server (`contracts.md` §8.2, §11). The game server therefore sees every guest arriving from **the same host-local address** — for a default profile, `127.0.0.1`. Consequences:
+
+1. **The game server cannot tell guests apart by IP.** Any game-level IP ban is useless, because there is no per-guest address to ban.
+2. **The game's own RCON brute-force protection becomes a liability.** "Ban an IP after a few failed attempts" would ban our own loopback address and lock out the host — exactly the failure the project warns about under bridge networking.
+3. **NET_CON_PORT cannot be protected by source IP**, since every connection appears local.
+4. **Joining is probably unaffected**, because `connect [ip:port]` identifies a *server*, not a client, and the player is identified by their Steam account. But this is an assumption, not a result — **[X] E-3/E-4/E-5 must confirm it.**
+
+**Candidate mitigations, none chosen [A]:** have the engine bind a distinct loopback source address (e.g. `127.0.0.2`, `127.0.0.3`, …) per guest flow so each appears as a separate client; or accept the collapse and state plainly in the docs that game-level IP banning does not work through a tunnel.
+
+**This also reaches Minecraft.** Java edition's `prevent-proxy-connections` kicks a player when the connecting IP differs from the one that reached Mojang's authentication server. Behind our relay the server sees loopback while the player authenticated from their real address — a guaranteed mismatch. That setting **must stay `false`** (it is `false` by default) and the generated configuration should say why. Bedrock behaves similarly: Xbox Live authentication happens client-side, but the address seen by the server is ours.
+
+**Consequence for guest admission (E-13).** Our relay-side source-IP admission is unaffected — it operates on the *public* connection before the engine dials. But the host must be told that the game's own view of player addresses is lost. Recorded as `AS-12` and as an open architecture issue; it does **not** by itself invalidate E-13.
+
+### §2.3 Terraria's UDP question: what the sources actually say
+
+Searched 2026-10-17. Sources split, and the split is instructive rather than random:
+
+- **Terraria Wiki (official wiki):** "The server runs on **TCP** port 7777 by default" — but the same page tells cloud operators to "ensure port 7777 on **TCP and UDP** is open".
+- **Official Terraria forums port-forwarding guide:** "Activate both **TCP/UDP** protocols for the port" — advice about what to forward, not a statement about what the server listens on.
+- **Two hosting vendors contradict each other.** One states "The game traffic runs over exactly one port, 7777 TCP, and the game opens **no UDP port at all**"; another claims Terraria "uses both TCP and UDP on that port".
+- A community answer asserts Terraria "does not (and never did) use UDP".
+
+**Reading [A]:** the TCP-and-UDP mentions are most likely **defensive port-forwarding advice** — forward both so you never miss the one you need — rather than a claim that a UDP listener exists. On that reading, TCP 7777 alone is correct and `AS-7` holds. But this is inference from the *shape* of the sources, not a measurement, and one vendor asserts the opposite.
+
+**E-1 becomes cheap and decisive:** start a Terraria server and observe which sockets it actually listens on (`netstat -anb`, or the engine's own probe). That answers the question outright rather than by argument. Recording as `[X]`; do not promote `AS-7` to verified on the strength of this section.
+
 ## 3. TCP vs UDP forwarding and UDP-over-tunnel transport
 
 ### RQ-3: How should UDP be carried through a tunnel to a relay?
@@ -406,6 +447,12 @@ Read and used — see §5 RQ-13.1 for how each was used and for what it does **n
 
 - Minecraft Wiki, "server.properties" — https://minecraft.wiki/w/Server.properties (community; **the default files shipped with Java 26.3 and BDS 1.26.52.3**, both editions, in full — the basis for §2 and §2.1)
 - Terraria Wiki, "Server" — https://terraria.wiki.gg/wiki/Server (community; TCP 7777, `serverconfig.txt`, uPNP, console commands, standalone download URL)
+- Left4DevOps, `l4d2-docker` README — https://github.com/Left4DevOps/l4d2-docker (community, actively maintained; builds images for **both** L4D and L4D2; per-player IP identification, game+RCON sharing 27015 across TCP/UDP, NET_CON_PORT telnet console, join methods)
+
+**Attempted and NOT reachable on 2026-10-17:**
+
+- `https://developer.valvesoftware.com/wiki/Source_Dedicated_Server` and `/wiki/RCON` — both return an **Anubis anti-bot interstitial**, so Valve's pages could not be read. The `[V]` labels on the Source port rows in §2 therefore **rest on a previous session's reading (2026-10-16) and could not be re-verified today.** A search-engine snippet reproducing Valve's text ("27015 TCP/UDP (game transmission, pings and RCON)… 27020 UDP…") is consistent with the recorded figures but is a snippet, not a reading.
+- `https://raw.githubusercontent.com/Left4DevOps/l4d/master/README.md` — 404. The `l4d2-docker` project covers Left 4 Dead as well, so this is not a gap.
 
 - Microsoft Learn, "Getting Started with Bedrock Dedicated Server" — https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/getting-started (vendor documentation; firewall prompt, loopback exemption, ports, folder layout, console commands)
 - Microsoft Learn, "Bedrock Dedicated Server Properties" — https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/server-properties (vendor documentation; the authoritative BDS key set, incl. the absence of RCON/query)

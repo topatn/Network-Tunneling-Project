@@ -106,6 +106,7 @@ Constraints added for host-local provisioning (2026-10-17):
 | AS-9 | Both artifacts can be updated and rolled back without losing the world | E-18 |
 | AS-10 | Supervising a headless server process (start, crash restart, log capture) is reliable enough to ship | E-17 |
 | AS-11 | Licensor terms and end-user terms permit the host to download and operate these servers on their own machine | E-19 — **[X] STILL UNVERIFIED. `minecraft.net` and `aka.ms/MinecraftEULA` were unreachable from the research environment on 2026-10-17, so the EULA and Usage Guidelines were never read. Owner or legal counsel must confirm** |
+| AS-12 | A guest can still be identified and joined normally through a relay even though the game server sees a host-local source address | E-3, E-5. **Raised 2026-10-17:** Source-engine games identify players by IP (`research.md` §2.2), and our engine dials the game server from a single local address, so all guests may collapse into one identity and game-level IP banning may stop working. Joining is assumed unaffected but **unverified** |
 
 ## 11. Success metrics
 
