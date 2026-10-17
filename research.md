@@ -561,7 +561,29 @@ Class file version **69.0 is Java 25**; **52.0 is Java 8**. The failure happens 
 
 If the clean VM cannot be produced locally, the next question is whether it can be produced *somewhere else*. **A hosted Windows runner is a fresh image per job with nothing preinstalled, which is very nearly the thing `SRV-001` asks for.** That removes the hardware prerequisite without pretending the requirement is met.
 
-`.github/workflows/clean-vm.yml` now exists to run `scripts/verify_clean_vm.py` on `windows-2022`, manual dispatch only, because a run downloads roughly 320 MB and touches third-party endpoints rather than our code. **It has never been executed** — no Git remote or CI provider is configured — and the file says so at the top, in the same spirit as the warning at the bottom of `ci.yml`.
+`.github/workflows/clean-vm.yml` now exists to run `scripts/verify_clean_vm.py` on `windows-2022`, manual dispatch only, because a run downloads roughly 320 MB and touches third-party endpoints rather than our code.
+
+**EXECUTED 2026-10-17, and it passed — the first time any workflow in this repository has run on a hosted runner.** A Git remote was configured, which had been a standing blocker across the whole project. The run produced direct log evidence for phase 1 on a genuinely clean image:
+
+| Check | Result on the clean runner |
+|---|---|
+| Session not elevated | **PASS** — so the hosted runner does *not* trip this, contrary to the prediction recorded below |
+| Required Java read per version, not hard-coded | **PASS** — `javaVersion.majorVersion = 25` |
+| Manifest `sha1` covers the version JSON, not the jar | **PASS** — computed `11f1aefe…` matched |
+| **`SRV-018` step 1: no host JRE present, verified fetch** | **PASS** — `OpenJDK25U-jre_x64_windows_hotspot_25.0.4.1_1.zip`, 58,475,080 bytes, **SHA-256 verified**, extracted per-user, `java -version` re-read as 25 |
+| `SRV-002` server artifact SHA-1 verified | **PASS** — 62,294,556 bytes, `33680f5f…5f4c` |
+| Declared size matches bytes received | **PASS** |
+| `--initSettings` without starting | **PASS** |
+| `eula.txt` generated as `eula=false` | **PASS** — the script stopped at the gate and did not accept |
+| `enable-rcon=false`, `enable-query=false`, `prevent-proxy-connections=false` | **PASS** — all three `SRV-004` defaults |
+
+**The runner genuinely has no Java** — discovery found nothing and the fetch branch ran. That is the `SRV-018` path a real clean host takes, verified on hardware that is actually clean.
+
+**Two defects were found by running it and are fixed** (`8df3d13`, `d4ba2e7`): a UTF-8 BOM written into `$GITHUB_ENV`, and a step that consumed exit code 10 as a success signal and then failed the job because it never issued an explicit `exit 0`. Both classes are now rejected by the audit, and both checks had to be debugged through their own false positives first — recorded at the call sites.
+
+**One prediction was wrong and is worth keeping.** I expected `session is not elevated` to fail, reasoning that GitHub runners use an administrator account, and pre-planned a fix to distinguish that from provisioning genuinely requiring elevation. **It passed.** Asking for the log rather than guessing is the only reason a gate was not weakened to accommodate a failure that never happened.
+
+**What this does not settle.** Phase 2 — start, probe, graceful stop, footprint — runs only when `accept_eula` is set, and the runner caveat below still applies. `SRV-001` remains unchecked.
 
 **One deliberate design point.** `scripts/verify_clean_vm.py` will not accept the EULA, so a naive workflow would stop at exit 10 forever. The workflow therefore has a **`accept_eula` boolean input, defaulting to false**, and the acceptance is performed by a visible, separately-named workflow step — not hidden inside the verification tool, and never on the default path. `SRV-015` forbids the *product* from accepting the EULA on a *host's* behalf; this is a deliberate, operator-initiated act on an ephemeral build agent, and keeping it explicit is what distinguishes the two. With the input false, phase 1 still runs and verifies the integrity chain, runtime selection and generated defaults.
 

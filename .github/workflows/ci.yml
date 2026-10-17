@@ -139,9 +139,7 @@ jobs:
         run: echo "Not implemented. Replaced by T-033."
 
 # ---------------------------------------------------------------------------
-# WARNING — this workflow has NEVER BEEN EXECUTED on a CI runner.
-#
-# Verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
+# HISTORY — verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
 # cargo-deny 0.20.2 (official prebuilt Windows binary, checksum verified):
 #   PASS  cargo fmt --all -- --check
 #   PASS  cargo clippy --workspace --all-targets -- -D warnings
@@ -149,18 +147,20 @@ jobs:
 #   PASS  the lint gate provably denies unwrap()
 #   PASS  cargo deny check advisories bans licenses
 #   PASS  the dependency gate provably FAILS on a seeded known-vulnerable crate
-#   PASS  python scripts/audit_traceability.py --self-test  (5/5 detected)
+#   PASS  python scripts/audit_traceability.py --self-test  (16/16 detected)
 #   PASS  python scripts/audit_traceability.py             (0 errors)
+#   PASS  python scripts/check_contrast.py                 (22/22 pairs)
+#
+# A Git remote was configured on 2026-10-17, and the sibling `clean-vm.yml` workflow has
+# run green on a hosted Windows runner — the first workflow here to execute on hosted
+# infrastructure.
 #
 # STILL not verified:
-#   1. These jobs have never run on a hosted runner: no Git remote or CI provider
-#      is configured, so no merge is actually gated by anything yet.
+#   1. The outcome of THIS workflow's jobs on a hosted runner. The local results above
+#      came from a machine that cannot compile Rust tooling from source (no Windows SDK,
+#      no assembler in the GNU bundle), so a hosted run is not redundant with them — it is
+#      the first real execution, and it is what actually gates a merge.
 #   2. The `migrate` job is disabled (if: false) until T-033 creates migrations.
-#
-# Sibling workflow: `clean-vm.yml` runs the SRV-001 provisioning verification on a hosted
-# Windows image. It is also unexecuted, for the same reason. Configuring a Git remote is
-# therefore what makes both runnable, and is the single highest-leverage infrastructure
-# action outstanding.
 #
 # Recorded in tasks.md under T-001.
 # ---------------------------------------------------------------------------
