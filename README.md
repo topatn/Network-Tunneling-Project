@@ -98,7 +98,10 @@ run, because there is no application code.**
 What *has* been checked in the documentation set:
 
 - All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
-- The traceability audit passes and catches 5 of 5 planted defects.
+- The traceability audit passes and catches 6 of 6 planted defects.
+- **The database schema has been executed**, not merely parser-checked: applied cleanly to an empty database on **PostgreSQL 16.10 and 17.6**, producing 12 tables, 35 indexes, 57 constraints and 13 foreign keys with zero errors. PRIV-006 (no email column) and INV-1 (no local destination column) were checked against the live schema, and four negative tests confirmed the CHECK constraints reject bad input. Method, version matrix, and one environment limitation are recorded in `schema.md`.
+
+**Withdrawn:** the earlier claim that "11 JSON Schemas are valid and example payloads were checked against them". `contracts/` does not exist in this repository, so no schema validation has been performed here. See `contracts.md`.
 
 ## Configuration example
 

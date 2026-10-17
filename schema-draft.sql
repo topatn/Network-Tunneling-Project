@@ -2,8 +2,16 @@
 -- DRAFT physical schema for the control-plane database (PostgreSQL).
 -- Source of design truth: data-model.md. Once migrations/ exists, migrations are authoritative
 -- for the physical schema and this file is retired (see schema.md).
--- Syntax-checked with the PostgreSQL parser only. NOT executed against a database.
--- Numeric bounds marked "proposal" are not validated values.
+--
+-- VERIFICATION STATUS 2026-10-17: applied successfully to an EMPTY database on
+-- PostgreSQL 16.10 and 17.6, producing 12 tables, 35 indexes, 57 constraints and
+-- 13 foreign keys on both, with zero errors. See schema.md for the version matrix
+-- and the exact method. It was NOT applied under a normal client connection: forked
+-- backends crash in the authoring environment with STATUS_DLL_INIT_FAILED, so
+-- `postgres --single` was used, which does not fork.
+-- Numeric bounds marked "proposal" are still not validated values. The four
+-- "proposal"-bounded CHECK constraints have now been exercised by negative tests
+-- and are enforced, but the bounds themselves remain unvalidated.
 
 CREATE TABLE users (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
