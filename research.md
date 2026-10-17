@@ -623,7 +623,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-004 | Whether to add an end-to-end encryption layer between host and guest (depends on ADR-007) | Open | 2026-10-16 | n/a |
 | ADR-005 | Tauri 2 shell + Rust engine, engine as current-user in-process or child process, no Windows service | Proposed | 2026-10-16 | Low–medium |
 | ADR-006 | Per-user NSIS installer + signed Tauri updater; MSIX deferred | Proposed | 2026-10-16 | Low–medium |
-| ADR-007 | Guest model: guests install client (G1) vs connect to relay address (G2). **G1 now has a licensing obstacle** — see RQ-13.1b constraint C2 / `SRV-014` | Open, **narrowed by evidence** | 2026-10-16; evidence 2026-10-17 | n/a |
+| ADR-007 | Guest model: **G2 — guests connect to the relay address with the stock client; no guest client, no guest account.** Decided by the product owner 2026-10-17, **which satisfies `SRV-014` by construction rather than by weakening it** | **Decided 2026-10-17** | 2026-10-16, decided 2026-10-17 | **[V]** that this is the owner's decision. **[A]** on the consequence analysis. Guest admission is now wholly IP-based, which makes E-13 load-bearing and still `[X]` |
 | ADR-008 | Rust control plane (`axum`) + PostgreSQL (`sqlx`); relay state in memory | **Accepted 2026-10-17** by the product owner | 2026-10-16, recorded 2026-10-17 | Medium |
 | ADR-009 | System-browser OAuth (PKCE) + OS credential store; identity provider open | Proposed | 2026-10-16 | Medium (flow), none (provider) |
 | ADR-010 | `tracing` + optional OTLP; no default client telemetry | Proposed | 2026-10-16 | Medium |
@@ -815,6 +815,26 @@ Everything in the right-hand column is why this is recorded as an **accepted ris
 **Still open, and honestly so.** Whether WebAuthn can actually be enforced depends on the admin client and is **unverified** — it needs a spike, not a decision, and is added to T-049's scope. Whether the owner is ever also a user is a product question nobody has asked and this ADR does not answer it; the decision above forces "never", which should be confirmed rather than inherited.
 
 **Confidence.** [V] that this is the owner's decision — it was stated directly. [A] on the design reasoning and on every "consequence" above; none of it has been tested.
+
+### ADR-007 — G2: guests connect to the relay address, with no client and no account
+
+**Status: Decided 2026-10-17 by the product owner.** This closes the guest model **and** resolves the `SRV-014` conflict that a G1 decision would have created. **No requirement had to be weakened.**
+
+**The decision.** `[V]` — **G2**: a guest connects to the relay's public address with the stock game client. They do not install our software, and they do not hold an account on this operator's platform.
+
+**Why this resolves the conflict instead of bending around it.** §5 RQ-13.1b (constraint C2) requires that server access not be "limited to or controlled, directly or indirectly, by a player owning or having access to out-of-game content, products, or services." A G1 design makes an account on our platform a precondition for reaching the game server, which is precisely what the clause appears to forbid. **G2 removes the precondition entirely**, so `SRV-014` holds on its own terms and its acceptance criterion — *"no guest-facing step requires an account on the operator's platform"* — is satisfied by construction rather than by reinterpretation.
+
+**This was recorded as a live conflict first, and that record was kept deliberately.** An earlier draft of this ADR documented the G1 decision together with the `SRV-014` clash and three ways to resolve it. It was replaced when the owner changed the decision, but the sequence is worth preserving in substance: **two documents disagreed, the disagreement was written down where both `architecture.md` and `requirements.md` pointed, and it was escalated rather than silently reconciled.** That is the behaviour `AGENTS.md` §2 and §10 ask for, and it is recorded here so a later reader can see the conflict was surfaced rather than discovered later.
+
+**Consequences.**
+
+1. **`SRV-014` passes as written.** No amendment, no documented legal reinterpretation, no accepted-risk annotation. It is the only P0 requirement in this project that was satisfied by a design choice rather than by narrowing.
+2. **`contracts.md` §6 and `api.md` row 18 stay as they are** — `POST /v1/invitations/claim`, Auth: **none**. Neither changes. That is the practical measure of how well the settled contracts anticipated this decision.
+3. **Guest admission is entirely IP-based**, which is why E-13 (`T-015`) and `AS-12` matter so much: with no client and no account, the relay's only way to recognise a guest is the source address it observes. That is the experiment this decision makes load-bearing, and it is still `[X]`.
+4. **We lose whatever G1 was chosen for.** If the motivation was discoverability, an in-game join method, guest-side telemetry, or moderation tooling, none of that comes free now. **Not recorded, because the owner did not state it** — and if it turns out to matter, the cheapest route back is the permissive reading of C2 argued in RQ-13.2e, not a re-litigation of this ADR.
+5. **The remaining exposure is technical, not legal.** `SRV-014` is satisfied; E-13 is not. CGNAT, shared NAT, and mobile address changes (all recorded in RQ-13.1b and `AS-12`) now sit on the critical path to a working guest join, where before they sat behind a licensing question.
+
+**Confidence.** `[V]` that this is the owner's decision — stated directly. `[A]` on the consequence analysis above, none of it tested.
 
 ## 8. Open experiments
 
