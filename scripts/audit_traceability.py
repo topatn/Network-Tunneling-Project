@@ -156,6 +156,41 @@ def api_rows(api_text: str) -> list[dict]:
     return rows
 
 
+def iter_run_blocks(text: str):
+    """Yield (body, step_name) for each `run: |` block in a workflow.
+
+    A block continues through indented lines and blank lines, and ends at the first line
+    that has content but no indentation -- which is how YAML actually delimits it. Two
+    regex versions of this got that wrong in opposite directions; see the call site.
+    """
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)run:\s*\|\s*$", lines[i])
+        if not m:
+            i += 1
+            continue
+        base = m.group(1)
+        name = ""
+        for back in range(i - 1, -1, -1):
+            nm = re.match(r"^\s*-\s*name:\s*(.+?)\s*$", lines[back])
+            if nm:
+                name = nm.group(1)
+                break
+            if re.match(r"^\s*-\s*(uses|run):", lines[back]):
+                break
+        body: list[str] = []
+        i += 1
+        while i < len(lines):
+            ln = lines[i]
+            if ln.strip() == "" or ln.startswith(base + "  ") or ln.startswith("\t"):
+                body.append(ln)
+                i += 1
+                continue
+            break
+        yield "\n".join(body), name
+
+
 def strip_sql_comments(sql_text: str) -> str:
     """Remove `--` line comments, honouring quoted strings.
 
@@ -607,7 +642,13 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                             f"upload-artifact takes glob patterns, which do not treat a "
                             f"backslash as a separator, so this silently matches nothing"
                         )
-            for cm in re.finditer(r"LASTEXITCODE -ne (\d+)", text):
+            # Matches any PowerShell comparison against a literal, not just
+            # `$LASTEXITCODE -ne N`. The workflow was refactored to capture the code into
+            # `$code` first (because any later command can clobber $LASTEXITCODE), and the
+            # narrower pattern silently stopped matching -- so a planted defect became
+            # invisible. A checker that quietly stops seeing is the failure mode this
+            # whole file exists to prevent.
+            for cm in re.finditer(r"\$\w+\s*-ne\s+(\d+)", text):
                 asserted = cm.group(1)
                 expected = exit_codes.get("EXIT_OPERATOR")
                 if expected is None:
@@ -640,6 +681,36 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                     f"{wf.name}: appends to $GITHUB_ENV with shell redirection, whose "
                     f"encoding depends on the shell. Use an explicit BOM-free write"
                 )
+
+            # A step that deliberately consumes a non-zero exit code must end with an
+            # explicit `exit`. Without one, the shell inherits the last command's status
+            # and the step fails even though the logic succeeded. This is not
+            # hypothetical: clean-vm.yml's phase-1 step ran all eleven checks green,
+            # printed its success line, and then reported "Process completed with exit
+            # code 1", because it read $LASTEXITCODE but never exited 0 itself.
+            # Walk the `run: |` blocks line by line rather than with a regex. Two regex
+            # attempts failed in a row: the first truncated at the first blank line, the
+            # second ran past the end of the block into later YAML keys and reported
+            # 'if-no-files-found: ignore' as the block's last line. Both produced false
+            # errors on a correct workflow. Line walking is dull and correct.
+            for body, step_name in iter_run_blocks(text):
+                if not re.search(r"\$\{?LASTEXITCODE\}?", body):
+                    continue
+                tail = [ln.strip() for ln in body.splitlines() if ln.strip()]
+                tail = [ln for ln in tail if not ln.startswith("#")]
+                if not tail:
+                    continue
+                # An explicit exit may be a literal or a variable, e.g. `exit 0` or
+                # `exit $LASTEXITCODE`. Requiring a digit after `exit` flagged the second
+                # form, which is perfectly correct.
+                if not re.match(r"^exit\s+(\d|\$)", tail[-1]):
+                    errors.append(
+                        f"{wf.name}: step {step_name!r} inspects an exit code but does not "
+                        f"end with an explicit `exit`. Its last line is "
+                        f"{tail[-1]!r}. A step that consumes a non-zero code on purpose "
+                        f"(for example treating 10 as success) will otherwise fail with "
+                        f"that code"
+                    )
 
     # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
@@ -884,7 +955,7 @@ def self_test(root: Path) -> int:
         (
             "workflow asserting an exit code the tool does not define",
             ".github/workflows/clean-vm.yml",
-            lambda t: t.replace("LASTEXITCODE -ne 10", "LASTEXITCODE -ne 99", 1),
+            lambda t: t.replace("$code -ne 10", "$code -ne 99", 1),
             "EXIT_OPERATOR=10",
         ),
         (
@@ -897,6 +968,12 @@ def self_test(root: Path) -> int:
                 1,
             ),
             "emits a UTF-8 BOM",
+        ),
+        (
+            "step consuming a non-zero exit code without an explicit exit",
+            ".github/workflows/clean-vm.yml",
+            lambda t: t.replace("          exit 0\n", "", 1),
+            "does not end with an explicit `exit`",
         ),
     ]
 

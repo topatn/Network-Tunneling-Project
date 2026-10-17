@@ -86,19 +86,30 @@ jobs:
         shell: pwsh
         run: |
           python scripts/verify_clean_vm.py --workdir "$env:RUNNER_TEMP\provision" --prepare
-          # Exit 10 is EXIT_OPERATOR: phase 1 completed and reached the EULA gate.
-          # Exit 1 means a check genuinely failed, which is a different problem and
-          # must not be reported as "wrong exit code" -- the first version of this step
-          # conflated the two and would have misattributed a real failure.
-          if ($LASTEXITCODE -eq 1) {
+          # Capture immediately: any later command can clobber $LASTEXITCODE.
+          $code = $LASTEXITCODE
+
+          # Exit 10 is EXIT_OPERATOR -- phase 1 succeeded and stopped at the EULA gate.
+          # Exit 1 means a check genuinely failed, which is a different problem and must
+          # not be reported as "wrong exit code".
+          if ($code -eq 1) {
             Write-Error "Phase 1 FAILED a verification check. See the log above."
             exit 1
           }
-          if ($LASTEXITCODE -ne 10) {
-            Write-Error "Expected exit 10 (reached the EULA gate); got $LASTEXITCODE"
+          if ($code -ne 10) {
+            Write-Error "Expected exit 10 (reached the EULA gate); got $code"
             exit 1
           }
+
           Write-Host "Phase 1 reached the EULA gate as required (SRV-015)."
+
+          # The explicit `exit 0` is load-bearing and was missing from the first version.
+          # A `pwsh` step inherits the last command's exit code when it ends without an
+          # explicit exit, so a step that deliberately CONSUMES a non-zero code -- here 10,
+          # which is a success signal -- still fails the job. The log showed all eleven
+          # checks passing and then "Process completed with exit code 1", which is exactly
+          # this: correct logic, implicit exit.
+          exit 0
 
       # ---------------------------------------------------------------- phase 2
       # Starting the server requires the EULA to have been accepted. scripts/
