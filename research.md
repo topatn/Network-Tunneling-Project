@@ -421,9 +421,39 @@ This closes the `[X]` above and is the evidence `SRV-002` needs. Run live agains
 
 **What E-15 still does not answer, and why.**
 
-1. **The server has never been started.** `java -jar server.jar` is *plausible* — the bundler bootstrap is a normal `Main-Class` and the manifest is well-formed — but **plausible is not verified**. Confirming it means accepting the EULA on this machine, which is a legal act and which `SRV-015` forbids the app from doing for a host. **Not done here; it needs the owner's explicit go-ahead.**
+1. ~~The server has never been started.~~ **See RQ-13.2c — it has now been started.**
 2. **The JRE supply question is open.** `SRV-010` forbids a system-wide install, and Mojang's `java-runtime-epsilon` component name suggests a published runtime, but **I did not find and verify a download endpoint for it** — the `launchermeta.mojang.com` runtime-manifest paths I tried returned 404, and guessing further URLs would be exactly the kind of invention `AGENTS.md` forbids. **[X] open.** Options remain: detect a suitable host JRE and refuse clearly if absent, bundle a redistributable runtime, or document a prerequisite.
-3. **Standard-user footprint is unmeasured.** E-19's VM half has still not been run, and now has more to check: the bundler unpacks into memory rather than to disk, so disk use and the `libraries/`+`versions/` directories in the older file list may not apply.
+3. **Standard-user footprint is unmeasured on a clean VM.** Measured on *this* machine in RQ-13.2c, which is not the same thing: a developer machine already has Java 25 installed, so the JRE-supply problem is masked here exactly as it would be hidden in a naive test.
+
+#### RQ-13.2c The Java server was actually started, and four requirements changed (2026-10-17)
+
+Run on this machine after the owner authorised it. All `[V]` — measured, and the raw output is reproducible. This is the first time any experiment here has executed a game server rather than reading about one.
+
+**Sequence and results.**
+
+| Step | Result |
+|---|---|
+| `java -jar server.jar --initSettings` | **Exit 0.** Unpacked the bundler contents, wrote `server.properties` (**69 keys**) and `eula.txt` with **`eula=false`**. **Did not start the server.** Confirms the desk-research claim |
+| Start **without** accepting | Refused: *"You need to agree to the EULA in order to run the server."* — **and exited with code 0** |
+| Accept (`eula=true`), start with `nogui` | World generated, **"Done (1.320s)!"**, listening on **`*:25565`** TCP. Required Java 25, already present |
+| `FR-011` L0 probe | Plain TCP connect to **`127.0.0.1:25565`** and **`::1:25565`** both **succeed**. The `::` listener is dual-stack and accepts IPv4 loopback. The server sends **no payload** until a legacy ping, so the probe must be **connect-only or ping-initiated**, never "expect data" |
+| §2.2.1 mitigation, real server | **`127.0.0.7 → 127.0.0.1:25565` connected.** The distinct-loopback-source mechanism works against a real Minecraft server, not only against my own listener. **Still needs a Source engine to confirm (E-3/E-4/E-5)** — Minecraft identifies players by authenticated UUID, not IP, so it does not exercise the identity problem that motivated the fix |
+| `SRV-010` on this machine | **Not elevated. 0 services, 0 scheduled tasks created.** Nothing written outside the scratch directory |
+| Footprint | **125.8 MB, 87 files**: 62 MB `server.jar` + **40.9 MB `libraries/` (39 files)** + **25.4 MB `versions/` (1 file)** + `world/` (26 files) + logs |
+| `SRV-004` defaults | `enable-rcon=false`, `enable-query=false`, `online-mode=true`, `rcon.port=25575`, `query.port=25565`, and **`prevent-proxy-connections=false`** — the last one is exactly what §2.2 requires and it is the shipped default, so the generated config must preserve it |
+
+**Correction to RQ-13.2b.** I wrote that the bundler jar is "self-contained … no library resolution is needed at install time." **That is half right and the wrong half is the one that matters for planning.** No *network* resolution happens — correct. But the bundler **unpacks to disk on first run**, creating `libraries/` (41 MB) and `versions/` (25 MB) beside the jar. So **provisioned footprint is ~126 MB per server, not 62 MB**, and a second version means a second `versions/` entry. That number belongs in the disk-budget part of `SRV-001`.
+
+**ADR-015 is now exercised, and one of its sources is wrong.** The server **does** generate its own `management-server-secret` into `server.properties` when the value is empty, exactly as RQ-13.4 predicted — so the app never creates or holds it, which is the whole point of that decision. But RQ-13.4 records the length as *"exactly 40 alphanumeric characters"* from the wiki. **The observed value is 43 characters.** Corrected below. The other predictions held: `management-server-enabled=false`, `-host=localhost`, `-port=0` (random per start), `-tls-enabled=true` with an empty keystore path, and `-allowed-origins=` empty.
+
+**Two findings that change `SRV-007` and were not anticipated anywhere.**
+
+1. **A refused start exits 0.** The EULA refusal is a *successful* exit as far as the OS is concerned. A supervisor that treats exit 0 as "started, then stopped cleanly" would report a healthy start that never happened, and a naive bounded-restart loop would burn all its retries on a condition no retry can fix. **The engine must treat "process exited before the readiness line" as a distinct failure state**, not as a clean exit. The readiness signal is the `Done (` line, which appeared **1.3 s** after launch.
+2. **A forced kill saves nothing, and there are two JVMs.** Killing the process produced **no shutdown or save message** in the log — it jumps straight from the periodic auto-save to the exit. And **two** `java.exe` processes had `server.jar` in their command line, of which only one owned the listening socket. Therefore: **(a)** the engine must hold a **writable stdin pipe** for the server's whole lifetime and write `stop` to it — on Windows there is no other graceful channel, no service control, and no signal; and **(b)** the engine must track the **process tree**, or stopping the listening PID orphans the other JVM. Both are hard requirements for `SRV-007`, and neither is in the task text today.
+
+**One new behavioural fact worth having.** After 60 s with no players the server logged **"Server empty for 60 seconds, pausing"** and paused. This is good for idle CPU, and it is a trap for our UI: **a tunnel can be active while the server is paused.** The players-seen indicator must not treat a live tunnel as evidence of activity (`FR-012`, `PERF-001`).
+
+**What this does not settle.** Nothing here was run on a **clean standard-user VM**, so `SRV-001`'s central promise — *no manual steps, no admin prompt, on a machine that has nothing installed* — is **still unverified**. This machine already had Java 25, which is precisely the condition the real product must not assume. `E-19`'s footprint half is answered for a developer machine only.
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.
@@ -456,7 +486,7 @@ Access control and defaults — all important:
 | `management-server-enabled` | `false` | **Disabled by default.** Good. |
 | `management-server-host` | `localhost` | **Localhost by default.** Good — keeps it off the network. |
 | `management-server-port` | `0` | **Random port on every startup.** A supervisor must set a static port. |
-| `management-server-secret` | generated and **written to `server.properties`** if empty | Exactly 40 alphanumeric characters. Presented as a bearer token or via `Sec-WebSocket-Protocol: minecraft-v1,<secret>`. Unauthorized requests get 401. |
+| `management-server-secret` | generated and **written to `server.properties`** if empty | **Measured 2026-10-17: the server does generate one on first run, and it is 43 characters.** ⚠️ The wiki's "exactly 40 alphanumeric characters", recorded here before, is **wrong**. Presented as a bearer token or via `Sec-WebSocket-Protocol: minecraft-v1,<secret>`. Unauthorized requests get 401. **The app neither creates nor holds this value** — see ADR-015 |
 | `management-server-tls-enabled` | `true` | **But requires a keystore** (`management-server-tls-keystore`, PKCS12). |
 | `management-server-tls-keystore-password` | none | **Can come from the environment variable `MINECRAFT_MANAGEMENT_TLS_KEYSTORE_PASSWORD`, then a `-D` JVM argument, then the property.** |
 | `management-server-allowed-origins` | empty | If left empty, **no client can connect**. |
@@ -520,7 +550,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-012 | Host-local game server provisioning runs as an engine-supervised child process on the host's PC; never operator-hosted | Proposed | 2026-10-17 | Low (no evidence; E-15–E-19) |
 | ADR-013 | First provisioning cut is **Minecraft Java Edition only**. Bedrock deferred pending a published integrity mechanism; Terraria, L4D and L4D2 stay manual | **Decided 2026-10-17** | 2026-10-17 | Medium. Based on documented behaviour, not on a run |
 | ADR-014 | Treatment of a generated game-server credential that the server must read from its configuration file | Open, **narrowed twice** — now Java-only (Bedrock has no RCON), and RQ-13.4 offers a better answer | 2026-10-17 | n/a |
-| ADR-015 | Prefer MSMP over RCON for Java server management; never enable RCON; let the server generate its own MSMP secret; pass the TLS keystore password by environment variable | Proposed | 2026-10-17 | Medium (documented behaviour read; not exercised) |
+| ADR-015 | Prefer MSMP over RCON for Java server management; never enable RCON; let the server generate its own MSMP secret; pass the TLS keystore password by environment variable | Proposed, **now exercised 2026-10-17** | 2026-10-17 | **Raised to high** — the behaviour was observed on a running server, not just read. See §5 RQ-13.2c |
 | ADR-016 | Cited files must exist; expected absences must be declared explicitly | **Accepted 2026-10-17** | 2026-10-17 | High (a demonstrated defect, not a judgement) |
 | ADR-017 | `sqlx migrate` owns `migrations/`; no separate migration library | **Accepted 2026-10-17** | 2026-10-17 | Medium-high; tool not yet executed, T-033 must verify |
 | ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Proposed 2026-10-17** — needs owner confirmation | 2026-10-17 | High for the S256 half (RFC 9700 is normative); low for the deferral half |
