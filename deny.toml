@@ -1,7 +1,13 @@
 # Advisories, bans, and licence policy (SEC-017).
 #
-# Kept minimal on purpose. Tighten once the first real dependencies exist, and
-# record every suppression with a justification in docs/dependency-register.md.
+# VERIFIED against cargo-deny 0.20.2 on 2026-10-17. An earlier version used
+# `[licenses] deny = [...]`, which was removed in this release and made the whole
+# config file fail validation -- so the file was never actually parsed before.
+# Rejection is now expressed by *omission*: anything not in `allow` fails.
+#
+# Verified: `cargo deny check advisories bans licenses` runs clean on the current
+# workspace, and a seeded known-vulnerable dependency makes the advisory check fail.
+# See docs/dependency-register.md.
 
 [graph]
 all-features = true
@@ -13,6 +19,8 @@ ignore = []
 
 [licenses]
 version = 2
+# Permissive licences only. Copyleft and proprietary licences (GPL, AGPL, SSPL,
+# proprietary) are deliberately absent, which denies them.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -24,14 +32,26 @@ allow = [
     "Unicode-DFS-2016",
     "Zlib",
 ]
-# Copyleft and proprietary licences need an explicit decision before use.
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-    "SSPL-1.0",
-]
+confidence-threshold = 0.8
+# An allowance that matches no crate in the dependency graph. The workspace
+# currently has zero dependencies, so every allowance is unmatched and this
+# would otherwise fail the licences check outright (verified 2026-10-17).
+# "warn" keeps the check meaningful once dependencies exist, without failing
+# on an empty graph.
+unused-allowed-license = "warn"
+
+[licenses.private]
+# Every workspace crate is `publish = false`, so none will ever be published.
+# Their licence field is the Cargo convention "UNLICENSED", which is not a valid
+# SPDX expression, and the project's own licensing decision has deliberately not
+# been made yet (see docs/dependency-register.md). Ignore private crates rather
+# than inventing a licence for them here.
+ignore = true
 
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+# A wildcard requirement is denied above; this makes the message explicit.
+deny = [
+    { name = "openssl", reason = "Prefer rustls: OpenSSL adds a native build dependency and its licence posture needs review." },
+]

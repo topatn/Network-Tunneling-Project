@@ -38,49 +38,76 @@ the tree, which §5.1 forbids.
 | `sqlx` or `postgres` | PostgreSQL access | Proposed — choice deferred to T-003/T-030 |
 | `tracing`, `tracing-subscriber` | Structured logging (ADR-010) | Proposed |
 | `keyring` | OS credential store (SEC-002) | Proposed |
-| `cargo-deny` | Licence/advisory/bans checking (SEC-017) | Dev dependency; policy file at `deny.toml` |
+| `cargo-deny` | Licences, advisories, and bans (SEC-017) | Dev/CI tool; policy file at `deny.toml`. **Use the official prebuilt binary**, not `cargo install` — compiling it needs a linker this environment lacks (see the T-001 verification section) |
 
 ## How to prove the scan actually fails (T-001 verification)
 
-**NOT DONE — and blocked by the environment, not by the project.** Recorded here
-so the gap is visible rather than forgotten.
+**DONE 2026-10-17.** The gate has now been observed to fail on a seeded known-vulnerable dependency, and to pass again once removed.
 
-What was attempted on 2026-10-17, and what happened:
+Approach: rather than installing a ~1–2 GB Windows SDK to compile `cargo-deny` from
+source, the **official prebuilt binary** was used — the documented distribution
+channel for this tool.
 
 | Step | Result |
 |---|---|
-| `cargo install cargo-deny --locked` on `stable-x86_64-pc-windows-msvc` | **Failed.** `rustup` warned the MSVC toolchain was installed without prerequisites. The MSVC compiler (14.51.36231) is present, but there is **no Windows SDK** (`Windows Kits\10\Lib` absent), so `kernel32.lib` is missing and every crate **build script** fails to link. |
-| `cargo install cargo-deny --locked` on `stable-x86_64-pc-windows-gnu` | **Failed.** Links for plain crates, but `dlltool.exe` is not present, so `getrandom` and `windows-sys` fail. rustup's GNU toolchain does not ship MinGW binutils. |
-| Install the Windows SDK or MinGW-w64 | **Not attempted.** Both are system software, which `AGENTS.md` §9.6 forbids installing without asking. **Owner decision required.** |
+| Resolve the latest release via the GitHub API | `0.20.2` |
+| Download `cargo-deny-0.20.2-x86_64-pc-windows-msvc.tar.gz` + its `.sha256` | Downloaded |
+| Verify SHA-256 against the published checksum | **Match** (`975a2214…cf87dc`) |
+| Extract and run `cargo-deny --version` | `cargo-deny 0.20.2` |
+| `check advisories bans licenses` on the empty workspace | **Pass, exit 0** |
+| Seed `time = "0.1.45"` into `crates/protocol` (RUSTSEC-2020-0071) | — |
+| `check advisories` with the seed present | **FAIL, exit 1** — `error[vulnerability]: Potential segfault in the time crate`, `ID: RUSTSEC-2020-0071`, `advisories FAILED` |
+| Remove the seed, re-run | **Pass, exit 0** |
 
-Consequence: the `dependency-scan` CI job and this whole file's enforcement story
-are **unproven**. `deny.toml` has never been parsed by the real `cargo-deny`
-binary, so even its syntax is unconfirmed.
+**The gate is real.** It is not decorative, and it blocks a merge on a known advisory.
 
-The procedure to run once a working `cargo-deny` exists:
+Two process notes, because both nearly produced a false pass:
 
-1. Add a crate with a known advisory to the **workspace** as a temporary dev
-   dependency, and record it in this file marked "seeded for T-001 verification".
-2. Run `cargo deny check advisories`.
-3. Confirm the job **fails** and names the advisory.
-4. Remove the crate and this row in the same change.
+1. **Seeding `[workspace.dependencies]` is not seeding the graph.** Adding `time`
+   there declares it for *possible* use; no crate depends on it, so the scan
+   correctly reported `advisories ok` and exit 0. The seed must go into an actual
+   crate's `[dependencies]`. A "successful" test that never put the crate in the
+   graph would have been worthless.
+2. **`cargo-deny` shells out to `cargo`**, so cargo must be on `PATH` or the tool
+   fails with a bare `program not found`.
 
-The point is to show the gate is not decorative. **A scan that has never been
-seen to fail is not evidence of anything**, and right now that is exactly the
-state of the dependency gate.
+### Configuration errors found and fixed by actually running it
+
+`deny.toml` had never been parsed by a real `cargo-deny`, and it was wrong in three
+ways. All three are fixed:
+
+- **`[licenses] deny = [...]` was removed in this release** and made the entire
+  config fail validation. Rejection is now by omission: anything not in `allow`
+  fails. The copyleft entries were deleted from the config accordingly.
+- **An empty dependency graph fails the licences check**, because every allowance
+  is "unmatched". Set `unused-allowed-license = "warn"`, which stays meaningful once
+  dependencies exist.
+- **Our own crates are `license = "UNLICENSED"`**, which is a Cargo convention and
+  not a valid SPDX expression, so each crate was reported `error[unlicensed]`. All
+  workspace crates are `publish = false`, so `[licenses.private] ignore = true` is
+  the correct treatment. This deliberately **defers** the project's own licensing
+  decision rather than inventing one.
+
+The toolchain gap remains for *compiling* Rust tooling, but it is no longer what
+stands between this repository and a proven dependency gate.
 
 ## What *was* verified locally (2026-10-17)
 
-Toolchain: `rustc 1.99.1`, `cargo 1.99.1`, `clippy 0.1.99`, `rustfmt 1.10.0`.
+Toolchain: `rustc 1.99.1`, `cargo 1.99.1`, `clippy 0.1.99`, `rustfmt 1.10.0`. Dependency
+gate: `cargo-deny 0.20.2` (official prebuilt Windows binary, checksum verified).
 
 | Check | Result |
 |---|---|
 | `cargo metadata --no-deps` | Pass — 6 members, empty dependency graph |
 | `cargo check --workspace` | Pass |
-| `cargo fmt --all -- --check` | Pass (after fixing generated trailing blank lines) |
+| `cargo fmt --all -- --check` | Pass |
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass, zero warnings |
 | Lint gate actually denies `unwrap()` | **Pass** — a temporary `unwrap()` produced `error: used unwrap() on an Option value`, exit 101, and clippy returned to clean on revert |
 | `cargo test --workspace --all-targets` | Pass under `stable-x86_64-pc-windows-gnu` — **0 tests**, because the crates are empty skeletons |
+| `cargo deny check advisories bans licenses` | **Pass, exit 0** |
+| Dependency gate fails on a known advisory | **Pass** — seeded `time 0.1.45`, got `RUSTSEC-2020-0071`, exit 1; removed, back to exit 0 |
+| `scripts/audit_traceability.py` | **Pass** — 110 requirements, 110 traceability rows, 86 tasks, 0 errors, 7 warnings |
+| `scripts/audit_traceability.py --self-test` | **Pass** — 5 planted defects, 5 detected |
 
 Two configuration bugs were caught by running the checks rather than trusting
 them, and are worth remembering:

@@ -118,21 +118,23 @@ jobs:
         run: echo "Not implemented. Replaced by T-033."
 
 # ---------------------------------------------------------------------------
-# WARNING — this workflow has NEVER BEEN EXECUTED.
+# WARNING — this workflow has NEVER BEEN EXECUTED on a CI runner.
 #
-# Verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1:
+# Verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
+# cargo-deny 0.20.2 (official prebuilt Windows binary, checksum verified):
 #   PASS  cargo fmt --all -- --check
 #   PASS  cargo clippy --workspace --all-targets -- -D warnings
 #   PASS  cargo test --workspace --all-targets   (0 tests; 6 empty crates)
-#   PASS  the lint gate provably denies unwrap() — see docs/dependency-register.md
-# NOT verified, and why:
-#   1. cargo-deny could not be built in the authoring environment (see that file
-#      for the two distinct toolchain failures). The dependency-scan job is
-#      therefore UNPROVEN — it has never been seen to pass or fail.
-#   2. The seeded known-vulnerable dependency check has not been performed.
-#   3. CI itself has never run: no Git remote or CI provider is configured.
+#   PASS  the lint gate provably denies unwrap()
+#   PASS  cargo deny check advisories bans licenses
+#   PASS  the dependency gate provably FAILS on a seeded known-vulnerable crate
+#   PASS  python scripts/audit_traceability.py --self-test  (5/5 detected)
+#   PASS  python scripts/audit_traceability.py             (0 errors)
 #
-# Treat the dependency-scan job as unproven until it has run green on a real
-# runner AND the seeded-vulnerability check has been observed to fail.
+# STILL not verified:
+#   1. These jobs have never run on a hosted runner: no Git remote or CI provider
+#      is configured, so no merge is actually gated by anything yet.
+#   2. The `migrate` job is disabled (if: false) until T-033 creates migrations.
+#
 # Recorded in tasks.md under T-001.
 # ---------------------------------------------------------------------------
