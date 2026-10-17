@@ -58,11 +58,9 @@ API_ROW = re.compile(r"^\|\s*(\d+)\s*\|")
 COUNTS_LINE = re.compile(r"(\d+)\s+requirements,\s*(\d+)\s+tasks")
 PLAN_TOTALS = re.compile(r"Total:\s*(\d+)\s+tasks,\s*(\d+)\s+requirements")
 
-
 def read(root: Path, name: str) -> str:
     # utf-8-sig tolerates a BOM, which some PowerShell writers emit.
     return (root / name).read_text(encoding="utf-8-sig")
-
 
 def _clean_routes(pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
     """Normalise route tokens: strip backticks, query strings, and whitespace.
@@ -76,7 +74,6 @@ def _clean_routes(pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
     for meth, path in pairs:
         out.add((meth, path.split("?")[0].split("#")[0].strip()))
     return out
-
 
 def contract_routes(contracts_text: str) -> dict[str, dict]:
     """Route definitions from contracts.md, keyed by section number.
@@ -126,7 +123,6 @@ def contract_routes(contracts_text: str) -> dict[str, dict]:
         }
     return out
 
-
 def api_rows(api_text: str) -> list[dict]:
     """Route rows from api.md, with column meaning taken from each table's header.
 
@@ -154,7 +150,6 @@ def api_rows(api_text: str) -> list[dict]:
         rec["num"] = cells[0]
         rows.append(rec)
     return rows
-
 
 def iter_run_blocks(text: str):
     """Yield (body, step_name) for each `run: |` block in a workflow.
@@ -190,6 +185,36 @@ def iter_run_blocks(text: str):
             break
         yield "\n".join(body), name
 
+def iter_steps(text: str):
+    """Yield (step_text, uses_value) for each list item under a job's `steps:`.
+
+    Needed because a `path:` key means different things to different actions:
+    actions/cache takes `~/.cargo/registry` and a `hashFiles('**/...')` key, neither of
+    which is an artifact glob. Only upload-artifact and download-artifact treat `path:`
+    as a glob that the action walks itself.
+    """
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = re.match(r"^(\s*)-\s*(?:uses|name|run):", lines[i])
+        if not m:
+            i += 1
+            continue
+        indent = m.group(1)
+        block: list[str] = []
+        j = i
+        while j < len(lines):
+            ln = lines[j]
+            if (j > i and ln.strip()
+                    and not ln.startswith(indent + "  ")
+                    and not ln.startswith("\t")):
+                break
+            block.append(ln)
+            j += 1
+        body = "\n".join(block)
+        um = re.search(r"uses:\s*(\S+)", body)
+        yield body, (um.group(1) if um else "")
+        i = j
 
 def strip_sql_comments(sql_text: str) -> str:
     """Remove `--` line comments, honouring quoted strings.
@@ -217,7 +242,6 @@ def strip_sql_comments(sql_text: str) -> str:
             j += 1
         out_lines.append(line[:cut])
     return "\n".join(out_lines)
-
 
 def ddl_columns(sql_text: str) -> dict[str, list[str]]:
     """Column names per CREATE TABLE, from the DDL text.
@@ -251,7 +275,6 @@ def ddl_columns(sql_text: str) -> dict[str, list[str]]:
                 cols.append(cm.group(1))
         out[table] = cols
     return out
-
 
 def documented_columns(model_text: str) -> dict[str, list[str]]:
     """Column names per entity, from data-model.md's '**Fields:**' lines.
@@ -302,7 +325,6 @@ def documented_columns(model_text: str) -> dict[str, list[str]]:
             i += 1
         out[table] = cols
     return out
-
 
 def audit(root: Path) -> tuple[list[str], list[str]]:
     errors: list[str] = []
@@ -625,23 +647,57 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
     if workflow_dir.is_dir():
         for wf in sorted(workflow_dir.glob("*.yml")):
             text = read(root, f".github/workflows/{wf.name}")
-            # Artifact paths live inside a YAML literal block (`path: |`), so each entry
-            # is a bare indented line, NOT a "- " list item. The first version of this
-            # check matched a list prefix, never matched anything, and sat there passing
-            # silently -- a false pass in the checker written to catch a false pass.
-            for block in re.finditer(
-                r"^\s*path:\s*\|\s*\n((?:[ \t]+[^\n]*\n)+)", text, re.M
-            ):
-                for line in block.group(1).splitlines():
-                    entry = line.strip()
-                    if not entry or entry.startswith("#"):
+            # Artifact paths belong to the upload/download-artifact steps specifically.
+            # An earlier version scanned every `path:` block in the file and flagged
+            # actions/cache's legitimate `~/.cargo/registry` and its `hashFiles('**/...`)`,
+            # key -- six false errors in one run. Those are cache inputs, not artifact
+            # globs, and cache handles them itself.
+            for step_text, step_uses in iter_steps(text):
+                if "upload-artifact" not in step_uses and "download-artifact" not in step_uses:
+                    continue
+                # Both YAML shapes: an inline scalar (`path: ci-artifacts/`) and a
+                # literal block (`path: |` followed by indented lines). The first
+                # version matched only the block form, so an inline path -- which is
+                # what this repository actually uses -- was never checked at all.
+                for pm in re.finditer(r"path:[ \t]*([^\n]*)\n", step_text):
+                    inline = pm.group(1).strip()
+                    if not inline or inline.startswith("#"):
                         continue
-                    if "\\" in entry:
-                        errors.append(
-                            f"{wf.name}: artifact path {entry!r} uses a backslash. "
-                            f"upload-artifact takes glob patterns, which do not treat a "
-                            f"backslash as a separator, so this silently matches nothing"
-                        )
+                    if inline.lstrip("-").strip() in ("|", ">"):
+                        entries: list[str] = []
+                        for nxt in step_text[pm.end():].splitlines():
+                            stripped = nxt.strip()
+                            if not stripped or stripped.startswith("#"):
+                                continue
+                            if not nxt.startswith(" "):
+                                break
+                            entries.append(stripped)
+                    else:
+                        entries = [inline]
+                    for entry in entries:
+                        entry = entry.split(" #")[0].strip().strip("\"'")
+                        if not entry or entry.startswith("#"):
+                            continue
+                        if "\\" in entry:
+                            errors.append(
+                                f"{wf.name}: artifact path {entry!r} uses a backslash. "
+                                f"upload-artifact takes glob patterns, which do not treat "
+                                f"a backslash as a separator, so this silently matches "
+                                f"nothing"
+                            )
+                        # A recursive glob rooted at a home directory or drive walks
+                        # protected directories and aborts the upload:
+                        #   EPERM ... scandir 'C:\Users\runneradmin\AppData\Local\History'
+                        if re.search(r"(^|[\\/])~[\\/]|\*\*", entry) or re.match(
+                            r"^[A-Za-z]:[\\/]", entry
+                        ):
+                            errors.append(
+                                f"{wf.name}: artifact path {entry!r} is a recursive glob "
+                                f"or a drive/home root. Uploading it walks the whole tree "
+                                f"and aborts on protected directories such as "
+                                f"AppData\\Local\\History. Copy the files into the checkout "
+                                f"and upload a relative path"
+                            )
             # Matches any PowerShell comparison against a literal, not just
             # `$LASTEXITCODE -ne N`. The workflow was refactored to capture the code into
             # `$code` first (because any later command can clobber $LASTEXITCODE), and the
@@ -751,7 +807,6 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
     errors, warnings, stats = errors, warnings, stats
     return errors, warnings, stats, chain_text
 
-
 def longest_chain(graph: dict[str, list[str]]) -> list[str]:
     """Longest prerequisite chain, counted in tasks.
 
@@ -791,7 +846,6 @@ def longest_chain(graph: dict[str, list[str]]) -> list[str]:
         if not nxt:
             return list(reversed(chain))
         node = sorted(nxt)[0]
-
 
 def find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
     """Return every elementary prerequisite cycle, detected without relying on
@@ -835,7 +889,6 @@ def find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
                 stack.pop()
 
     return cycles
-
 
 def self_test(root: Path) -> int:
     """Prove the audit detects defects. A checker never seen to fail proves nothing."""
@@ -975,6 +1028,13 @@ def self_test(root: Path) -> int:
             lambda t: t.replace("          exit 0\n", "", 1),
             "does not end with an explicit `exit`",
         ),
+        (
+            "artifact upload globbing a home directory or drive root",
+            ".github/workflows/clean-vm.yml",
+            lambda t: t.replace("          path: ci-artifacts/",
+                                "          path: ~/**/provision/verify.log", 1),
+            "walks the whole tree and aborts",
+        ),
     ]
 
     failures = 0
@@ -1019,7 +1079,6 @@ def self_test(root: Path) -> int:
     print("\nSELF-TEST PASSED: every planted defect was detected")
     return 0
 
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--strict", action="store_true")
@@ -1045,7 +1104,6 @@ def main() -> int:
         return 1
     print(f"\nPASSED: 0 errors, {len(warnings)} warning(s)")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

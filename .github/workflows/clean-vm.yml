@@ -143,26 +143,37 @@ jobs:
           to exercise the start/stop path on this clean image.
           "@
 
+      - name: Collect logs for upload
+        if: always()
+        shell: pwsh
+        run: |
+          # Copy into the workspace and upload from there, rather than globbing the user
+          # profile. The first version used `~/**/provision/verify.log`, which forces a
+          # recursive walk of the entire profile and died on a protected directory:
+          #   EPERM: operation not permitted, scandir 'C:\Users\runneradmin\AppData\Local\History'
+          # A narrow relative path is the correct pattern regardless, and it keeps the
+          # walk inside the checkout.
+          New-Item -ItemType Directory -Force -Path "ci-artifacts" | Out-Null
+          foreach ($f in @("verify.log", "server.properties", "eula.txt")) {
+            $src = Join-Path "$env:USERPROFILE\provision" $f
+            if (Test-Path $src) {
+              Copy-Item $src "ci-artifacts\$f"
+              Write-Host "collected $f"
+            }
+          }
+
       - name: Upload the verification log
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: clean-vm-log
-          # Forward slashes only. upload-artifact takes glob patterns, which do not
-          # treat a backslash as a separator, so a Windows-style path silently matches
-          # nothing and the run produces no artifact at all. Written with backslashes
-          # first and caught by scripts/audit_traceability.py, which now checks that
-          # every artifact path in this repository uses forward slashes.
-          #
-          # The workdir moved from RUNNER_TEMP to USERPROFILE so that SRV-010's
-          # containment check is actually evaluable: on a hosted runner RUNNER_TEMP is a
-          # separate volume (D:\a\_temp), so the check could not be measured and was
-          # correctly skipped. Running under the profile makes it a real test.
-          path: |
-            ~/**/provision/verify.log
-            ~/**/provision/server.properties
+          # Relative to the checkout, forward slashes only. upload-artifact takes glob
+          # patterns, which do not treat a backslash as a separator, so a Windows-style
+          # path silently matches nothing. That was written with backslashes first and is
+          # now rejected by scripts/audit_traceability.py.
+          path: ci-artifacts/
           retention-days: 14
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
 # ---------------------------------------------------------------------------
 # WHAT A PASS HERE WOULD AND WOULD NOT ESTABLISH
