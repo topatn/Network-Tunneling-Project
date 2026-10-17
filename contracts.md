@@ -146,10 +146,12 @@ Example response:
 Example request: `{"expires_in_seconds":3600,"max_claims":4}`
 
 ### 5.12 `GET /v1/tunnels/{id}/invitations`, `DELETE /v1/invitations/{id}`
-- List invitations (never returns secrets) / revoke one. Revocation also revokes its admissions. `204`. Check: owner only.
+- List invitations (never returns secrets) / revoke one. Revocation also revokes its admissions. Check: owner only.
+- Success `200` (`GET`): the tunnel's invitations. Success `204` (`DELETE`): no body.
 
 ### 5.13 `GET /v1/tunnels/{id}/admissions`, `DELETE /v1/admissions/{id}` **[E-13]**
-- List live guest admissions (source IPs shown to the owner only in masked form *(proposal)*) / revoke one. `204`.
+- List live guest admissions (source IPs shown to the owner only in masked form *(proposal)*) / revoke one.
+- Success `200` (`GET`): the live admissions. Success `204` (`DELETE`): no body.
 
 ### 5.14 `GET /v1/tunnels/{id}/usage`
 - Success `200`: aggregated bytes and peak flows over a requested window. Check: owner only.

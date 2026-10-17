@@ -48,6 +48,13 @@ ADR_HEADING = re.compile(r"^###\s+(ADR-\d+)\b", M)
 DM_TABLE_HEADING = re.compile(r"^###\s+([a-z_]+)\s*$", M)
 DM_FIELDS = re.compile(r"^- \*\*Fields:\*\*\s*(.*)$", M)
 DDL_TABLE = re.compile(r"CREATE TABLE\s+([a-z_]+)\s*\(", re.I)
+CT_ROUTE_SECTION = re.compile(
+    r"^###\s+(\d+(?:\.\d+)?)\s+(.*?)$(?P<body>.*?)(?=^###\s|^##\s|\Z)", M | re.S
+)
+CT_SECTION = re.compile(r"^##\s+(\d+)\.\s+(.*?)$(?P<body>.*?)(?=^##\s|\Z)", M | re.S)
+ROUTE_TOKEN = re.compile(r"`([A-Z]+)\s+(/[^`]+)`")
+ROUTE_LIST_ITEM = re.compile(r"^-\s+`([A-Z]+)\s+(/[^`]+)`", M)
+API_ROW = re.compile(r"^\|\s*(\d+)\s*\|")
 COUNTS_LINE = re.compile(r"(\d+)\s+requirements,\s*(\d+)\s+tasks")
 PLAN_TOTALS = re.compile(r"Total:\s*(\d+)\s+tasks,\s*(\d+)\s+requirements")
 
@@ -55,6 +62,98 @@ PLAN_TOTALS = re.compile(r"Total:\s*(\d+)\s+tasks,\s*(\d+)\s+requirements")
 def read(root: Path, name: str) -> str:
     # utf-8-sig tolerates a BOM, which some PowerShell writers emit.
     return (root / name).read_text(encoding="utf-8-sig")
+
+
+def _clean_routes(pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
+    """Normalise route tokens: strip backticks, query strings, and whitespace.
+
+    The query-string strip is not cosmetic. Section 7 writes the route as
+    "`GET /internal/v1/relays/{relay_id}/state?cursor=<opaque>`", so a pattern that
+    required the closing backtick immediately after the path matched nothing and
+    contracts.md section 7 appeared to define only one of its two routes.
+    """
+    out = set()
+    for meth, path in pairs:
+        out.add((meth, path.split("?")[0].split("#")[0].strip()))
+    return out
+
+
+def contract_routes(contracts_text: str) -> dict[str, dict]:
+    """Route definitions from contracts.md, keyed by section number.
+
+    Three shapes have to be handled, and getting this wrong is how the first attempt
+    reported four phantom errors:
+
+    - Numbered subsections: '### 5.7 `GET /v1/tunnels` and `GET /v1/tunnels/{id}`' --
+      several routes in one heading.
+    - Prose sections whose routes are unnumbered sub-headings: section 6 is
+      '### `POST /v1/invitations/claim` **[E-13]**'.
+    - Prose sections whose routes are list items: section 7 is a pair of
+      '- `GET /internal/...`' bullets.
+
+    Only the section's *own* content counts. A parent section such as '## 5. User HTTP
+    API' must not absorb its subsections' routes, and a prose section that merely
+    mentions a route in passing -- section 4 names 'POST /v1/invitations/claim' while
+    describing rate-limit classes, section 8 names 'POST /v1/tunnels' while describing
+    idempotency -- defines nothing. Requiring an unnumbered sub-heading or a leading
+    '- `METHOD path`' list item is what separates a definition from a mention.
+    """
+    out: dict[str, dict] = {}
+    for m in CT_ROUTE_SECTION.finditer(contracts_text):
+        own = ROUTE_TOKEN.findall(m.group(2))
+        own.extend(ROUTE_LIST_ITEM.findall(m.group("body")))
+        out[m.group(1)] = {
+            "routes": _clean_routes(own),
+            "success": re.findall(r"[Ss]uccess\s+`?(\d{3})`?", m.group("body")),
+            "title": m.group(2).strip(),
+        }
+
+    for m in CT_SECTION.finditer(contracts_text):
+        num = m.group(1)
+        body = m.group("body")
+        own: list[tuple[str, str]] = []
+        for part in re.split(r"^###\s", body, flags=M)[1:]:
+            if re.match(r"\d", part):
+                continue  # numbered subsection, indexed above
+            own.extend(ROUTE_TOKEN.findall(part.splitlines()[0]))
+        own.extend(ROUTE_LIST_ITEM.findall(body))
+        if not own:
+            continue
+        out[num] = {
+            "routes": _clean_routes(own),
+            "success": re.findall(r"[Ss]uccess\s+`?(\d{3})`?", body),
+            "title": m.group(2).strip(),
+        }
+    return out
+
+
+def api_rows(api_text: str) -> list[dict]:
+    """Route rows from api.md, with column meaning taken from each table's header.
+
+    The three tables have different column sets -- the user table has an Idem column,
+    the guest table does not, and the internal table has no Success column at all -- so
+    positions are read from the header rather than hard-coded. Hard-coding them is how the
+    first attempt failed, with a ValueError on unpack.
+    """
+    rows: list[dict] = []
+    header: list[str] | None = None
+    for line in api_text.splitlines():
+        s = line.strip()
+        if not s.startswith("|"):
+            header = None
+            continue
+        cells = [c.strip() for c in s.strip("|").split("|")]
+        if cells and cells[0] == "#":
+            header = [c.lower() for c in cells]
+            continue
+        if not (cells and cells[0].isdigit()):
+            continue
+        if not header:
+            continue
+        rec = dict(zip(header, cells))
+        rec["num"] = cells[0]
+        rows.append(rec)
+    return rows
 
 
 def strip_sql_comments(sql_text: str) -> str:
@@ -393,6 +492,74 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                     f"not in the DDL"
                 )
 
+    # 10. api.md and contracts.md must agree on every route.
+    #
+    #     Added 2026-10-17, closing the remaining "API/data-model agreement" gap that
+    #     T-120 and requirements.md both named as open. api.md is an inventory and
+    #     contracts.md is authoritative for wire format; nothing compared them, so a
+    #     route could be renamed, moved, or given a different status code in one file
+    #     and every other check would still pass.
+    api_file = root / "api.md"
+    if not api_file.exists():
+        errors.append("api.md is missing; the route agreement check cannot run")
+    else:
+        api_text = read(root, "api.md")
+        sections = contract_routes(contracts_text)
+        rows = api_rows(api_text)
+        if not rows or not sections:
+            errors.append(
+                f"route agreement check parsed nothing (api rows={len(rows)}, "
+                f"contract sections={len(sections)}) -- the check is broken"
+            )
+        covered: set[str] = set()
+        for rec in rows:
+            method = rec.get("method", "")
+            path = rec.get("path", "").strip("`")
+            ref = rec.get("contract", "").strip().lstrip("\u00a7")
+            key = f"{method} {path}"
+            if ref not in sections:
+                errors.append(
+                    f"api.md route {key} cites contracts.md section {ref or '(none)'}, "
+                    f"which does not exist"
+                )
+                continue
+            covered.add(ref)
+            section = sections[ref]
+            if (method, path) not in section["routes"]:
+                errors.append(
+                    f"api.md route {key} is not defined in contracts.md section {ref} "
+                    f"(that section defines: "
+                    f"{', '.join(sorted(m + ' ' + p for m, p in section['routes'])) or 'nothing'})"
+                )
+                continue
+            stated = rec.get("success", "")
+            api_codes = re.findall(r"\b(\d{3})\b", stated)
+            if api_codes and not api_codes[0].startswith("2"):
+                errors.append(
+                    f"api.md lists success {api_codes[0]} for {key}; a Success column "
+                    f"must hold a 2xx status"
+                )
+            elif api_codes and not section["success"]:
+                errors.append(
+                    f"api.md gives success {api_codes[0]} for {key}, but contracts.md "
+                    f"section {ref} -- the authoritative document -- states no success "
+                    f"code at all"
+                )
+            elif api_codes and not set(api_codes) & set(section["success"]):
+                errors.append(
+                    f"api.md gives success {api_codes[0]} for {key}, but contracts.md "
+                    f"section {ref} states {sorted(set(section['success']))}"
+                )
+        # A route defined in contracts.md but absent from the inventory is the same
+        # drift in the other direction: the contract promises an endpoint nothing lists.
+        for ref in sorted(sections, key=lambda s: [int(p) for p in s.split(".")]):
+            if ref not in covered and sections[ref]["routes"]:
+                errors.append(
+                    f"contracts.md section {ref} defines "
+                    f"{', '.join(sorted(m + ' ' + p for m, p in sections[ref]['routes']))} "
+                    f"but no api.md row cites it"
+                )
+
     # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
     if m:
@@ -601,6 +768,37 @@ def self_test(root: Path) -> int:
             "data-model.md",
             lambda t: t + "\n### shadow_table\n- **Fields:** `id uuid PK`.\n",
             "is documented in data-model.md but absent from the DDL",
+        ),
+        (
+            "route in api.md that contracts.md does not define at that path",
+            "api.md",
+            lambda t: t.replace(
+                "| 4 | GET | `/v1/me` |", "| 4 | GET | `/v1/mystery` |", 1
+            ),
+            "is not defined in contracts.md section 5.4",
+        ),
+        (
+            "success status in api.md that the authoritative contracts.md contradicts",
+            "api.md",
+            # Matched without the section symbol: the planted text must not depend on a
+            # non-ASCII character surviving the write, or the defect silently does
+            # nothing and the test passes for the wrong reason.
+            lambda t: t.replace(
+                "| 4 | GET | `/v1/me` | user | self | no | none | 200 |",
+                "| 4 | GET | `/v1/me` | user | self | no | none | 299 |",
+                1,
+            ),
+            "but contracts.md section 5.4 states",
+        ),
+        (
+            "route defined in contracts.md that no api.md row lists",
+            "contracts.md",
+            lambda t: t.replace(
+                "- Success `200`: `{id, display_name, status}`.",
+                "- `GET /v1/undocumented-extra` — also served here.",
+                1,
+            ),
+            "but no api.md row cites it",
         ),
     ]
 
