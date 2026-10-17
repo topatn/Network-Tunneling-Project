@@ -18,7 +18,7 @@
 | M8 — Packaging, observability, deployment, operations | T-098–T-110 (12 tasks) | Gate G8: staging environment passes exercises for deploy, rollback, backup, alerts, and updates. |
 | M9 — Release readiness | T-120–T-122 (3 tasks) | Gate G9: go/no-go review. |
 
-Task counts are computed from `tasks.md` data. Total: 86 tasks, 116 requirements.
+Task counts are computed from `tasks.md` data. Total: 86 tasks, 117 requirements.
 
 ## Sequencing
 

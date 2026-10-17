@@ -490,6 +490,42 @@ So the requirement in `SRV-007` — hold a writable stdin pipe for the process l
 - **[X] Redistributability is not verified.** The Adoptium assets endpoint returned `licenses: null`, so **no licence claim is made here.** Bundling a runtime would require reading the project's licence first and adding a `docs/dependency-register.md` entry per `AGENTS.md` §5. **Fetching at provision time from the vendor's own API redistributes nothing**, which sidesteps the question for the first cut — and is why that option is preferable rather than merely simpler.
 - **Still `[X]`:** whether a *typical* host can reach `api.adoptium.net`, and whether the GitHub release CDN its asset link points to is reachable on the networks we care about. That is `E-14`'s restrictive-network question applied to a second vendor, and it is a real risk.
 - **The recommendation — a decision, and therefore the owner's:** fetch the runtime at provision time from Adoptium's documented API, verify the published SHA-256 before use, extract per-user, and **do not bundle it**. Fall back to a clear, specific refusal when the host has no suitable JRE *and* the fetch fails. This keeps the first cut free of redistribution questions and keeps our own installer small. **[A] reasoning; every measurement above is `[V]`.**
+
+#### RQ-13.2e What "a suitable host JRE" actually means on Windows, and the trap that decides it (2026-10-17)
+
+The recommendation above needs a refusal path, and a refusal path needs a definition of "suitable". That definition was nowhere in the documents, and it is not the obvious one. Measured on this machine, which turns out to be an awkward case.
+
+**The trap, demonstrated rather than described. [V]** This machine has **two Java generations installed**:
+
+| Discovery route | What it finds here |
+|---|---|
+| `java` on `PATH` | `C:\Program Files\Common Files\Oracle\Java\javapath\java.exe` — an Oracle **forwarder shim**, not a real JRE. Reports 25.0.1 |
+| Registry `HKLM\SOFTWARE\JavaSoft\JDK` | `25.0.1` |
+| Registry `HKLM\SOFTWARE\JavaSoft\Java Runtime Environment` | **`1.8`** and `1.8.0_481` — a **Java 8** runtime, also installed |
+| `C:\Program Files\Java` | `jdk-25`, `jre1.8.0_481`, `latest` |
+| `JAVA_HOME` | **unset** |
+| Registry `HKLM\SOFTWARE\Eclipse Adoptium\JDK` | **absent** — so a Temurin-specific key is not a reliable discovery route |
+
+Running the server on the Java 8 runtime fails immediately and unambiguously:
+
+```
+Exception in thread "main" java.lang.UnsupportedClassVersionError:
+  net/minecraft/bundler/Main has been compiled by a more recent version of the
+  Java Runtime (class file version 69.0), this version of the Java Runtime
+  only recognizes class file versions up to 52.0
+```
+
+Class file version **69.0 is Java 25**; **52.0 is Java 8**. The failure happens on the *first class load*, before any server logic runs.
+
+**Three design consequences. [V] for the measurements, [A] for the conclusions.**
+
+1. **A Java 8 runtime on the host is a realistic, silent hazard, not a hypothetical.** Naive discovery — "read the registry", "run `java -version`", "just use whatever is on `PATH`" — can all land on Java 8 here and produce a crash the host cannot interpret. Discovery must **validate by running `-version` and parsing the major number**, never by trusting a path, a registry key, or a `PATH` entry. The `javapath` shim is why `PATH` is a poor source of truth: it resolves successfully while pointing somewhere else entirely.
+2. **The required version is data, not a constant.** It comes from `javaVersion.majorVersion` in the version JSON (RQ-13.2b), so it is **read per game version and never hard-coded**. A host on Java 21 who downloads a server needing 25 must be told 25, not "a newer Java".
+3. **The refusal can be specific, because the failure is specific.** Because the mismatch surfaces on the first class load, the app can detect it *before* launching and refuse with a message naming the required major version and what it actually found — rather than surfacing a Java stack trace. That is the difference between a support ticket and a self-service fix.
+
+**The resulting runtime-selection contract, recorded as `SRV-018`.** Order of preference: **a JRE the app itself fetched and verified** (RQ-13.2d) → a **validated** host JRE at or above the required major version → otherwise **refuse, naming both versions**. Registry reads are read-only `HKLM` queries and need no elevation, which is what makes the middle step possible at all under `SRV-010`. **[A] on the ordering; it is a policy choice, and the owner may reasonably prefer refusing outright over using a host runtime the app did not verify.**
+
+**What remains genuinely open.** Whether a typical host can reach the runtime vendor's API and its CDN is still `[X]`, and is `E-14`'s question applied to a second vendor. And whether reusing an **unverified** host JRE is acceptable at all is a supply-chain judgement: RQ-13.2d verified the *fetched* runtime's SHA-256, but a host-installed JRE carries no such guarantee, so preferring it trades a verified artifact for a convenient one. **That trade is the owner's to make.**
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.
