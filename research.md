@@ -489,7 +489,7 @@ So the requirement in `SRV-007` — hold a writable stdin pipe for the process l
 
 - **[X] Redistributability is not verified.** The Adoptium assets endpoint returned `licenses: null`, so **no licence claim is made here.** Bundling a runtime would require reading the project's licence first and adding a `docs/dependency-register.md` entry per `AGENTS.md` §5. **Fetching at provision time from the vendor's own API redistributes nothing**, which sidesteps the question for the first cut — and is why that option is preferable rather than merely simpler.
 - **Still `[X]`:** whether a *typical* host can reach `api.adoptium.net`, and whether the GitHub release CDN its asset link points to is reachable on the networks we care about. That is `E-14`'s restrictive-network question applied to a second vendor, and it is a real risk.
-- **The recommendation — a decision, and therefore the owner's:** fetch the runtime at provision time from Adoptium's documented API, verify the published SHA-256 before use, extract per-user, and **do not bundle it**. Fall back to a clear, specific refusal when the host has no suitable JRE *and* the fetch fails. This keeps the first cut free of redistribution questions and keeps our own installer small. **[A] reasoning; every measurement above is `[V]`.**
+- **The recommendation — DECIDED 2026-10-17 by the product owner as "verified-then-host":** fetch the runtime at provision time from Adoptium's documented API, verify the published SHA-256 before use, extract per-user, and **do not bundle it**. Fall back to a validated host JRE, then to a clear, specific refusal. Fetching rather than bundling keeps the first cut free of redistribution questions and keeps our own installer small. The two-step ordering was chosen over refuse-only; the trade is recorded honestly in RQ-13.2e.
 
 #### RQ-13.2e What "a suitable host JRE" actually means on Windows, and the trap that decides it (2026-10-17)
 
@@ -523,9 +523,18 @@ Class file version **69.0 is Java 25**; **52.0 is Java 8**. The failure happens 
 2. **The required version is data, not a constant.** It comes from `javaVersion.majorVersion` in the version JSON (RQ-13.2b), so it is **read per game version and never hard-coded**. A host on Java 21 who downloads a server needing 25 must be told 25, not "a newer Java".
 3. **The refusal can be specific, because the failure is specific.** Because the mismatch surfaces on the first class load, the app can detect it *before* launching and refuse with a message naming the required major version and what it actually found — rather than surfacing a Java stack trace. That is the difference between a support ticket and a self-service fix.
 
-**The resulting runtime-selection contract, recorded as `SRV-018`.** Order of preference: **a JRE the app itself fetched and verified** (RQ-13.2d) → a **validated** host JRE at or above the required major version → otherwise **refuse, naming both versions**. Registry reads are read-only `HKLM` queries and need no elevation, which is what makes the middle step possible at all under `SRV-010`. **[A] on the ordering; it is a policy choice, and the owner may reasonably prefer refusing outright over using a host runtime the app did not verify.**
+**The resulting runtime-selection contract, recorded as `SRV-018`.** Order of preference: **a JRE the app itself fetched and verified** (RQ-13.2d) → a **validated** host JRE at or above the required major version → otherwise **refuse, naming both versions**. Registry reads are read-only `HKLM` queries and need no elevation, which is what makes the middle step possible at all under `SRV-010`.
 
-**What remains genuinely open.** Whether a typical host can reach the runtime vendor's API and its CDN is still `[X]`, and is `E-14`'s question applied to a second vendor. And whether reusing an **unverified** host JRE is acceptable at all is a supply-chain judgement: RQ-13.2d verified the *fetched* runtime's SHA-256, but a host-installed JRE carries no such guarantee, so preferring it trades a verified artifact for a convenient one. **That trade is the owner's to make.**
+**The ordering was decided by the product owner on 2026-10-17: verified-then-host.** It is therefore policy, not `[A]` reasoning. The owner was told plainly that it trades a verified artifact for a convenient one — RQ-13.2d checksum-verified the runtime we fetched, and a host-installed JRE carries no such guarantee — and chose the two-step order, declining the stricter refuse-only alternative.
+
+**What that acceptance means, stated honestly rather than buried.**
+
+1. **The second step is a compatibility check, not an integrity check.** Running `-version` and parsing the major number proves the runtime is *new enough*. It proves nothing about whether the binary is intact or untampered. The first step of `SRV-018` is the only one with an integrity guarantee.
+2. **So the residual risk is a compromised host JRE**, which the app would use in preference to failing. On the threat model this project has adopted — supply-chain risk on the host's machine, `SRV-002` — that is a real, accepted exposure, and it is the reason the first step exists at all: on a host with no suitable Java we fetch and verify rather than trust.
+3. **This is an accepted risk, on the same footing as ADR-019's separation-of-duties gap.** Both are recorded as accepted rather than mitigated, because the alternative was available and was declined.
+4. **It is revisitable cheaply**, because nothing about it is structural: the order is a preference list, not a dependency. If a future version decides the exposure is not worth it, the change is to delete step two — no schema, contract, or architecture change follows.
+
+**What remains genuinely open.** Whether a typical host can reach the runtime vendor's API and its CDN is still `[X]`, and is `E-14`'s question applied to a second vendor.
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.
@@ -625,7 +634,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-015 | Prefer MSMP over RCON for Java server management; never enable RCON; let the server generate its own MSMP secret; pass the TLS keystore password by environment variable | Proposed, **now exercised 2026-10-17** | 2026-10-17 | **Raised to high** — the behaviour was observed on a running server, not just read. See §5 RQ-13.2c |
 | ADR-016 | Cited files must exist; expected absences must be declared explicitly | **Accepted 2026-10-17** | 2026-10-17 | High (a demonstrated defect, not a judgement) |
 | ADR-017 | `sqlx migrate` owns `migrations/`; no separate migration library | **Accepted 2026-10-17** | 2026-10-17 | Medium-high; tool not yet executed, T-033 must verify |
-| ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Proposed 2026-10-17** — needs owner confirmation | 2026-10-17 | High for the S256 half (RFC 9700 is normative); low for the deferral half |
+| ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Accepted 2026-10-17** by the product owner | 2026-10-17 | High for the S256 half (RFC 9700 is normative and read directly); the deferral half is a recorded sequencing judgement |
 | ADR-019 | The project owner is the sole administrator; admin is a **separate identity** (not a role on `users`); WebAuthn required, no TOTP fallback; short sessions plus step-up before destructive actions; recovery codes. **Separation of duties is absent and recorded as an accepted risk** | **Decided 2026-10-17** by the product owner | 2026-10-17 | [V] that this is the decision; [A] on all design reasoning, none of it tested |
 
 **ADR-016 was missing from this table on 2026-10-17** even though its full record existed 30 lines below it, and ADR-017 was present. Found while adding ADR-018. That is the same defect class ADR-016 was written about: a claim that exists in the document but is not represented where a reader would look. The summary table is now checked by `scripts/audit_traceability.py`, which was extended to require that every `### ADR-nnn` heading in §7 has a matching row above it — the same check that would have caught this.
@@ -745,7 +754,7 @@ Added 2026-10-17. `SEC-018` (P0) requires that admin operations "require separat
 
 ### ADR-018 — Fix PKCE to `S256`; defer sender-constraining access tokens
 
-**Status: Proposed, 2026-10-17.** Needs owner confirmation. This is deliberately a *small* ADR: it records one change that is forced by a normative source, and one deferral, without pre-empting SEC-018.
+**Status: Accepted, 2026-10-17.** Confirmed by the product owner. This is deliberately a *small* ADR: it records one change that is forced by a normative source, and one deferral, without pre-empting SEC-018.
 
 **Context.** Reading RFC 9700 (BCP 240) directly on 2026-10-17 (RQ-15) surfaced two things our documents get wrong or leave silent.
 
@@ -762,10 +771,10 @@ Added 2026-10-17. `SEC-018` (P0) requires that admin operations "require separat
 
 **Consequences.**
 
-1. `contracts.md` §5.1, `api.md`, and `SEC-001`'s acceptance criteria must name `S256` and add a negative test: a `plain` challenge is rejected. Mapped to T-043/T-046.
+1. `contracts.md` §5.1, `api.md`, and `SEC-001`'s acceptance criteria must name `S256` and add a negative test: a `plain` challenge is rejected. Mapped to T-043/T-046. **Done 2026-10-17** — all four places updated.
 2. **The open question is now written down** in `research.md` RQ-15 and in the §7 table, so it cannot be lost between sessions.
-3. **This does not unblock SEC-018.** The admin authentication model still needs the two owner answers named in RQ-15: who the administrators are, and which identity provider. `contracts.md` §9 stays OPEN.
-4. **If the owner rejects the deferral**, DPoP (RFC 9449) is the cheaper of the two mechanisms for a desktop client, because it needs no operator certificate issuance. That is a later decision, not this one.
+3. **This does not unblock SEC-018.** The admin authentication model still needs the two owner answers named in RQ-15: who the administrators are, and which identity provider. `contracts.md` §9 stays OPEN. **Update 2026-10-17: the "who" answer has since been given** — the project owner is the sole administrator (ADR-019) — **so only the identity-provider question remains, and ADR-019's separate identity store means it no longer blocks admin design.**
+4. **If the deferral is ever revisited**, DPoP (RFC 9449) is the cheaper of the two mechanisms for a desktop client, because it needs no operator certificate issuance. That is a later decision, not this one.
 
 **Confidence.** High for item 1 — RFC 9700 is normative and was read directly. Low for item 2 — it is a judgement about sequencing, not a technical finding.
 

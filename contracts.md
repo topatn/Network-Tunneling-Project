@@ -94,8 +94,8 @@ Exchange an identity-provider authorization code (PKCE) for session tokens. **Pr
 - Auth: none. Request: `{code, code_verifier, redirect_uri, device_label?}`. Success `200`: `{access_token, refresh_token, expires_in}`.
 - Errors: `validation_failed`, `unauthenticated` (code rejected), `forbidden` (suspended).
 - Checks: redirect URI must be in the registered allow-list (loopback form per RFC 8252); verifier must match.
-- **PKCE challenge method is `S256` only.** A `plain` challenge is rejected with `validation_failed`; there is no fallback and no configuration to enable one. Added 2026-10-17 per ADR-018: RFC 9700 §2.1.1 states *"Currently, S256 is the only such method"*, and a contract that does not name the method cannot reject `plain`. Negative test required (T-040).
-- **Not decided:** whether access tokens are sender-constrained (RFC 8705 mTLS or RFC 9449 DPoP). Deferred deliberately per ADR-018, not omitted by oversight.
+- **PKCE challenge method is `S256` only.** A `plain` challenge is rejected with `validation_failed`; there is no fallback and no configuration to enable one. **Decided 2026-10-17 (ADR-018, accepted):** RFC 9700 §2.1.1 states *"Currently, S256 is the only such method"*, and a contract that does not name the method cannot reject `plain`. Negative test required (T-040).
+- **Access tokens are not sender-constrained at launch.** Deferred deliberately per ADR-018, which the product owner accepted on 2026-10-17 — recorded as a decision with a reason rather than an omission. Revisit when the identity provider (ADR-009) is chosen; DPoP (RFC 9449) is the likely cheaper mechanism.
 
 ### 5.2 `POST /v1/auth/refresh`
 - Auth: refresh token in body (no access token). Request: `{refresh_token}`. Success `200`: new access and refresh tokens (rotation). Errors: `unauthenticated`, `forbidden`. Reuse of an already-rotated token revokes the session family and returns `unauthenticated`.
