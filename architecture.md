@@ -295,6 +295,9 @@ Trust boundaries: host PC, local game server, control plane, relay, public inter
 | **Managed server becomes an attack surface on the host PC** | No elevation, no service, per-user directory only, world and config not shared, update verified and reversible | Security review; E-18, E-19 |
 | **Managed server crash loop consumes the host's resources** | Bounded restart with backoff; automatic restart stops after the limit and surfaces the log | Load/soak test; E-17 |
 | **Managed server port or world data leaks to the operator** | Local address and port stay in process (SRV-005); server files are never uploaded; diagnostics pass through redaction | Request-capture test; leak test |
+| **Game server opens its own path in, bypassing the tunnel** | Terraria's `serverconfig.txt` documents `upnp=1` and the server auto-forwards its port via uPNP on launch. Generated configuration sets `upnp=0`. **A host whose own manually-configured server has uPNP on has already exposed themselves**, so the app warns about it rather than assuming the tunnel is the only way in | Config-generation review; warning copy review |
+| **Managed server exposes an internal-to-external UDP port mapping** | Bedrock's `server-udp-ports` supports `[ip:]external:internal` mappings, which could publish a port the host never configured. Must not be enabled in generated configuration | Security test: assert generated config omits it |
+| **Managed server exposes a management surface** | Java `enable-jmx-monitoring` stays off (default); MSMP is off by default and localhost-bound when enabled; RCON never enabled (ADR-015) | Configuration review |
 
 **Encryption statement.** Client-to-relay traffic is encrypted by QUIC/TLS. Guest-to-relay traffic is whatever the game itself uses, usually unencrypted. The relay therefore can read game traffic in the default guest model. This is not end-to-end encryption.
 

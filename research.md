@@ -38,9 +38,9 @@ Nothing here is benchmark data. No performance, compatibility, or cost figure ha
 
 | Game | Port / protocol (defaults) | Label | Notes |
 |---|---|---|---|
-| Terraria | TCP 7777 | [R] | One wiki page also says to open TCP and UDP 7777 on cloud hosts; other guides say TCP only. UDP need is unresolved. [X] |
-| Minecraft Java | `server-port` TCP 25565; `query.port` UDP 25565 (only with `enable-query=true`); `rcon.port` TCP 25575 (only with `enable-rcon=true`) | [R] for the port numbers; **[V] for the property names** (`enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port` confirmed, read 2026-10-17) | Port numbers still rest on an Arch wiki mirror and hosting providers, not Mojang — T-002 still open. The property names are confirmed. Query and RCON are optional and RCON must not be exposed by default. **New since 1.21.9: the Minecraft Server Management Protocol (MSMP), a management API with mandatory client authentication and TLS on by default — an unexamined alternative to RCON** |
-| Minecraft Bedrock | UDP; `server-port` 19132 (IPv4), `server-portv6` 19133 (IPv6) | **[V] for the port defaults and the property set** (Microsoft's official BDS properties reference, read 2026-10-17); [R] for RakNet naming | **Corrected 2026-10-17.** `enable-lan-visibility` defaults to **true** and per Microsoft's own documentation "will cause the server to bind to the default ports (19132 and 19133) even when `server-port` and `server-portv6` have non-default values" — previously [R], now [V] as documented behavior (actual runtime binding still [X], E-16). A previously cited **`server-udp-ports` setting does not appear in the official property reference** and should be treated as unverified. BDS has **no RCON and no query**. **Console players on Xbox/PlayStation/Switch can only connect via custom DNS or LAN**, so they cannot use a relay address (AS-2 answered **no**) |
+| Terraria | TCP 7777 default | **[V]** for TCP 7777 (Terraria Wiki "Server", read 2026-10-17: "The server runs on TCP port 7777 by default"). **UDP remains genuinely unresolved and the source contradicts itself** — the same page says that on AWS/GCP "ensure port 7777 on **TCP and UDP** is open". Both claims are on one page. **[X] E-1 stands.** | See §2.1 for provisioning-relevant Terraria findings, including uPNP |
+| Minecraft Java | `server-port` **TCP 25565**; `query.port` **UDP 25565** (only with `enable-query=true`); `rcon.port` **TCP 25575** (only with `enable-rcon=true`) | **[V]** for all three ports and for both defaults (**Minecraft Wiki `server.properties`, default file for 26.3, read 2026-10-17**). Mojang publishes no equivalent server reference; the wiki is the best available source and `research.md` §9 already names it as an upgrade target | `enable-rcon=false` and `enable-query=false` by default — **confirms GAME-008**. Note `server-port` and `query.port` **share the number 25565 on different protocols** (TCP vs UDP), so they are not interchangeable. The wiki's own `enable-rcon` text warns RCON is unencrypted and "should only [be connected] from localhost" — independent support for ADR-015 |
+| Minecraft Bedrock | UDP; `server-port` 19132 (IPv4), `server-portv6` 19133 (IPv6) | **[V]** port defaults and property set — **two independent sources**: Microsoft's official BDS properties reference, and the full default `server.properties` shipped in BDS 1.26.52.3 (Minecraft Wiki, both read 2026-10-17). [R] for RakNet naming | **Correction to my own 2026-10-17 note:** I earlier wrote that a cited **`server-udp-ports` setting does not appear in the official reference** and called it unverified. **That was wrong.** `server-udp-ports` is real — it is present in the shipped default file (commented out, with documented value syntax and examples). The Microsoft Learn page simply omits it. The original `[R]` claim was sound; I should have checked the shipped file before "correcting" it |
 | Left 4 Dead 2 | 27015, UDP for game and queries, TCP for RCON | [V] for Source engine ports, [R] for L4D2 specifics | Valve Developer Community's Source Dedicated Server page lists 27015 TCP/UDP (game, pings, RCON), 27020 UDP (SourceTV), 27005 UDP (client port), 26900 UDP (Steam, outgoing). The wiki is generic to Source, not L4D2-specific. |
 | Left 4 Dead (1) | 27015, TCP and UDP per a community Docker image | [R] | Weakest evidence of the five. Needs a primary source or experiment. [X] |
 
@@ -64,6 +64,44 @@ Valve's RCON page states RCON listens on TCP 27015 by default and follows `-port
 | Left 4 Dead | Hypothesis: works via `connect` | Unknown [X] | UDP (TCP unclear) |
 
 **Required experiments:** E-1 Terraria TCP-only join; E-2 Bedrock join through a UDP relay and behavior with non-default ports; E-3 Source engine direct-connect through a relay; E-4 L4D2 lobby join through a relay; E-5 L4D (1) port and protocol capture.
+
+**Still `[R]` after T-002 progress, 2026-10-17:** Terraria's TCP-vs-UDP question (E-1 — its source contradicts itself on a single page); all Valve/Source port specifics for L4D and L4D2 (Valve's pages were not read in this session); and the Bedrock `allow-list` default conflict. **Minecraft Java and Bedrock port facts are now `[V]`.**
+
+### §2.1 Server defaults that change our security posture
+
+Added 2026-10-17 from the default `server.properties` files actually shipped with Minecraft Java Edition 26.3 and BDS 1.26.52.3, and the Terraria Wiki server page. These matter because a tunnel makes a server internet-reachable, which is exactly the situation several of these defaults are *not* safe for.
+
+**Minecraft Java Edition — defaults we must override in generated configuration**
+
+| Key | Default | Why it matters here |
+|---|---|---|
+| `enable-rcon` | `false` | Correct. Leave off. The wiki's own text warns RCON is unencrypted and should only be used from localhost — independent support for ADR-015. |
+| `enable-query` | `false` | Correct. Leave off (GAME-008). |
+| `enable-jmx-monitoring` | `false` | **Exposes a JMX MBean. Must stay off.** A remote management surface we do not need and do not control. |
+| `prevent-proxy-connections` | `false` | Kicks players when the connecting IP differs from the one that reached Mojang's auth server. **Off by default.** Worth considering ON for a proxied server, but it interacts with our relay and needs an experiment, not an assumption. |
+| `online-mode` | `true` | Keep true. |
+| `white-list` | **`true`** | Java edition defaults the whitelist **on**. Note this differs from a widely repeated assumption that it is off. |
+| `rate-limit` | `0` (disabled) | Packet rate limiting is off by default; relevant to NET-006 and abuse. |
+| `max-tick-time` | `60000` | Watchdog kills the server after a 60 s tick and **exits with code 1** — useful for supervision (a crash is distinguishable, T-025/E-17). |
+| `server-ip` | blank | Blank means listen on all interfaces. Correct for us. |
+| `enable-status` | `true` | Server appears "online" in the server list. |
+
+**Minecraft Bedrock — the transport default changes the port story**
+
+- **`transport=nethernet` is the shipped default**, not `raknet`. Both `server-udp-ports` and `server-ip` are documented as "ignored when `transport=raknet`", and `server-portv6` is "ignored when `transport=nethernet` and a dual-stack socket will be opened on `server-port` instead".
+- **Consequence:** the `enable-lan-visibility` behaviour that binds default ports 19132/19133 despite non-default `server-port` is documented as happening "**when `transport=raknet`**". Since the default is `nethernet`, **that port-shadowing may not affect us at all** — which would make GAME-003's non-default-port requirement much easier than assumed. **[X] Must be measured (E-16), not assumed.**
+- **Source conflict to resolve:** Microsoft's BDS properties reference states `allow-list` defaults to **`false`**; the `server.properties` shipped in the server states **`allow-list=true`**. Both read 2026-10-17, both community- or vendor-adjacent, and they disagree. **[X] E-16 must determine the effective default.**
+- `server-udp-ports` supports `[ip:]external[-external]:internal[-internal]` mappings — an internal-to-external UDP port mapping feature. **Security-relevant and outside our needs.** A generated configuration must not enable it, and this deserves an explicit threat-model row.
+
+**Terraria — the server will try to port-forward itself**
+
+- `serverconfig.txt` documents **`upnp=1`**, and the wiki states that on launch the server "will ask if you want to auto port forward". The server can also auto-forward the port via uPNP.
+- **This is the exact behaviour this product exists to avoid.** A host whose manually-configured Terraria server has uPNP enabled has already opened a hole in their router, independently of the tunnel. Provisioning must set `upnp=0`, and the product should *warn* a host whose own Terraria server has uPNP on, because their tunnel address may not be the only way in. **New threat-model row.**
+- Terraria's console supports `playing` (player list), `version`, `port`, `save`, `kick`, `ban`, `password`, `motd`, `exit`. So **`playing` is a second possible source of confirmed presence** — console-driven, so it would need process I/O rather than a network API. **[X] not evaluated.**
+- Official standalone download exists: `https://terraria.org/api/download/pc-dedicated-server/terraria-server-<version>.zip` (e.g. `...-1458.zip` for 1.4.5.8). On Windows the server normally ships **inside the Steam installation**, so a Windows host may already have it without any download.
+- Server needs **.NET Framework 4.0 and XNA Framework** on Windows — a runtime dependency comparable to the JRE question for Java.
+
+**Cross-game note.** Both Minecraft editions state that `server.properties` is **regenerated on startup**, with missing or invalid keys reset to defaults, and that **changes require a restart**. Terraria's config is read via `-config`. So no game in the first cut supports a live configuration apply; the engine must always plan stop → write → start.
 
 ## 3. TCP vs UDP forwarding and UDP-over-tunnel transport
 
@@ -364,7 +402,10 @@ Secondary (reported only):
 
 ### Sources for RQ-13 (accessed 2026-10-17)
 
-Read and used — see §5 RQ-13.1 for how each was used and for what it does **not** establish:
+Read and used — see §5 RQ-13.1 for how each was used and for what it does **not** establish. Added 2026-10-17 for T-002:
+
+- Minecraft Wiki, "server.properties" — https://minecraft.wiki/w/Server.properties (community; **the default files shipped with Java 26.3 and BDS 1.26.52.3**, both editions, in full — the basis for §2 and §2.1)
+- Terraria Wiki, "Server" — https://terraria.wiki.gg/wiki/Server (community; TCP 7777, `serverconfig.txt`, uPNP, console commands, standalone download URL)
 
 - Microsoft Learn, "Getting Started with Bedrock Dedicated Server" — https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/getting-started (vendor documentation; firewall prompt, loopback exemption, ports, folder layout, console commands)
 - Microsoft Learn, "Bedrock Dedicated Server Properties" — https://learn.microsoft.com/en-us/minecraft/creator/documents/bedrockserver/server-properties (vendor documentation; the authoritative BDS key set, incl. the absence of RCON/query)
