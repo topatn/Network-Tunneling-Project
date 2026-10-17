@@ -66,6 +66,21 @@ jobs:
       - name: Unit and integration tests
         run: cargo test --workspace --all-targets
 
+  docs-audit:
+    name: Documentation traceability audit
+    # TEST-008. Added 2026-10-17 with scripts/audit_traceability.py.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Proves the checker itself still detects defects before trusting a pass.
+      - name: Prove the audit detects planted defects
+        run: python scripts/audit_traceability.py --self-test
+      - name: Audit requirement/task/identifier consistency
+        run: python scripts/audit_traceability.py
+
   dependency-scan:
     name: Dependency scan (SEC-017)
     runs-on: ubuntu-latest

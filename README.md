@@ -73,6 +73,8 @@ Secrets must never be committed or logged (`AGENTS.md` §7).
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass, zero warnings |
 | `cargo test --workspace --all-targets` | Pass under `stable-x86_64-pc-windows-gnu` — **0 tests**, the crates are empty skeletons |
 | `cargo deny check advisories` | **Not run.** `cargo-deny` cannot be built in this environment; see `docs/dependency-register.md` |
+| `python scripts/audit_traceability.py` | Pass — 110 requirements, 110 traceability rows, 86 tasks, 0 errors, 7 warnings |
+| `python scripts/audit_traceability.py --self-test` | Pass — all 5 planted defects detected |
 
 Known environment gaps: there is **no Windows SDK**, so the MSVC toolchain can
 compile but not link; and the GNU toolchain has **no `dlltool.exe`**. Anything
