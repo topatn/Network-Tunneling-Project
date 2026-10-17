@@ -93,7 +93,28 @@ ways. All three are fixed:
 The toolchain gap remains for *compiling* Rust tooling, but it is no longer what
 stands between this repository and a proven dependency gate.
 
-### Trialed and rejected: adding `sqlx` as a real dependency (2026-10-17)
+### The Windows SDK could not be installed, and `dlltool` turned out not to be the fix (2026-10-17)
+
+I recommended the Windows SDK as "the single highest-value environment fix". **Attempted, and it is blocked.**
+
+| Attempt | Outcome |
+|---|---|
+| `winget search "Windows SDK"` | Only **10.0.17134** (2019) and **10.0.18362** (2019) offered. No current SDK in the winget source |
+| `winget install` either | **Not attempted.** Both candidates are six years old, and installing a 2019 SDK alongside MSVC 14.51 is a likely-to-break pairing |
+| Adding an SDK component to the existing **Visual Studio Community 2026** (18.10.12210.168) | **Requires elevation.** This session is **not** elevated (`IsInRole(Administrator)` = false). `AGENTS.md` §9.5 forbids escalating without an explicit instruction |
+| VS already has a Windows SDK? | No. `vswhere` reports no `Microsoft.VisualStudio.Component.Windows11SDK.*`, and only `Windows Kits\NETFXSDK` exists — **no `Lib` directory at all**, which is why `kernel32.lib` is missing |
+
+**A more promising lead, which did not pan out.** `dlltool.exe` is *not* actually missing — rustup ships a self-contained MinGW bin at `~/.rustup/toolchains/stable-x86_64-pc-windows-gnu/lib/rustlib/x86_64-pc-windows-gnu/bin/self-contained/`, containing `dlltool.exe` (GNU Binutils 2.44), `ld.exe`, and `gcc.exe`. Adding it to `PATH` moved the failure along:
+
+```
+dlltool could not create import library with ...\self-contained\dlltool.exe ... : CreateProcess
+```
+
+`dlltool` runs fine when invoked directly, but fails to spawn the assembler it shells out to, because the self-contained bundle ships no `as.exe`. **So the GNU toolchain's missing piece is the assembler, not `dlltool`**, and the self-contained bundle cannot substitute for a full MinGW-w64 installation.
+
+**Conclusion, recorded so it is not retried blindly.** To compile Rust tooling from source, this machine needs **one** of: the Windows SDK (admin, ~1–2 GB, for MSVC), a full MinGW-w64 installation (admin, ~100 MB, for GNU), or a Linux/CI runner for builds. All three need elevation, which this session does not have. **This is an owner action, not an agent action**, and it is now the one blocker standing between "all gates verified locally" and "tooling can be compiled at all".
+
+What this does *not* block: `cargo check`, `cargo clippy`, `cargo fmt`, `cargo test` (GNU, linking via `ld.exe`), `cargo deny` (prebuilt binary), and PostgreSQL verification via `--single`. **Every gate currently passes.**
 
 For T-003's migration-tool research, `sqlx 0.9.0` was added to `gtt-control-plane` temporarily to measure what it costs and whether it builds here. **Removed in the same change; the workspace is back to zero dependencies and `git status` is clean.**
 
@@ -149,10 +170,13 @@ them, and are worth remembering:
   `sqlx`), and **ADR-017 the same day** (`sqlx migrate` as the migration tool, adding no
   further dependency). `axum`, `tokio`, and `sqlx` still need real `Cargo.toml` entries
   in T-030.
-- **No Rust tooling can be compiled from source in this environment.** `cargo install`
-  fails on the GNU toolchain for want of `dlltool.exe`, and the MSVC toolchain has no
-  Windows SDK. This blocked `cargo-deny` (worked around with the official prebuilt
-  binary) and now blocks `sqlx-cli` as well, which publishes no prebuilt Windows binary.
-  **A Windows SDK would unblock both** and is the single highest-value environment fix.
+- **No Rust tooling can be compiled from source in this environment.** The MSVC
+  toolchain has no Windows SDK, and the GNU toolchain's self-contained MinGW bundle
+  ships no assembler (`as.exe`), so `dlltool` cannot spawn one. This blocked
+  `cargo-deny` (worked around with the official prebuilt binary) and blocks
+  `sqlx-cli`, which publishes no prebuilt Windows binary. **Fixing this needs
+  elevation** — the Windows SDK (~1–2 GB), MinGW-w64 (~100 MB), or building on a
+  Linux/CI runner. This session is not elevated, so it is an owner action. See the
+  attempt log in the "Windows SDK could not be installed" section.
 - PostgreSQL 16.10 and 17.6 **were** run successfully from EDB standalone binaries in a
   temporary directory, so the schema itself is verified. No system install was made.
