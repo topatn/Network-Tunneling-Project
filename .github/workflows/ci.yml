@@ -81,6 +81,20 @@ jobs:
       - name: Audit requirement/task/identifier consistency
         run: python scripts/audit_traceability.py
 
+  contrast:
+    name: Design token contrast (UX-005)
+    # Added 2026-10-17 with scripts/check_contrast.py. Recomputes the DESIGN.md
+    # section 3 table from the tokens in section 2, so an edited token or an
+    # overstated ratio fails the build instead of rotting in the document.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Verify colour tokens and contrast claims
+        run: python scripts/check_contrast.py
+
   dependency-scan:
     name: Dependency scan (SEC-017)
     runs-on: ubuntu-latest

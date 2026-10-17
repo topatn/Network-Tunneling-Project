@@ -39,7 +39,11 @@ Values are provisional. Both themes are defined; the app follows the operating-s
 
 ## 3. Contrast verification (computed)
 
-Method: WCAG 2.x relative-luminance contrast formula, implemented in a script and checked against reference pairs (black/white = 21.00; #767676 on white = 4.54; #777777 on white = 4.48). Thresholds: 4.5:1 for normal text, 3:1 for non-text UI boundaries and focus indicators. The WCAG version to cite in release documents should be confirmed when T-080 runs; this check must be repeated by CI on the real token file (UX-005).
+Method: WCAG 2.x relative-luminance contrast formula. Thresholds: 4.5:1 for normal text, 3:1 for non-text UI boundaries and focus indicators.
+
+**Verified 2026-10-17** by `scripts/check_contrast.py`, which recomputes every ratio below from the token table in §2 rather than trusting the numbers here. That script first validates its own implementation against the reference pairs this section previously cited (black/white = 21.00; #767676 on white = 4.54; #777777 on white = 4.48), then recomputes all 22 pairs. **All 22 matched.** It also rejects the table if a ratio is overstated or a threshold is wrong — confirmed by planting both defects and watching each one fail. It runs in CI and covers every pair in the table below, so a pair added here without being checked is an error rather than a silent gap.
+
+**Not verified, and unchanged:** hover, disabled, and high-contrast-mode states are not in the table and are not checked; the WCAG version to cite in release documents should be confirmed when T-080 runs.
 
 | Theme | Pair | Ratio | Needed | Result |
 |---|---|---|---|---|

@@ -20,6 +20,7 @@
   - 11 JSON Schemas validated; example payloads (valid and deliberately invalid) checked against them. String-format enforcement (`uuid`, `date-time`) was not independently confirmed.
   - 11 Mermaid diagrams parsed with Mermaid 10.9.8 (syntax only; visual rendering **not** checked). The parser was confirmed to reject invalid input.
   - Contrast ratios for both palettes computed with the WCAG formula, which was checked against reference values. Untested: hover/disabled states and high-contrast mode.
+  - **Superseded 2026-10-17:** now recomputed from the token table by `scripts/check_contrast.py`, which self-validates against the three WCAG reference pairs and then re-derives all 22 pairs. All 22 matched, and the checker was confirmed to fail on a planted overstated ratio and a planted wrong threshold. Added as a CI job. Hover, disabled, and high-contrast states remain unchecked.
   - Reference audit: every requirement, task, experiment, ADR, invariant, section, and file reference in the documents resolves. The audit script was confirmed to detect planted bad references.
   - Traceability: all 99 requirements map to at least one of 78 tasks; every task cites existing requirements and prerequisites that precede it.
   - Semantic cross-checks: error codes (contracts vs schema), tunnel states (SQL vs schema), relay statuses, invitation bounds, engine states vs the design status table. One drift was found and fixed (UDP datagram header description in `architecture.md`).

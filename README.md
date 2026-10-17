@@ -75,6 +75,7 @@ Secrets must never be committed or logged (`AGENTS.md` §7).
 | `cargo deny check advisories bans licenses` | Pass, exit 0 — via the official prebuilt `cargo-deny` 0.20.2 binary, SHA-256 verified |
 | `python scripts/audit_traceability.py` | Pass — 110 requirements, 110 traceability rows, 86 tasks, longest chain 23, 0 errors, 10 warnings |
 | `python scripts/audit_traceability.py --self-test` | Pass — all 6 planted defects detected |
+| `python scripts/check_contrast.py` | Pass — all 22 DESIGN.md contrast pairs recomputed and matched; formula self-validated against 3 WCAG reference pairs |
 
 **Every gate has been seen to fail, not just pass.** `cargo clippy` denies `unwrap()`
 (exit 101); `cargo deny` reports `RUSTSEC-2020-0071` on a seeded vulnerable crate
@@ -99,6 +100,7 @@ What *has* been checked in the documentation set:
 
 - All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
 - The traceability audit passes and catches 6 of 6 planted defects.
+- **Colour contrast is recomputed, not asserted.** `scripts/check_contrast.py` re-derives all 22 ratios in `DESIGN.md` §3 from the token table in §2, after validating its own implementation against three WCAG reference pairs. All 22 matched, and it was confirmed to fail on a planted overstated ratio and a planted wrong threshold. Hover, disabled, and high-contrast states are still unchecked.
 - **The database schema has been executed**, not merely parser-checked: applied cleanly to an empty database on **PostgreSQL 16.10 and 17.6**, producing 12 tables, 35 indexes, 57 constraints and 13 foreign keys with zero errors. PRIV-006 (no email column) and INV-1 (no local destination column) were checked against the live schema, and four negative tests confirmed the CHECK constraints reject bad input. Method, version matrix, and one environment limitation are recorded in `schema.md`.
 
 **Withdrawn:** the earlier claim that "11 JSON Schemas are valid and example payloads were checked against them". `contracts/` does not exist in this repository, so no schema validation has been performed here. See `contracts.md`.
