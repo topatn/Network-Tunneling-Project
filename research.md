@@ -453,7 +453,43 @@ Run on this machine after the owner authorised it. All `[V]` — measured, and t
 
 **One new behavioural fact worth having.** After 60 s with no players the server logged **"Server empty for 60 seconds, pausing"** and paused. This is good for idle CPU, and it is a trap for our UI: **a tunnel can be active while the server is paused.** The players-seen indicator must not treat a live tunnel as evidence of activity (`FR-012`, `PERF-001`).
 
-**What this does not settle.** Nothing here was run on a **clean standard-user VM**, so `SRV-001`'s central promise — *no manual steps, no admin prompt, on a machine that has nothing installed* — is **still unverified**. This machine already had Java 25, which is precisely the condition the real product must not assume. `E-19`'s footprint half is answered for a developer machine only.
+**What this does not settle.** Nothing here was run on a **clean standard-user VM**, so `SRV-001`'s central promise — *no manual steps, no admin prompt, on a machine that has nothing installed* — is **still unverified**. This machine already had Java 25, which is precisely the condition the real product must not assume. `E-19`'s footprint half is answered for a developer machine only. **The Java runtime part of that gap is closed in RQ-13.2c's successor, §5 RQ-13.2d, by running the server on a private per-user JRE instead of the machine's own.**
+
+#### RQ-13.2d The JRE question is answered: a per-user runtime needs no elevation, and the `SRV-007` stdin requirement is now proven (2026-10-17)
+
+RQ-13.2c left one question that mattered more than the rest: a typical host has no Java 25, `SRV-010` forbids a system-wide install, and the product cannot assume anything is present. **That is now answered by measurement**, and the answer removes the blocker rather than relocating it.
+
+**Step 1 — is there a Mojang-published runtime? Not established. [X]** The version JSON names a runtime component (`java-runtime-epsilon`), and Mojang documents runtime manifests under `launchermeta.mojang.com/v1/products/java-runtime/<component>/<os>-<arch>/<major>.json`. **36 probes** across four component names, three Windows architectures and three major versions **all returned HTTP 404.** I stopped there rather than trying more URL shapes, because guessing further is exactly the invention `AGENTS.md` forbids. **[X] unestablished** — not "does not exist", but "not found". This matters: Mojang's own runtime would have been the most defensible option, same vendor as the artifact and version-matched, and it could not be shown to be available.
+
+**Step 2 — a third-party runtime exists with a verifiable checksum. [V]** Adoptium's documented API v3 returned exactly one asset for Java 25 / Windows x64 / JRE: **`OpenJDK25U-jre_x64_windows_hotspot_25.0.4.1_1.zip`, 58,475,080 bytes, SHA-256 published**. Downloaded and verified: byte count matched and the computed SHA-256 was an **exact match**.
+
+**Step 3 — it needs no elevation, because it is a ZIP. [V]** A ZIP has no installer: no UAC prompt, no service, no registry write, no `PATH` change. Extracted to a temporary directory — 382 entries, `java.exe` at `…/bin/java.exe`, and confirmed **not present on `PATH`**, so a genuinely private copy rather than the machine's existing Java.
+
+**Step 4 — the private copy runs standalone. [V]** Launched with a deliberately stripped environment, `PATH` set to `C:\Windows\System32` only and **`JAVA_HOME` unset** so no system Java was reachable, it reported `openjdk version "25.0.4.1" 2026-08-18 LTS`, exit 0.
+
+**Step 5 — and it runs the real server. [V]** Under that same stripped environment `server.jar` reached **"Done (1.651s)!"** and `127.0.0.1:25565` was reachable. **The "host has no Java" scenario is solved.** Not elevated throughout; 0 services matching `jdk|java|temurin|minecraft`.
+
+**Step 6 — the `SRV-007` stdin requirement is now proven rather than inferred. [V]** RQ-13.2c inferred from a forced kill that a writable stdin pipe was required. That inference is now an A/B, run in a single process:
+
+| Action | Result |
+|---|---|
+| Write `stop\n` to the server's stdin | **"Stopping the server" → "Saving players" → "Saving worlds" → "Saving chunks"** for all three dimensions, **exit 0 in 0.5 s** |
+| Force-kill the process (earlier run) | **No shutdown or save message at all** |
+
+So the requirement in `SRV-007` — hold a writable stdin pipe for the process lifetime — is the only difference between a saved world and a lost one on Windows. Not a stylistic preference.
+
+**A methodological note, because my first attempt at that test was invalid.** The first graceful-stop test lost the stdin handle when the *parent* process exited, so `stop` could never be sent and the test proved nothing. The handle must be held for the child's whole lifetime — which is exactly the property `SRV-007` requires of the engine, discovered by being unable to test it. **A test that cannot fail is not a test; this one initially could not.**
+
+**Two further findings.**
+
+1. **`--initSettings` is not optional if we want a clean log.** Starting with no `server.properties` logs `[ServerMain/ERROR]: Failed to load properties from file: server.properties` with a `NoSuchFileException` stack trace, then falls back to defaults and starts normally. Functionally fine, but a host reading their log sees a red ERROR on a successful start. Provisioning must run `--initSettings` first, which is what RQ-13.2c showed it does.
+2. **Footprint is ~307 MB per provisioned Minecraft Java server, not the ~126 MB measured earlier.** Measured: private JRE **179.1 MB / 320 files** (from a 58.5 MB ZIP) plus server **127.9 MB / 76 files** = **307 MB, 400 files**. That is the real number for `SRV-001`'s disk budget and for the installer-size decision.
+
+**What remains open, and the recommendation it supports.**
+
+- **[X] Redistributability is not verified.** The Adoptium assets endpoint returned `licenses: null`, so **no licence claim is made here.** Bundling a runtime would require reading the project's licence first and adding a `docs/dependency-register.md` entry per `AGENTS.md` §5. **Fetching at provision time from the vendor's own API redistributes nothing**, which sidesteps the question for the first cut — and is why that option is preferable rather than merely simpler.
+- **Still `[X]`:** whether a *typical* host can reach `api.adoptium.net`, and whether the GitHub release CDN its asset link points to is reachable on the networks we care about. That is `E-14`'s restrictive-network question applied to a second vendor, and it is a real risk.
+- **The recommendation — a decision, and therefore the owner's:** fetch the runtime at provision time from Adoptium's documented API, verify the published SHA-256 before use, extract per-user, and **do not bundle it**. Fall back to a clear, specific refusal when the host has no suitable JRE *and* the fetch fails. This keeps the first cut free of redistribution questions and keeps our own installer small. **[A] reasoning; every measurement above is `[V]`.**
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.
@@ -753,11 +789,11 @@ Everything in the right-hand column is why this is recorded as an **accepted ris
 | E-12 | Sign-in spike: system browser + loopback/device flow + credential store | ADR-009 |
 | E-13 | Source-IP admission of guests at the relay: behavior with CGNAT, mobile, shared NAT | Guest access design (ADR-007) |
 | E-14 | Fallback carrier for tunnel when UDP to relay is blocked | Restrictive-network support |
-| E-15 | Minecraft Java server artifact: official channel, terms, unattended download, integrity check, standard-user install, required runtime. **Channel, terms, unattended download, integrity check and required runtime all answered 2026-10-17 (§5 RQ-13.2b, `[V]`). Remaining: start-up needs a legal EULA acceptance, JRE supply for hosts without Java 25, and the standard-user footprint** | ADR-013, SRV-001, SRV-002 |
+| E-15 | Minecraft Java server artifact: official channel, terms, unattended download, integrity check, standard-user install, required runtime. **All answered `[V]` 2026-10-17** (§5 RQ-13.2b, §5 RQ-13.2c, §5 RQ-13.2d): channel, terms, end-to-end SHA-1 integrity, unattended download, start-up, local probe, generated defaults, graceful stop, and **a per-user Java 25 runtime that needs no elevation and runs the server with no system Java reachable**. **Remaining `[X]`:** whether a typical host can reach the runtime vendor's API and its CDN, and the clean standard-user VM run | ADR-013, SRV-001, SRV-002 |
 | E-16 | Minecraft Bedrock server artifact: same questions, plus the license-acceptance step and the settings that must be generated | ADR-013, SRV-001, SRV-002 |
 | E-17 | Supervising a headless server process: start, graceful stop, bounded crash restart, log capture, exit-code handling | ADR-012, SRV-007 |
 | E-18 | Update, rollback, world backup/restore, and per-server disk/CPU/memory footprint | SRV-008, SRV-009 |
-| E-19 | Licensing and end-user terms for the host operating these servers, plus a clean standard-user VM footprint check | SRV-010, AS-11 |
+| E-19 | Licensing and end-user terms for the host operating these servers, plus a clean standard-user VM footprint check. **Licensing: answered (§5 RQ-13.1b). Footprint: measured on a developer machine (§5 RQ-13.2c, §5 RQ-13.2d) — 307 MB and 400 files per provisioned Minecraft Java server. Still `[X]`: a genuinely clean standard-user VM** | SRV-010, AS-11 |
 
 ## 9. Sources (accessed 2026-10-16)
 
