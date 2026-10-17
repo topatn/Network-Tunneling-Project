@@ -10,7 +10,7 @@ Legend — Auth: **user** = access token; **none** = unauthenticated; **relay** 
 
 | # | Method | Path | Auth | Permission check | Idem | Request schema | Success | Contract |
 |---|---|---|---|---|---|---|---|---|
-| 1 | POST | `/v1/auth/exchange` | none | redirect URI allow-list, PKCE verifier | no | provisional (provider-dependent) | 200 | §5.1 |
+| 1 | POST | `/v1/auth/exchange` | none | redirect URI allow-list, PKCE verifier (`S256` only, ADR-018) | no | provisional (provider-dependent) | 200 | §5.1 |
 | 2 | POST | `/v1/auth/refresh` | refresh token | token valid, not reused | no | `{refresh_token}` | 200 | §5.2 |
 | 3 | POST | `/v1/auth/logout` | user | own session | no | none | 204 | §5.3 |
 | 4 | GET | `/v1/me` | user | self | no | none | 200 | §5.4 |

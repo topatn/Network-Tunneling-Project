@@ -44,6 +44,7 @@ TASK_PREREQ = re.compile(r"^- \[.\]\s+\*\*Prerequisites:\*\*\s*(.*)$", M)
 TASK_REQ_FIELD = re.compile(r"^- \*\*Requirements:\*\*\s*(.*)$", M)
 EXP_ROW = re.compile(r"^\|\s*(E-\d+)\s*\|", M)
 ADR_ROW = re.compile(r"^\|\s*(ADR-\d+)\s*\|", M)
+ADR_HEADING = re.compile(r"^###\s+(ADR-\d+)\b", M)
 COUNTS_LINE = re.compile(r"(\d+)\s+requirements,\s*(\d+)\s+tasks")
 PLAN_TOTALS = re.compile(r"Total:\s*(\d+)\s+tasks,\s*(\d+)\s+requirements")
 
@@ -70,6 +71,7 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
     tasks = {m.group(1) for m in TASK_HEADING.finditer(task_text)}
     experiments = {m.group(1) for m in EXP_ROW.finditer(research_text)}
     adrs = {m.group(1) for m in ADR_ROW.finditer(research_text)}
+    adr_sections = {m.group(1) for m in ADR_HEADING.finditer(research_text)}
     invariants = set(re.findall(r"(INV-\d+)", model_text))
 
     if not declared:
@@ -171,6 +173,25 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
             if ref not in known:
                 errors.append(f"{label} {ref} referenced but never defined")
 
+    # 6b. The ADR summary table and the ADR full records must agree.
+    #
+    #     Added 2026-10-17 after ADR-016 was found to have a complete record in
+    #     section 7 but no row in the summary table directly above it, while
+    #     ADR-017 had both. A reader scanning the table would conclude the
+    #     decision had not been made. Check 6 only proved that a *referenced*
+    #     ADR number resolves to *some* definition; it cannot see an ADR that is
+    #     defined but unrepresented.
+    for adr in sorted(adr_sections - adrs):
+        errors.append(
+            f"{adr} has a full record in research.md section 7 but no row in "
+            f"the ADR summary table"
+        )
+    for adr in sorted(adrs - adr_sections):
+        warnings.append(
+            f"{adr} is listed in the ADR summary table but has no full record "
+            f"in research.md section 7"
+        )
+
     # 7. Cited files and paths must actually exist.
     #
     #    Added 2026-10-17 after finding that contracts.md, api.md,
@@ -245,7 +266,8 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
         "traceability rows": len(appendix),
         "tasks": len(tasks),
         "experiments": len(experiments),
-        "ADRs": len(adrs),
+        "ADRs (table rows)": len(adrs),
+        "ADRs (full records)": len(adr_sections),
         "invariants": len(invariants),
         "longest chain (tasks)": len(chain),
     }
@@ -391,6 +413,20 @@ def self_test(root: Path) -> int:
             "requirements.md",
             lambda t: re.sub(r"Counts: \d+ requirements", "Counts: 999 requirements", t, count=1),
             "requirements, found",
+        ),
+        (
+            "ADR with a full record but no summary-table row",
+            "research.md",
+            lambda t: re.sub(
+                r"^\| ADR-016 \|[^\n]*\n", "", t, count=1, flags=M
+            ),
+            "no row in the ADR summary table",
+        ),
+        (
+            "summary-table row for an ADR with no full record",
+            "research.md",
+            lambda t: t + "\n| ADR-099 | Invented decision | Proposed | 2026-10-17 | Low |\n",
+            "no full record",
         ),
     ]
 

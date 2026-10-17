@@ -305,6 +305,7 @@ Counts: 86 tasks across 10 milestones.
 - **Requirements:** SEC-001, SEC-003, FR-001
 - **Verification:** Integration and security tests
 - **Done when:** Reused refresh token revokes the family; wrong PKCE verifier and unlisted redirect URI are rejected.
+- **Added 2026-10-17 (ADR-018):** the challenge method is fixed to **`S256`** and a `plain` challenge must be rejected with `validation_failed`. "Done when" gains: a `plain` challenge is rejected. RFC 9700 §2.1.1: *"Currently, S256 is the only such method."* [V]
 
 ### T-041 — Implement authorization policy and tenant isolation [CP]
 

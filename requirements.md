@@ -72,7 +72,7 @@ Counts: 110 requirements, 86 tasks.
 
 | ID | Requirement | Pri | Rationale | Acceptance criteria | Verification | Depends on | Target |
 |---|---|---|---|---|---|---|---|
-| **SEC-001** | Sign-in uses the system browser with authorization code and PKCE. | P0 | RFC 8252 native-app guidance. | No embedded web view is used for sign-in; redirect URI is checked against the allow-list; a wrong verifier is rejected. | Integration + security test | — | Alpha |
+| **SEC-001** | Sign-in uses the system browser with authorization code and PKCE, challenge method `S256`. | P0 | RFC 8252 native-app guidance; RFC 9700 §2.1.1 makes `S256` the only permitted method. | No embedded web view is used for sign-in; redirect URI is checked against the allow-list; a wrong verifier is rejected; a `plain` challenge is rejected. | Integration + security test | — | Alpha |
 | **SEC-002** | Tokens are stored only in the OS credential store; secrets never appear in files or logs. | P0 | Credential theft. | Scan of settings files, logs, and crash dumps in tests finds no token or secret strings. | Security test | — | Alpha |
 | **SEC-003** | Refresh tokens rotate; reuse of a rotated token revokes the session family. | P0 | Stolen-token detection. | Presenting a previously used refresh token returns `unauthenticated` and all tokens in that family stop working. | Integration test | — | Alpha |
 | **SEC-004** | Relay validates allocation tokens (signature, audience, expiry, replay). | P0 | Relay trust boundary. | Tokens with a bad signature, wrong audience, expiry in the past, or a reused `jti` are rejected with the matching `reject` code. | Unit + security test | — | Alpha |

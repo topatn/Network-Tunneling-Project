@@ -422,9 +422,13 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-013 | First provisioning cut is **Minecraft Java Edition only**. Bedrock deferred pending a published integrity mechanism; Terraria, L4D and L4D2 stay manual | **Decided 2026-10-17** | 2026-10-17 | Medium. Based on documented behaviour, not on a run |
 | ADR-014 | Treatment of a generated game-server credential that the server must read from its configuration file | Open, **narrowed twice** — now Java-only (Bedrock has no RCON), and RQ-13.4 offers a better answer | 2026-10-17 | n/a |
 | ADR-015 | Prefer MSMP over RCON for Java server management; never enable RCON; let the server generate its own MSMP secret; pass the TLS keystore password by environment variable | Proposed | 2026-10-17 | Medium (documented behaviour read; not exercised) |
+| ADR-016 | Cited files must exist; expected absences must be declared explicitly | **Accepted 2026-10-17** | 2026-10-17 | High (a demonstrated defect, not a judgement) |
 | ADR-017 | `sqlx migrate` owns `migrations/`; no separate migration library | **Accepted 2026-10-17** | 2026-10-17 | Medium-high; tool not yet executed, T-033 must verify |
+| ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Proposed 2026-10-17** — needs owner confirmation | 2026-10-17 | High for the S256 half (RFC 9700 is normative); low for the deferral half |
 
-Each ADR still needs full context, options, rationale, and consequences sections. Not yet written. **ADR-016 added 2026-10-17** (see below).
+**ADR-016 was missing from this table on 2026-10-17** even though its full record existed 30 lines below it, and ADR-017 was present. Found while adding ADR-018. That is the same defect class ADR-016 was written about: a claim that exists in the document but is not represented where a reader would look. The summary table is now checked by `scripts/audit_traceability.py`, which was extended to require that every `### ADR-nnn` heading in §7 has a matching row above it — the same check that would have caught this.
+
+Each ADR still needs full context, options, rationale, and consequences sections. Not yet written, except ADR-016 and ADR-017, which are complete.
 
 ### ADR-016 — Cited files must exist, and expected absences must be declared
 
@@ -468,7 +472,47 @@ Each ADR still needs full context, options, rationale, and consequences sections
 4. **If the team's TypeScript experience later turns out to dominate Rust experience, this should be revisited as a new ADR, not a silent migration.** The deciding factor would need re-evaluating against a concrete shared-schema-package design.
 5. **This says nothing about `quinn`** (ADR-001, RQ-6), the data plane's transport, which remains unproven until E-6.
 
-**Not settled here.** Identity provider (ADR-009) and the admin authentication model (SEC-018) are untouched; SEC-018 is still undesigned.
+**Not settled here.** Identity provider (ADR-009) and the admin authentication model (SEC-018) are untouched; SEC-018 is still undesigned. **Evidence for SEC-018 was gathered on 2026-10-17 — see RQ-15.**
+
+### RQ-15: What does "stronger authentication" mean for the admin API?
+
+Added 2026-10-17. `SEC-018` (P0) requires that admin operations "require separate, stronger authentication", and `contracts.md` §9 says this section "must be completed before the security review" — but no definition of "stronger" existed anywhere. That is not implementable as written. This section gathers primary-source evidence and lays out options; **it does not decide**, because the decision depends on the identity provider, which is still open (ADR-009).
+
+**Sources read 2026-10-17** (all `[V]`, read directly from the RFC text, not from summaries — a deliberate correction of the practice recorded in RQ-9, where RFCs were confirmed only via secondary sources):
+
+| Source | Title | Relevance |
+|---|---|---|
+| **RFC 9700** (BCP 240, Jan 2025) | Best Current Practice for OAuth 2.0 Security | The normative reference for what "secure OAuth" now means |
+| RFC 8705 | OAuth 2.0 Mutual-TLS Client Authentication and Certificate-Bound Access Tokens | Sender-constraining by client certificate |
+| RFC 9449 | OAuth 2.0 Demonstrating Proof of Possession (DPoP) | Sender-constraining by proof-of-possession |
+| RFC 8252 (re-read) | OAuth 2.0 for Native Apps | External-user-agent requirement |
+
+**What RFC 9700 actually requires** — quoted from the text, because this is the part that changes our contract:
+
+- **"Public clients MUST use PKCE"**, and PKCE for confidential clients is RECOMMENDED, specifically "to prevent authorization code injection attacks". Our `contracts.md` §5.1 already requires PKCE, so current design conforms. [V]
+- **"Currently, S256 is the only such method."** Any `plain` PKCE method in our contract would be non-conforming. `contracts.md` §5.1 says "verifier must match" but **never names the method** — an unspecified-method gap. [V]
+- **"Refresh tokens for public clients MUST be sender-constrained or use refresh token rotation"** (§2.2.2). We chose rotation with family revocation on reuse, which satisfies the second branch. Our §5.2 wording matches. [V]
+- **Sender-constrained tokens** are the RFC's answer to stolen/leaked access tokens, delivered via RFC 8705 (mTLS, "certificate-bound", 30 mentions) or RFC 9449 (DPoP, whose `jti` claim and proof validation are normative). [V]
+- Authorization code injection and mix-up attacks are treated as distinct threats (11 and 9 mentions respectively). RFC 9700 notes OpenID Connect clients **MAY** use `nonce` instead of PKCE — relevant only if an OIDC provider is chosen. [V]
+
+**Note a gap in our own documents:** RFC 9700 requires PKCE for **public clients**, and a desktop app using a system browser is a public client. Our `SEC-001` and §5.1 treat PKCE as the whole story. They do not mention sender-constraining access tokens at all, for any client type. **This is an unresolved design question, not a violation** — sender-constraining an access token is `SHOULD`-level guidance for authorization/resource servers — but it should be decided deliberately rather than inherited by omission.
+
+**Options for "separate, stronger" admin authentication.** None chosen.
+
+| Option | Shape | Cost / risk |
+|---|---|---|
+| **A. Separate IdP tenant, WebAuthn-only** | Admin identities live in a different identity provider tenant from end users, and **only** phishing-resistant second factors are accepted for the admin role | Strongest separation. Requires an IdP that supports WebAuthn and per-app configuration; if the chosen IdP is a single consumer-facing tenant this collapses into option B. **Note: RFC 9700 does not use the term "phishing-resistant" (0 mentions), so this option rests on WebAuthn/W3C guidance, not on RFC 9700.** |
+| **B. Separate role + mandatory second factor, same IdP** | Admin is a role on `users` (`data-model.md` §2 already raises this question) with a mandatory TOTP/WebAuthn second factor at authorization time | Cheapest. Weaker: a compromised host session can still attempt escalation, and "mandatory second factor" must be enforced by our own authorization server, which is trust we may not own if the IdP is external |
+| **C. mTLS client certificates (RFC 8705)** | Admin tooling presents a client certificate; tokens are certificate-bound | Standardised and strong; `contracts.md` §7 already leaves the relay credential as "mTLS vs signed token: **open**", so this reuses an unresolved decision. Operational cost of issuing and rotating operator certificates is real |
+
+**Questions this cannot answer without the product owner**, and which are recorded rather than guessed:
+
+1. **Who are the administrators?** The project has no named operator team, no operator headcount, and no stated relationship between the operator and the end users they would suspend.
+2. **Which identity provider?** ADR-009 is still open. Option A is impossible until this is answered.
+3. **Is an operator a human at all?** Automated administration (for example, an autoscaling controller draining relays) would change the design completely — a certificate or workload identity, not a second factor.
+4. **What does "separate" mean operationally** when a one-person project has one administrator who is also likely a developer with database access? Separation of duties is weakest here.
+
+**What is actually needed to unblock SEC-018**: questions 1 and 2 answered. Until then any design would be a guess, and `contracts.md` §9 must stay OPEN. **Confidence: the RFC evidence is [V]; the option assessment is [A] reasoning and explicitly incomplete.**
 
 ### ADR-017 — `sqlx migrate` owns the migrations directory
 
@@ -494,6 +538,32 @@ Each ADR still needs full context, options, rationale, and consequences sections
 2. **T-033 must verify rather than assume.** `sqlx-cli` could not be run here — `dlltool.exe` is missing from the GNU toolchain, the MSVC toolchain has no Windows SDK, and no prebuilt binary is published. T-033's first check must be that `sqlx migrate` parses statement boundaries correctly, because that is the exact defect class which silently produced a **zero-table** schema on the first manual apply (recorded in `schema.md`).
 3. The migration tool ships with the dependency already counted in ADR-008; the register needs no new row beyond the existing `sqlx` entry.
 4. **`invitations`, `guest_admissions`, and `relay_allocations` all change shape** as experiment E-13 resolves, so early migrations are expected to be followed by compensating forward migrations. That is the documented workflow, not a failure mode, but T-033 should not treat the initial schema as immutable.
+
+### ADR-018 — Fix PKCE to `S256`; defer sender-constraining access tokens
+
+**Status: Proposed, 2026-10-17.** Needs owner confirmation. This is deliberately a *small* ADR: it records one change that is forced by a normative source, and one deferral, without pre-empting SEC-018.
+
+**Context.** Reading RFC 9700 (BCP 240) directly on 2026-10-17 (RQ-15) surfaced two things our documents get wrong or leave silent.
+
+1. **Our contract never names the PKCE challenge method.** `contracts.md` §5.1 requires that the "verifier must match" and nothing more. RFC 9700 §2.1.1 states: *"Currently, S256 is the only such method."* A contract that does not name the method cannot reject a `plain` challenge, and a `plain` challenge provides no protection against an attacker who can observe the authorization request.
+2. **We never considered sender-constraining access tokens at all.** RFC 9700 §2.2 treats them as the answer to stolen and leaked access tokens, via RFC 8705 (certificate-bound) or RFC 9449 (DPoP). Our `SEC-001` treats PKCE as the whole story.
+
+**Options for the first item** — there is effectively only one: require `S256` and reject `plain` outright, since RFC 9700 leaves no room for `plain` and it must be rejected rather than merely discouraged.
+
+**Decision (item 1, recommended).** The PKCE challenge method is fixed to **`S256`**; a `plain` challenge is rejected with `validation_failed`. `contracts.md` §5.1 names it explicitly.
+
+**Decision (item 2, recommended).** Sender-constraining is **deferred**, recorded as an open question rather than adopted by omission. Rationale: it is `SHOULD`-level, it requires choosing a mechanism (mTLS or DPoP), and option C in RQ-15 collides with the still-open relay-credential question in `contracts.md` §7. Adopting it before SEC-018 and ADR-009 are settled would mean picking a mechanism for an identity model that does not exist yet.
+
+**Rationale.** Item 1 costs nothing and removes a real defect. Item 2 is recorded so that the omission is a decision with a reason rather than a gap nobody noticed — which is precisely the failure mode ADR-016 was written about, and the third time this document set has claimed verification it did not perform.
+
+**Consequences.**
+
+1. `contracts.md` §5.1, `api.md`, and `SEC-001`'s acceptance criteria must name `S256` and add a negative test: a `plain` challenge is rejected. Mapped to T-043/T-046.
+2. **The open question is now written down** in `research.md` RQ-15 and in the §7 table, so it cannot be lost between sessions.
+3. **This does not unblock SEC-018.** The admin authentication model still needs the two owner answers named in RQ-15: who the administrators are, and which identity provider. `contracts.md` §9 stays OPEN.
+4. **If the owner rejects the deferral**, DPoP (RFC 9449) is the cheaper of the two mechanisms for a desktop client, because it needs no operator certificate issuance. That is a later decision, not this one.
+
+**Confidence.** High for item 1 — RFC 9700 is normative and was read directly. Low for item 2 — it is a judgement about sequencing, not a technical finding.
 
 ## 8. Open experiments
 

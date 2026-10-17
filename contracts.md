@@ -94,6 +94,8 @@ Exchange an identity-provider authorization code (PKCE) for session tokens. **Pr
 - Auth: none. Request: `{code, code_verifier, redirect_uri, device_label?}`. Success `200`: `{access_token, refresh_token, expires_in}`.
 - Errors: `validation_failed`, `unauthenticated` (code rejected), `forbidden` (suspended).
 - Checks: redirect URI must be in the registered allow-list (loopback form per RFC 8252); verifier must match.
+- **PKCE challenge method is `S256` only.** A `plain` challenge is rejected with `validation_failed`; there is no fallback and no configuration to enable one. Added 2026-10-17 per ADR-018: RFC 9700 §2.1.1 states *"Currently, S256 is the only such method"*, and a contract that does not name the method cannot reject `plain`. Negative test required (T-040).
+- **Not decided:** whether access tokens are sender-constrained (RFC 8705 mTLS or RFC 9449 DPoP). Deferred deliberately per ADR-018, not omitted by oversight.
 
 ### 5.2 `POST /v1/auth/refresh`
 - Auth: refresh token in body (no access token). Request: `{refresh_token}`. Success `200`: new access and refresh tokens (rotation). Errors: `unauthenticated`, `forbidden`. Reuse of an already-rotated token revokes the session family and returns `unauthenticated`.
@@ -181,6 +183,17 @@ If the control plane is unreachable, the relay keeps serving existing allocation
 ## 9. Admin API (OPEN)
 
 Not defined beyond intent: suspend/unsuspend user, terminate tunnel, list tunnels and abuse signals, drain/retire relay, rotate signing keys. Whether administrators are a role on `users` or a separate identity system is an unresolved security decision; admin routes must require separate, stronger authentication and produce `admin` audit events. This section must be completed before the security review.
+
+**"Stronger" has never been defined, which is why this section is still open (2026-10-17).** Primary-source evidence and three concrete options are recorded in `research.md` RQ-15, read directly from RFC 9700 / 8705 / 9449. In summary: RFC 9700 requires PKCE for public clients and treats sender-constrained tokens (mTLS or DPoP) as the answer to leaked access tokens. It does **not** use the term "phishing-resistant", so an option resting on that term rests on WebAuthn guidance, not on RFC 9700.
+
+**Two owner answers are required before this section can be written, and neither is a technical question:**
+
+1. **Who are the administrators?** The project has no named operator team or headcount, and no stated relationship between the operator and the users they would suspend.
+2. **Which identity provider?** ADR-009 is open. A separate-tenant option is impossible until this is answered.
+
+A third question changes the design entirely and is also unanswered: **is an operator a human at all?** If administration is automated (for example a controller draining relays), the answer is a certificate or workload identity, not a second factor.
+
+ADR-018 records one related decision that *is* settled: PKCE is `S256`-only for all clients including admin tooling. That does not unblock this section.
 
 ## 10. Tunnel protocol (engine ↔ relay)
 
