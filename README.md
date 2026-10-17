@@ -73,8 +73,8 @@ Secrets must never be committed or logged (`AGENTS.md` §7).
 | `cargo clippy --workspace --all-targets -- -D warnings` | Pass, zero warnings |
 | `cargo test --workspace --all-targets` | Pass under `stable-x86_64-pc-windows-gnu` — **0 tests**, the crates are empty skeletons |
 | `cargo deny check advisories bans licenses` | Pass, exit 0 — via the official prebuilt `cargo-deny` 0.20.2 binary, SHA-256 verified |
-| `python scripts/audit_traceability.py` | Pass — 110 requirements, 110 traceability rows, 86 tasks, longest chain 23, 0 errors, 10 warnings |
-| `python scripts/audit_traceability.py --self-test` | Pass — all 6 planted defects detected |
+| `python scripts/audit_traceability.py` | Pass — 110 requirements, 110 traceability rows, 86 tasks, 19 experiments, 19 ADR rows (6 with full records), 7 invariants, 12 model/DDL tables compared, longest chain 23, **0 errors, 23 warnings** |
+| `python scripts/audit_traceability.py --self-test` | Pass — all **10** planted defects detected |
 | `python scripts/check_contrast.py` | Pass — all 22 DESIGN.md contrast pairs recomputed and matched; formula self-validated against 3 WCAG reference pairs |
 
 **Every gate has been seen to fail, not just pass.** `cargo clippy` denies `unwrap()`
@@ -99,7 +99,8 @@ run, because there is no application code.**
 What *has* been checked in the documentation set:
 
 - All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
-- The traceability audit passes and catches 6 of 6 planted defects.
+- The traceability audit passes and catches **10 of 10** planted defects, including two that verify every ADR in `research.md` §7 has a summary-table row — added after ADR-016 was found to have a full record but no row, while ADR-017 had both.
+- **`data-model.md` and `schema-draft.sql` are compared mechanically** — all 12 tables, column by column. Added after `T-120` was found to name this as a standing gap.
 - **Colour contrast is recomputed, not asserted.** `scripts/check_contrast.py` re-derives all 22 ratios in `DESIGN.md` §3 from the token table in §2, after validating its own implementation against three WCAG reference pairs. All 22 matched, and it was confirmed to fail on a planted overstated ratio and a planted wrong threshold. Hover, disabled, and high-contrast states are still unchecked.
 - **The database schema has been executed**, not merely parser-checked: applied cleanly to an empty database on **PostgreSQL 16.10 and 17.6**, producing 12 tables, 35 indexes, 57 constraints and 13 foreign keys with zero errors. PRIV-006 (no email column) and INV-1 (no local destination column) were checked against the live schema, and four negative tests confirmed the CHECK constraints reject bad input. Method, version matrix, and one environment limitation are recorded in `schema.md`.
 

@@ -45,6 +45,9 @@ TASK_REQ_FIELD = re.compile(r"^- \*\*Requirements:\*\*\s*(.*)$", M)
 EXP_ROW = re.compile(r"^\|\s*(E-\d+)\s*\|", M)
 ADR_ROW = re.compile(r"^\|\s*(ADR-\d+)\s*\|", M)
 ADR_HEADING = re.compile(r"^###\s+(ADR-\d+)\b", M)
+DM_TABLE_HEADING = re.compile(r"^###\s+([a-z_]+)\s*$", M)
+DM_FIELDS = re.compile(r"^- \*\*Fields:\*\*\s*(.*)$", M)
+DDL_TABLE = re.compile(r"CREATE TABLE\s+([a-z_]+)\s*\(", re.I)
 COUNTS_LINE = re.compile(r"(\d+)\s+requirements,\s*(\d+)\s+tasks")
 PLAN_TOTALS = re.compile(r"Total:\s*(\d+)\s+tasks,\s*(\d+)\s+requirements")
 
@@ -52,6 +55,119 @@ PLAN_TOTALS = re.compile(r"Total:\s*(\d+)\s+tasks,\s*(\d+)\s+requirements")
 def read(root: Path, name: str) -> str:
     # utf-8-sig tolerates a BOM, which some PowerShell writers emit.
     return (root / name).read_text(encoding="utf-8-sig")
+
+
+def strip_sql_comments(sql_text: str) -> str:
+    """Remove `--` line comments, honouring quoted strings.
+
+    guest_admissions has `source_ip inet NOT NULL,   -- sensitive; short retention`.
+    Splitting on comma-newline before stripping comments glued that whole line to the
+    next one, so `created_at` vanished from the parsed columns and the check reported a
+    missing column in a table that has it. Comment stripping must happen first.
+    """
+    out_lines: list[str] = []
+    for line in sql_text.splitlines():
+        in_single = in_double = False
+        cut = len(line)
+        j = 0
+        while j < len(line):
+            ch = line[j]
+            if ch == "'" and not in_double:
+                in_single = not in_single
+            elif ch == '"' and not in_single:
+                in_double = not in_double
+            elif ch == "-" and not in_single and not in_double:
+                if j + 1 < len(line) and line[j + 1] == "-":
+                    cut = j
+                    break
+            j += 1
+        out_lines.append(line[:cut])
+    return "\n".join(out_lines)
+
+
+def ddl_columns(sql_text: str) -> dict[str, list[str]]:
+    """Column names per CREATE TABLE, from the DDL text.
+
+    Statement bodies are located by paren-depth walking rather than by splitting on
+    commas, because a column definition may itself contain commas (CHECK with an
+    IN list, a numeric type). A naive comma split produced phantom columns named
+    "AND" and duplicate column names on the first attempt at this.
+    """
+    out: dict[str, list[str]] = {}
+    for m in DDL_TABLE.finditer(sql_text):
+        table = m.group(1)
+        depth, i = 1, m.end()
+        while i < len(sql_text) and depth:
+            if sql_text[i] == "(":
+                depth += 1
+            elif sql_text[i] == ")":
+                depth -= 1
+            i += 1
+        body = strip_sql_comments(sql_text[m.end(): i - 1])
+        cols: list[str] = []
+        for raw in re.split(r",\s*\n", body):
+            item = raw.strip().rstrip(",").strip()
+            if not item:
+                continue
+            if re.match(r"^(CONSTRAINT|PRIMARY KEY|FOREIGN KEY|UNIQUE|CHECK|EXCLUDE)\b",
+                        item, re.I):
+                continue
+            cm = re.match(r"^([a-z_][a-z0-9_]*)\s+\S", item, re.I)
+            if cm:
+                cols.append(cm.group(1))
+        out[table] = cols
+    return out
+
+
+def documented_columns(model_text: str) -> dict[str, list[str]]:
+    """Column names per entity, from data-model.md's '**Fields:**' lines.
+
+    Two exclusions, both learned from writing this the obvious way first and being
+    wrong:
+
+    - Tokens inside parentheses are dropped. guest_admissions says
+      "(composite FK to `invitations(id, tunnel_id)`)" -- that is a *reference* to a
+      column on another table, not a column of this one. Including it reported
+      guest_admissions as having an 'invitations' column.
+    - Only backticked names at paren depth 0 are collected, and every one of them is
+      kept rather than just the first per semicolon-separated segment. Two real
+      formatting styles exist in this document: semicolon-separated groups
+      ("`a`; `b`") and comma-separated ones ("`a FK CASCADE`, `b text`, `c`").
+      Taking only the first token per segment silently dropped seven columns across
+      four tables and produced six false 'missing column' errors on a clean repo.
+
+    Fields lines that use neither style consistently are a formatting question for
+    data-model.md, not something to paper over here: whatever this function cannot
+    parse shows up as an error naming the table, so a formatting change cannot pass
+    unnoticed.
+    """
+    out: dict[str, list[str]] = {}
+    for m in DM_TABLE_HEADING.finditer(model_text):
+        table = m.group(1)
+        fm = DM_FIELDS.search(model_text[m.end():])
+        if not fm:
+            continue
+        line = fm.group(1)
+        cols: list[str] = []
+        depth = 0
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth = max(0, depth - 1)
+            elif ch == "`" and depth == 0:
+                end = line.find("`", i + 1)
+                if end != -1:
+                    token = line[i + 1:end]
+                    name = re.match(r"^([a-z_][a-z0-9_]*)", token)
+                    if name:
+                        cols.append(name.group(1))
+                    i = end
+            i += 1
+        out[table] = cols
+    return out
 
 
 def audit(root: Path) -> tuple[list[str], list[str]]:
@@ -237,6 +353,46 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
         else:
             errors.append(f"cited path does not exist: {p}")
 
+    # 9. data-model.md and the DDL must describe the same tables and columns.
+    #
+    #    Added 2026-10-17. T-120's "does not cover API/data-model agreement" was a
+    #    standing gap: data-model.md is authoritative for entities and
+    #    schema-draft.sql for physical shape, and nothing compared them. A column
+    #    could be added to one and not the other indefinitely and every other check
+    #    would still pass, because identifiers would all still resolve.
+    ddl_file = root / "schema-draft.sql"
+    if not ddl_file.exists():
+        warnings.append("schema-draft.sql not found; skipping model/DDL agreement check")
+    else:
+        ddl = ddl_columns(ddl_file.read_text(encoding="utf-8-sig"))
+        doc = documented_columns(model_text)
+        if not ddl or not doc:
+            errors.append(
+                "model/DDL agreement check parsed nothing "
+                f"(DDL tables={len(ddl)}, documented={len(doc)}) -- the check is broken"
+            )
+        for table in sorted(set(ddl) - set(doc)):
+            errors.append(
+                f"table {table} exists in the DDL but is not documented in data-model.md"
+            )
+        for table in sorted(set(doc) - set(ddl)):
+            errors.append(
+                f"table {table} is documented in data-model.md but absent from the DDL"
+            )
+        for table in sorted(set(ddl) & set(doc)):
+            only_ddl = [c for c in ddl[table] if c not in doc[table]]
+            only_doc = [c for c in doc[table] if c not in ddl[table]]
+            if only_ddl:
+                errors.append(
+                    f"{table}: column(s) {', '.join(only_ddl)} are in the DDL but not "
+                    f"in data-model.md"
+                )
+            if only_doc:
+                errors.append(
+                    f"{table}: column(s) {', '.join(only_doc)} are in data-model.md but "
+                    f"not in the DDL"
+                )
+
     # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
     if m:
@@ -269,6 +425,7 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
         "ADRs (table rows)": len(adrs),
         "ADRs (full records)": len(adr_sections),
         "invariants": len(invariants),
+        "model/DDL tables compared": len(ddl) if ddl_file.exists() else 0,
         "longest chain (tasks)": len(chain),
     }
     chain_text = " -> ".join(chain)
@@ -428,6 +585,23 @@ def self_test(root: Path) -> int:
             lambda t: t + "\n| ADR-099 | Invented decision | Proposed | 2026-10-17 | Low |\n",
             "no full record",
         ),
+        (
+            "column in data-model.md that the DDL does not have",
+            "data-model.md",
+            lambda t: t.replace(
+                "### audit_events\n- **Fields:** `id bigint identity PK`;",
+                "### audit_events\n- **Fields:** `id bigint identity PK`; "
+                "`invented_column timestamptz`;",
+                1,
+            ),
+            "are in data-model.md but not in the DDL",
+        ),
+        (
+            "table in the DDL that data-model.md does not document",
+            "data-model.md",
+            lambda t: t + "\n### shadow_table\n- **Fields:** `id uuid PK`.\n",
+            "is documented in data-model.md but absent from the DDL",
+        ),
     ]
 
     failures = 0
@@ -436,6 +610,11 @@ def self_test(root: Path) -> int:
             tree = Path(tmp)
             for f in root.glob("*.md"):
                 shutil.copy2(f, tree / f.name)
+            # schema-draft.sql is copied too: without it the model/DDL check skips
+            # itself and the two planted defects below would pass for the wrong reason.
+            ddl_src = root / "schema-draft.sql"
+            if ddl_src.exists():
+                shutil.copy2(ddl_src, tree / ddl_src.name)
             original = (tree / filename).read_text(encoding="utf-8-sig")
             (tree / filename).write_text(mutate(original), encoding="utf-8")
             errs, warns, _, _ = audit(tree)

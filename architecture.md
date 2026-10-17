@@ -114,7 +114,7 @@ Proposed Cargo workspace plus a UI package (not created yet):
 | `profiles/` | One declarative file per game (data, not code) |
 | `migrations/` | Authoritative schema migrations (see `schema.md`, planned) |
 | `infra/` | Deployment definitions per environment |
-| `scripts/` | **Added 2026-10-17.** Repository tooling: `audit_traceability.py` (TEST-008 — requirement/task/identifier consistency, prerequisite cycles, cited-path existence, longest-chain depth; self-testing) and `check_contrast.py` (UX-005 — recomputes the `DESIGN.md` §3 contrast table from the §2 tokens; self-validating). Both run in CI. Ahead of T-080/T-120 |
+| `scripts/` | **Added 2026-10-17.** Repository tooling: `audit_traceability.py` (TEST-008 — requirement/task/identifier consistency, prerequisite cycles, cited-path existence, longest-chain depth, ADR table/record agreement, and `data-model.md` vs `schema-draft.sql` column agreement; self-testing against 10 planted defects) and `check_contrast.py` (UX-005 — recomputes the `DESIGN.md` §3 contrast table from the §2 tokens; self-validating). Both run in CI. API-route agreement and diagram agreement remain uncovered — T-120. |
 | `tests/{integration,game-compat,network,security,perf}/` | Test suites by type |
 | `docs/` | **Inconsistency, recorded 2026-10-17:** this row calls `docs/` "the documentation set", but the 20 documents actually live at the repository root alongside the code. Only `docs/dependency-register.md` is under `docs/`. **Not moved** — moving 20 files would break every relative link across the set and is not required by T-001. Decide at T-004 and do it as one change that fixes all links together. |
 

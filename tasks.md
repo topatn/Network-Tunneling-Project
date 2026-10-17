@@ -832,6 +832,7 @@ Counts: 86 tasks across 10 milestones.
 - **Requirements:** TEST-008
 - **Verification:** Audit script and review
 - **Done when:** Report shows zero unmapped requirements and zero unresolved contradictions.
+- **Progress 2026-10-17 — partly done ahead of the task, and the box stays unchecked.** `scripts/audit_traceability.py` already covers requirement-to-task mapping, task-to-requirement links, prerequisite cycles, cited-path existence, longest-chain depth, ADR table/record agreement, and — added today — **`data-model.md` against `schema-draft.sql`, column by column for all 12 tables**, with two planted defects proving both directions are detected. **Still open here:** API-route agreement (`api.md` route shapes against `contracts.md`), and diagram agreement. Those are why this is not checked.
 
 ### T-121 — Release checklist and go/no-go [CP]
 
