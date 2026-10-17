@@ -188,8 +188,20 @@ def java_major(java_exe: Path) -> int | None:
     return int(first)
 
 
-def java_candidates() -> list[tuple[Path, str]]:
-    """Where a Windows host may keep a Java runtime. Order is not a preference."""
+def java_candidates(simulate_none: bool = False) -> list[tuple[Path, str]]:
+    """Where a Windows host may keep a Java runtime. Order is not a preference.
+
+    `simulate_none` exists so the SRV-018 *fetch* path can be exercised on a machine
+    that happens to have Java installed. It is a simulation and never counts as
+    clean-VM evidence; the report says so when it is used.
+
+    An environment-variable override was tried first and does not work: PowerShell's
+    `$env:ProgramFiles = ...` does not displace the inherited `PROGRAMFILES` entry that
+    Python's `os.environ` reads, so discovery kept finding the real runtimes. A flag is
+    honest about what it does in a way an env var is not.
+    """
+    if simulate_none:
+        return []
     roots = [
         Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
         Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
@@ -236,7 +248,8 @@ def dir_stats(root: Path) -> tuple[int, int]:
 # ------------------------------------------------------------------- runtime (SRV-018)
 
 
-def select_runtime(report: Report, workdir: Path, required_major: int) -> Path | None:
+def select_runtime(report: Report, workdir: Path, required_major: int,
+                   simulate_none: bool = False) -> Path | None:
     """SRV-018, in the order the product owner decided on 2026-10-17.
 
     1. a JRE we fetch and checksum-verify (the only step with an integrity guarantee)
@@ -247,7 +260,7 @@ def select_runtime(report: Report, workdir: Path, required_major: int) -> Path |
     print(f"  required major version: {required_major}")
 
     host = []
-    for exe, label in java_candidates():
+    for exe, label in java_candidates(simulate_none):
         major = java_major(exe)
         host.append((exe, label, major))
         print(f"  host candidate  {label:<42} -> " +
@@ -310,7 +323,7 @@ def select_runtime(report: Report, workdir: Path, required_major: int) -> Path |
 # --------------------------------------------------------------------- phase 1 / 2
 
 
-def prepare(report: Report, workdir: Path) -> bool:
+def prepare(report: Report, workdir: Path, simulate_none: bool = False) -> bool:
     print("\n--- phase 1: acquire and verify (SRV-002) ---")
     report.check("session is not elevated", not is_elevated(),
                  "required by SRV-010 / SEC-012")
@@ -339,7 +352,7 @@ def prepare(report: Report, workdir: Path) -> bool:
                  manifest_json_sha == entry["sha1"],
                  f"computed {manifest_json_sha[:16]}… == manifest entry")
 
-    java = select_runtime(report, workdir, required_major)
+    java = select_runtime(report, workdir, required_major, simulate_none)
     if java is None:
         return False
     report.facts["java_exe"] = str(java)
@@ -378,7 +391,7 @@ def prepare(report: Report, workdir: Path) -> bool:
     return True
 
 
-def run_phase(report: Report, workdir: Path) -> bool:
+def run_phase(report: Report, workdir: Path, simulate_none: bool = False) -> bool:
     print("\n--- phase 2: start, probe, stop (SRV-001, FR-011, SRV-007) ---")
     eula = workdir / "eula.txt"
     if not eula.is_file():
@@ -408,7 +421,7 @@ def run_phase(report: Report, workdir: Path) -> bool:
         # this process. Re-derive the runtime instead of depending on in-memory state;
         # the earlier version raised KeyError here, which is a bug a reader of the
         # instructions would have hit immediately.
-        java_exe = select_runtime(report, workdir, required_major)
+        java_exe = select_runtime(report, workdir, required_major, simulate_none)
         if java_exe is None:
             report.check("runtime available for phase 2", False, "no usable JRE")
             return False
@@ -522,6 +535,9 @@ def main() -> int:
     ap.add_argument("--prepare", action="store_true", help="phase 1 only")
     ap.add_argument("--run", action="store_true", help="phase 2 only")
     ap.add_argument("--json", action="store_true", help="also emit JSON")
+    ap.add_argument("--simulate-no-host-java", action="store_true",
+                    help="pretend the host has no Java, to exercise the SRV-018 "
+                         "fetch path. A simulation, never clean-VM evidence.")
     args = ap.parse_args()
 
     if args.prepare and args.run:
@@ -530,6 +546,9 @@ def main() -> int:
 
     workdir = args.workdir.expanduser().resolve()
     report = Report()
+    if args.simulate_no_host_java:
+        report.note("SIMULATION: host Java discovery is disabled. This exercises the "
+                    "SRV-018 fetch path but is NOT clean-VM evidence.")
     # Unbuffered, because this tool is read in a console and an error printed after a
     # banner looks like it belongs to the wrong run.
     sys.stdout.reconfigure(line_buffering=True)
@@ -542,7 +561,7 @@ def main() -> int:
 
     try:
         if not args.run:
-            if not prepare(report, workdir):
+            if not prepare(report, workdir, args.simulate_no_host_java):
                 return report.emit(args.json)
         if args.prepare:
             print("\n" + "=" * 72)
@@ -551,7 +570,7 @@ def main() -> int:
             print("  Then re-run with --run.")
             print("=" * 72)
             return EXIT_OPERATOR
-        if not run_phase(report, workdir):
+        if not run_phase(report, workdir, args.simulate_no_host_java):
             if "operator action required" in " ".join(report.notes):
                 print("\n" + "=" * 72)
                 print("STOPPED FOR OPERATOR ACTION (SRV-015)")

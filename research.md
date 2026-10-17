@@ -534,7 +534,28 @@ Class file version **69.0 is Java 25**; **52.0 is Java 8**. The failure happens 
 3. **This is an accepted risk, on the same footing as ADR-019's separation-of-duties gap.** Both are recorded as accepted rather than mitigated, because the alternative was available and was declined.
 4. **It is revisitable cheaply**, because nothing about it is structural: the order is a preference list, not a dependency. If a future version decides the exposure is not worth it, the change is to delete step two — no schema, contract, or architecture change follows.
 
-**What remains genuinely open.** Whether a typical host can reach the runtime vendor's API and its CDN is still `[X]`, and is `E-14`'s question applied to a second vendor.
+#### RQ-13.2f The clean-VM test cannot run here, and the reason is a hard prerequisite worth recording (2026-10-17)
+
+`SRV-001` and E-19's remaining gate is a clean standard-user VM. Before asking the owner for "a machine", I checked whether this one could be made to serve. **It cannot, and the reason is not elevation.**
+
+| Attempt | Result |
+|---|---|
+| **Windows Sandbox** | **Unavailable, and unfixable here.** This machine is **Windows 10 Home Single Language** (build 26300). Sandbox requires **Pro, Enterprise, or Education** — it is not a feature Home lacks *enabled*, it is a feature Home does not have. `WindowsSandbox.exe` and `WindowsSandboxClient.exe` are both absent |
+| Hyper-V / Virtual Machine Platform / WSL | `Get-WindowsOptionalFeature -Online` **requires elevation** for every feature queried, so their state cannot even be read unelevated |
+| Elevation on this session | Not available, and `AGENTS.md` §9.5 forbids taking it without an explicit instruction |
+
+**So the owner's "a machine" has a prerequisite that would otherwise cost a wasted round-trip: it must be Windows Pro, Enterprise, or Education.** A Home machine cannot run this verification by any means available to a non-elevated session, which is worth stating plainly rather than discovering later.
+
+**What was done instead, and it is real evidence about the code even though it is not evidence about a clean VM.** `scripts/verify_clean_vm.py` had never exercised the `SRV-018` **fetch** path, because this machine always satisfies the host-JRE step first — so the branch a genuinely clean VM *must* take was the one path never run. A `--simulate-no-host-java` flag was added and both branches were then verified end to end:
+
+| Branch | Result |
+|---|---|
+| Host JRE (step 2) | **11/11 checks**, exit 0 |
+| Fetched, checksum-verified JRE (step 1) | **12/12 checks**, exit 0 — SHA-256 verified, extracted per-user, `java -version` re-read as 25, server reached readiness in 7.0 s, `127.0.0.1` and `::1` probed, graceful stop with save messages, **398 files / 321.9 MB**, no service, no scheduled task |
+
+**An environment-variable approach was tried first and does not work**, recorded because the failure is instructive: PowerShell's `$env:ProgramFiles = <empty>` does not displace the inherited `PROGRAMFILES` entry that Python's `os.environ` reads, so Java discovery kept finding the real runtimes. A flag states what it does; an env var that silently does not is worse than either.
+
+**What this does and does not establish.** It establishes that **both `SRV-018` branches work**, that the integrity chain is correct, and that the script's own traps are handled. It does **not** establish `SRV-001`, because a simulated clean host still has this machine's Windows, firewall, Defender, network filters and disk behind it. The script prints that caveat itself whenever the flag is used, so a simulation cannot be mistaken for the real thing.
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.
