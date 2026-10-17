@@ -101,6 +101,7 @@ Counts: 86 tasks across 10 milestones.
 - **Requirements:** GAME-004, GAME-005
 - **Verification:** Real client join; capture analysis
 - **Done when:** Each game's required ports/protocols are documented from capture, and direct connect result recorded.
+- **Added 2026-10-17 — the per-guest loopback question is now narrowed to one thing.** `research.md` §2.2.1 tested the candidate fix and Windows preserves a distinct loopback source per flow for TCP and UDP, 64-way concurrent, no elevation. **What only a real server can answer, and is the point of this task:** does `srcds_run` treat `127.0.0.2` as a distinct player, does it accept loopback sources other than `127.0.0.1`, and does a failed RCON login ban *that* address rather than the host's. Record all three; do not infer them from the OS result.
 
 ### T-014 — Experiment E-4: L4D2 lobby join through a relay
 

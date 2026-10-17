@@ -129,6 +129,35 @@ What the project documents:
 
 **Candidate mitigations, none chosen [A]:** have the engine bind a distinct loopback source address (e.g. `127.0.0.2`, `127.0.0.3`, …) per guest flow so each appears as a separate client; or accept the collapse and state plainly in the docs that game-level IP banning does not work through a tunnel.
 
+#### §2.2.1 The loopback-per-guest mitigation was tested at the OS level and works (2026-10-17)
+
+The second mitigation above was the highest-priority open architecture issue (`architecture.md` §20 item 13, "must be settled before the engine is designed"), and it was **completely unexamined** — nobody had checked whether Windows even permits the trick. It was testable without a game server, so it was tested.
+
+**Method.** Three Python probes against a loopback listener, run on this development machine (Windows 11). No elevation, no game server, no network access.
+
+**Results, all `[V]`:**
+
+| Probe | Result |
+|---|---|
+| TCP: bind a distinct loopback source (`127.0.0.2`, `127.0.0.5`, `127.1.2.3`) and connect to `127.0.0.1` | **Succeeds.** The listener observed **four distinct source addresses**, one per flow. No `WSAEADDRNOTAVAIL` |
+| UDP: same, datagram source addresses | **Succeeds.** `127.0.0.1`, `127.0.0.2`, `127.0.0.9`, `127.255.255.254` all preserved at the receiver |
+| Concurrency: 64 simultaneous flows, one distinct source each | **64 accepted, 64 distinct source IPs observed, 0 collapsed**, 0 errors, 0.01 s |
+| Address range | `127.0.0.0` and `127.255.255.255` are **rejected** (`WSAEADDRNOTAVAIL`, WinError 10049); `127.0.1.1`, `127.1.255.255`, `127.128.0.1`, `127.255.255.254` all bind. `128.0.0.1` and `10.0.0.1` are correctly rejected |
+| IPv6 | Only `::1` binds. **`::2` is rejected.** An IPv6-only design would get no per-guest separation — the engine's loopback-source scheme must be IPv4 |
+| Privilege | **None required.** No admin rights, matching the project's no-elevation constraint |
+
+**What this settles.** The mechanism `architecture.md` §20 item 13 proposed **works at the operating-system level**, for both TCP and UDP, at concurrency, with no elevation, and with ~16 million usable source addresses. The idea was sound and nobody had checked it. The engine can allocate `127.0.x.y` per guest flow from a pool that must **exclude `.0.0` and `.255.255.255`**.
+
+**What this does *not* settle — the experiment stops where the game server begins.** These probes prove Windows preserves the source address. They do **not** prove:
+
+1. **That a Source engine server accepts and honours it.** Whether `srcds_run` treats `127.0.0.2` as a distinct player, and whether its own bind/`sv_lan` logic accepts connections from loopback sources other than `127.0.0.1`, is untested. **This is the load-bearing unknown and it needs a real server: E-3, E-4, E-5.**
+2. **That the RCON brute-force ban becomes safe.** It would now ban *one* guest's address rather than the host's — plausibly correct, but only a real failed-login test confirms it, and the consequence of getting it wrong (host locked out of its own server) is severe.
+3. **That Source supports IPv6 at all.** Given `::2` does not even bind, a per-guest loopback scheme is IPv4-only, and an IPv6-preferring game server would need explicit configuration.
+
+**[A] Design consequence, not a decision.** If E-3/E-4/E-5 confirm item 1, the engine needs a **loopback source pool** allocator with explicit exclusion of `.0.0` and `.255.255.255`, and the relay needs to hand each guest flow a stable address for the life of that flow (reusing an address while it is live would recreate the collapse). No schema change is implied — this is engine and relay data-path state, which `architecture.md` §20 item 8 already places outside the database.
+
+**Confidence.** `[V]` for the OS behaviour, measured and reproducible on this machine. `[A]` for everything downstream of it. The distinction matters: this result is stronger than anything else in §2.2 and it still does not license a claim about Source-engine behaviour.
+
 **This also reaches Minecraft.** Java edition's `prevent-proxy-connections` kicks a player when the connecting IP differs from the one that reached Mojang's authentication server. Behind our relay the server sees loopback while the player authenticated from their real address — a guaranteed mismatch. That setting **must stay `false`** (it is `false` by default) and the generated configuration should say why. Bedrock behaves similarly: Xbox Live authentication happens client-side, but the address seen by the server is ours.
 
 **Consequence for guest admission (E-13).** Our relay-side source-IP admission is unaffected — it operates on the *public* connection before the engine dials. But the host must be told that the game's own view of player addresses is lost. Recorded as `AS-12` and as an open architecture issue; it does **not** by itself invalidate E-13.
