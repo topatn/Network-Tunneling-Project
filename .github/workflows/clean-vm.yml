@@ -1,0 +1,144 @@
+name: clean-vm
+
+# Clean-VM provisioning verification for Minecraft Java Edition (SRV-001, T-023, T-027).
+#
+# WHY THIS EXISTS. SRV-001's acceptance criterion requires provisioning to complete on a
+# clean standard-user Windows VM with no admin prompt. That was blocked on procuring
+# hardware: the development machine is Windows 10 Home Single Language, and Windows
+# Sandbox requires Pro, Enterprise, or Education, so it is not available there at all
+# (research.md RQ-13.2f).
+#
+# A hosted Windows runner IS a clean VM: a fresh image per job with nothing preinstalled.
+# That makes this verification available without buying hardware. It is the closest thing
+# to the criterion that can run today.
+#
+# NOT EXECUTED. Like ci.yml, this workflow has never run: no Git remote or CI provider is
+# configured. Everything below is written against the documented behaviour of the runner
+# image and has NOT been observed to work. Do not treat the presence of this file as
+# evidence that anything was verified.
+
+on:
+  # Manual dispatch only. A run downloads roughly 320 MB (62 MB server artifact plus a
+  # 58 MB runtime archive expanding to about 180 MB), so this is far too expensive to run
+  # on every push, and it exercises third-party network endpoints rather than our code.
+  workflow_dispatch:
+    inputs:
+      accept_eula:
+        description: >-
+          Accept the Minecraft EULA on the runner so the start/stop phase can run.
+          Leave false for an integrity-only run.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clean-vm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Provisioning on a clean Windows image
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Record the runner image, for the report
+        shell: pwsh
+        run: |
+          "image: $env:ImageOS" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
+          "version: $env:ImageVersion" | Out-File -FilePath "$env:GITHUB_ENV" -Append -Encoding utf8
+
+      # ---------------------------------------------------------------- phase 1
+      # Acquisition and integrity only. This phase never starts the server and never
+      # touches the EULA, so it is safe to run unconditionally.
+      - name: Phase 1 - acquire and verify (SRV-002, SRV-004, SRV-018)
+        shell: pwsh
+        run: |
+          python scripts/verify_clean_vm.py --workdir "$env:RUNNER_TEMP\provision" --prepare
+          if ($LASTEXITCODE -ne 10) {
+            Write-Error "Expected exit 10 (operator action required); got $LASTEXITCODE"
+            exit 1
+          }
+          Write-Host "Phase 1 reached the EULA gate as required (SRV-015)."
+
+      # ---------------------------------------------------------------- phase 2
+      # Starting the server requires the EULA to have been accepted. scripts/
+      # verify_clean_vm.py deliberately will not do that itself, because SRV-015 and the
+      # Minecraft Usage Guidelines forbid the product from accepting on a host's behalf
+      # (research.md RQ-13.1b constraint C3).
+      #
+      # This step is that acceptance, performed deliberately and visibly, on an ephemeral
+      # build agent rather than on anyone's PC, and only when the operator asked for it via
+      # the accept_eula input. It is NOT the product doing it, and it is not hidden inside
+      # the verification tool.
+      - name: Phase 2 - start, probe, stop (SRV-001, FR-011, SRV-007)
+        if: ${{ inputs.accept_eula }}
+        shell: pwsh
+        run: |
+          $eula = "$env:RUNNER_TEMP\provision\eula.txt"
+          (Get-Content $eula -Raw) -replace 'eula=false', 'eula=true' |
+            Set-Content $eula -NoNewline
+          python scripts/verify_clean_vm.py --workdir "$env:RUNNER_TEMP\provision" --run
+          exit $LASTEXITCODE
+
+      - name: Report when the EULA was not accepted
+        if: ${{ !inputs.accept_eula }}
+        shell: pwsh
+        run: |
+          Write-Host @"
+          Integrity-only run complete.
+
+          Phase 2 was skipped because accept_eula was false, so SRV-001 is NOT yet
+          verified: nothing was started, probed, or stopped. Re-run with accept_eula=true
+          to exercise the start/stop path on this clean image.
+          "@
+
+      - name: Upload the verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clean-vm-log
+          path: |
+            ${{ runner.temp }}\provision\verify.log
+            ${{ runner.temp }}\provision\server.properties
+          retention-days: 14
+          if-no-files-found: ignore
+
+# ---------------------------------------------------------------------------
+# WHAT A PASS HERE WOULD AND WOULD NOT ESTABLISH
+#
+# WOULD establish, on a genuinely clean image with nothing preinstalled:
+#   - the SRV-002 integrity chain end to end (manifest -> version JSON ->
+#     downloads.server.sha1 -> download -> SHA-1)
+#   - SRV-018 runtime selection, most likely exercising the FETCH branch, since a fresh
+#     runner image has no Java installed
+#   - SRV-004 generated defaults
+#   - start-up, the FR-011 local probe on 127.0.0.1 and ::1, and graceful stop over the
+#     stdin pipe per SRV-007
+#   - that no service, scheduled task, or elevation was required
+#
+# WOULD NOT establish, and these gaps are real:
+#   1. **The runner account is an administrator account.** GitHub-hosted Windows runners
+#      execute as a user in the Administrators group. SRV-001 asks for a *standard* user.
+#      The session is typically not elevated even so, which is what the script checks, but
+#      "administrator account, unelevated session" is weaker than "standard user". A real
+#      standard-user VM remains the stricter test.
+#   2. **The runner image is not a retail Windows install.** It is preconfigured, and its
+#      firewall and Defender posture is whatever the image ships with.
+#   3. **Network reachability is the runner's, not a typical host's.** The one thing this
+#      cannot tell us is whether an ordinary home network can reach Mojang's and the
+#      runtime vendor's endpoints, which is E-14's question.
+#   4. Nothing here has ever been executed.
+#
+# Treat a green run as strong evidence, not as SRV-001 being satisfied. The requirement
+# still names a clean standard-user VM, and a retail standard-user VM is the only thing
+# that fully meets it.
+# ---------------------------------------------------------------------------

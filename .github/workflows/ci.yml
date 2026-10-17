@@ -150,5 +150,10 @@ jobs:
 #      is configured, so no merge is actually gated by anything yet.
 #   2. The `migrate` job is disabled (if: false) until T-033 creates migrations.
 #
+# Sibling workflow: `clean-vm.yml` runs the SRV-001 provisioning verification on a hosted
+# Windows image. It is also unexecuted, for the same reason. Configuring a Git remote is
+# therefore what makes both runnable, and is the single highest-leverage infrastructure
+# action outstanding.
+#
 # Recorded in tasks.md under T-001.
 # ---------------------------------------------------------------------------

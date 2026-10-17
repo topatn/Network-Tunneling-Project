@@ -556,6 +556,25 @@ Class file version **69.0 is Java 25**; **52.0 is Java 8**. The failure happens 
 **An environment-variable approach was tried first and does not work**, recorded because the failure is instructive: PowerShell's `$env:ProgramFiles = <empty>` does not displace the inherited `PROGRAMFILES` entry that Python's `os.environ` reads, so Java discovery kept finding the real runtimes. A flag states what it does; an env var that silently does not is worse than either.
 
 **What this does and does not establish.** It establishes that **both `SRV-018` branches work**, that the integrity chain is correct, and that the script's own traps are handled. It does **not** establish `SRV-001`, because a simulated clean host still has this machine's Windows, firewall, Defender, network filters and disk behind it. The script prints that caveat itself whenever the flag is used, so a simulation cannot be mistaken for the real thing.
+
+#### RQ-13.2g A hosted CI Windows runner is a clean VM — and it is not quite good enough (2026-10-17)
+
+If the clean VM cannot be produced locally, the next question is whether it can be produced *somewhere else*. **A hosted Windows runner is a fresh image per job with nothing preinstalled, which is very nearly the thing `SRV-001` asks for.** That removes the hardware prerequisite without pretending the requirement is met.
+
+`.github/workflows/clean-vm.yml` now exists to run `scripts/verify_clean_vm.py` on `windows-2022`, manual dispatch only, because a run downloads roughly 320 MB and touches third-party endpoints rather than our code. **It has never been executed** — no Git remote or CI provider is configured — and the file says so at the top, in the same spirit as the warning at the bottom of `ci.yml`.
+
+**One deliberate design point.** `scripts/verify_clean_vm.py` will not accept the EULA, so a naive workflow would stop at exit 10 forever. The workflow therefore has a **`accept_eula` boolean input, defaulting to false**, and the acceptance is performed by a visible, separately-named workflow step — not hidden inside the verification tool, and never on the default path. `SRV-015` forbids the *product* from accepting the EULA on a *host's* behalf; this is a deliberate, operator-initiated act on an ephemeral build agent, and keeping it explicit is what distinguishes the two. With the input false, phase 1 still runs and verifies the integrity chain, runtime selection and generated defaults.
+
+**Four reasons this is strong evidence rather than a satisfied requirement. All four are recorded in the workflow itself.**
+
+1. **The runner account is in the Administrators group.** GitHub-hosted Windows runners execute as an administrator user; the session is normally not elevated, which is what the script checks, but "administrator account, unelevated session" is genuinely weaker than "standard user". This is the gap that matters most.
+2. **The image is not a retail Windows install.** It is preconfigured, and its firewall and Defender posture is whatever Microsoft ships with the image rather than what a user's machine has.
+3. **Network reachability is the runner's, not a typical host's.** This is the one thing it can never tell us: whether an ordinary home network reaches Mojang's and the runtime vendor's endpoints. That remains `E-14`'s question and it is unaffected by anything here.
+4. **Nothing has been run.** A green run would be the first observation; the file's value today is that the verification exists in executable form and is one push away.
+
+**What I would claim if it passed.** That the integrity chain, both runtime branches, start-up, the local probe, graceful stop, and the no-elevation/no-service property all hold **on a clean Windows image**. I would still not tick `SRV-001`, because its criterion names a *standard-user* VM and a retail standard-user VM is the only thing that fully meets it. The requirement stays worded that way deliberately.
+
+**One consequence worth noting for the standing CI blocker.** Until now "configure a Git remote" was a general good-hygiene item with no urgent purpose. This workflow gives it a concrete one: the remote is what makes `T-023`'s remaining verification runnable at all, without buying hardware.
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.

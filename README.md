@@ -77,6 +77,7 @@ Secrets must never be committed or logged (`AGENTS.md` §7).
 | `python scripts/audit_traceability.py --self-test` | Pass — all **13** planted defects detected |
 | `python scripts/check_contrast.py` | Pass — all 22 DESIGN.md contrast pairs recomputed and matched; formula self-validated against 3 WCAG reference pairs |
 | `python scripts/verify_clean_vm.py --workdir <dir>` | **Requires a clean standard-user VM on Windows Pro/Enterprise/Education.** Host-JRE branch 11/11, fetched-JRE branch (`--simulate-no-host-java`) 12/12, both exit 0. Stops at the EULA gate (exit 10) because the script never accepts it on your behalf |
+| `.github/workflows/clean-vm.yml` | **Never executed** — no Git remote. Runs the same verification on a hosted Windows image |
 
 **Every gate has been seen to fail, not just pass.** `cargo clippy` denies `unwrap()`
 (exit 101); `cargo deny` reports `RUSTSEC-2020-0071` on a seeded vulnerable crate
