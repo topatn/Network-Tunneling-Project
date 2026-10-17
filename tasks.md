@@ -391,11 +391,11 @@ Counts: 86 tasks across 10 milestones.
 ### T-049 — Design and implement admin authentication and API
 
 - [ ] **Prerequisites:** T-045, T-046
-- **Scope:** Decide admin identity model (ADR); implement admin routes: suspend, terminate, relay drain.
-- **Deliverables:** ADR; admin routes; tests.
+- **Scope:** Admin identity model **decided** — ADR-019: the project owner is the sole administrator, admin is a separate identity rather than a role on `users`, WebAuthn required with no TOTP fallback, short sessions plus step-up before destructive actions, offline recovery codes. Still to do here: spike whether WebAuthn can actually be enforced on the admin client (unverified); implement admin routes: suspend, terminate, relay drain.
+- **Deliverables:** ADR-019 (done); admin identity store and its migration; admin routes; tests.
 - **Requirements:** SEC-018, SEC-015
 - **Verification:** Design review; security tests
-- **Done when:** Admin routes fail without admin authentication; all admin actions audited.
+- **Done when:** Admin routes fail without admin authentication; all admin actions audited. **Added 2026-10-17:** a user access token presented to an admin route returns `forbidden`; a destructive route refuses a session that has not step-re-authenticated; recovery codes restore admin access and are hashed at rest; no recovery material appears in logs or `audit_events` (INV-5).
 
 
 ## M4 — Tunnel protocol, TCP, UDP, and relay

@@ -89,7 +89,7 @@ Counts: 110 requirements, 86 tasks.
 | **SEC-015** | Abuse controls exist: quotas, suspension, tunnel termination, and a documented incident procedure. | P0 | Public endpoints invite abuse. | A suspended user's active tunnels are terminated and new starts refused; quota limits return `quota_exceeded`; the incident runbook exists and has been walked through once. | Integration test; tabletop exercise | OPS-008 | Beta |
 | **SEC-016** | Signing keys can be rotated without downtime. | P0 | Key compromise response. | In staging a key rotation completes while tunnels remain connected; old keys stop validating after the overlap window. | Staging exercise | — | Beta |
 | **SEC-017** | Dependencies are inventoried and scanned in CI. | P1 | Maintenance and vulnerability response. | CI fails on a known-vulnerable dependency above a configured severity; each dependency has a recorded purpose. | CI check | — | Alpha |
-| **SEC-018** | Admin operations require separate, stronger authentication and are audited. [OPEN] | P0 | Admin compromise is high impact. | The admin authentication design is documented and reviewed before any admin route ships; admin routes fail without it. | Design review; security test | SEC-013 | Beta |
+| **SEC-018** | Admin operations require separate, stronger authentication and are audited. *Who/how: decided (ADR-019). Route shapes: open.* | P0 | Admin compromise is high impact. | The admin authentication design is documented and reviewed before any admin route ships; admin routes fail without it; a user token is refused (`forbidden`) on an admin route; destructive routes require step-up re-authentication; every admin action is audited. | Design review; security test | SEC-013 | Beta |
 
 ## Reliability requirements
 

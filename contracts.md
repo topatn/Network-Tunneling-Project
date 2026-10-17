@@ -180,20 +180,40 @@ If the control plane is unreachable, the relay keeps serving existing allocation
 - The server stores key, route, and a hash of the request per user. Same key + same hash within the retention window → return the stored response. Same key + different hash → `idempotency_mismatch`. Window *(proposal)*.
 - `stop` and `DELETE` routes are naturally idempotent.
 
-## 9. Admin API (OPEN)
+## 9. Admin API
 
-Not defined beyond intent: suspend/unsuspend user, terminate tunnel, list tunnels and abuse signals, drain/retire relay, rotate signing keys. Whether administrators are a role on `users` or a separate identity system is an unresolved security decision; admin routes must require separate, stronger authentication and produce `admin` audit events. This section must be completed before the security review.
+**Status: who and how are decided (ADR-019, 2026-10-17). The route list and request/response shapes are still OPEN.** Read this section together with `research.md` ADR-019, which records the reasoning and — importantly — the risk the decision does *not* remove.
 
-**"Stronger" has never been defined, which is why this section is still open (2026-10-17).** Primary-source evidence and three concrete options are recorded in `research.md` RQ-15, read directly from RFC 9700 / 8705 / 9449. In summary: RFC 9700 requires PKCE for public clients and treats sender-constrained tokens (mTLS or DPoP) as the answer to leaked access tokens. It does **not** use the term "phishing-resistant", so an option resting on that term rests on WebAuthn guidance, not on RFC 9700.
+Intended operations: suspend/unsuspend user, terminate tunnel, list tunnels and abuse signals, drain/retire relay, rotate signing keys.
 
-**Two owner answers are required before this section can be written, and neither is a technical question:**
+### 9.1 Authentication
 
-1. **Who are the administrators?** The project has no named operator team or headcount, and no stated relationship between the operator and the users they would suspend.
-2. **Which identity provider?** ADR-009 is open. A separate-tenant option is impossible until this is answered.
+- Admin is a **separate identity**, not a role on `users` (ADR-019). An admin session cannot hold tunnels; a user session carries no admin capability. **[A] — a separate identity store is a new entity; see `data-model.md` and the T-033 migration.**
+- **WebAuthn (passkey) is required for the admin role. No TOTP fallback.** A single admin identity can suspend every user and rotate every signing key, so the factor is the strongest available rather than the cheapest.
+- Admin sessions are **short-lived** and are **not** interchangeable with user access tokens. A user access token presented to an admin route returns `forbidden`, never a partial result.
+- **Step-up re-authentication** is required immediately before a destructive action: terminate a tunnel, drain a relay, suspend a user, or rotate signing keys. A session that has not re-authenticated recently is refused for those routes.
+- Recovery uses **offline recovery codes, hashed at rest**, plus a documented database-level recovery path. **[A] — mechanism unverified; T-049 must test it.** This is an explicit, narrow exception to SEC-002 ("no secrets in files"): the codes exist somewhere by necessity, at a stated location, and must never reach logs or `audit_events` (INV-5).
+- PKCE for admin tooling is **`S256`-only** like every other client (ADR-018).
+- Every admin action writes an `audit_events` row with `actor_type = 'admin'` (append-only). With one administrator this trail is the **primary** control, not a formality.
 
-A third question changes the design entirely and is also unanswered: **is an operator a human at all?** If administration is automated (for example a controller draining relays), the answer is a certificate or workload identity, not a second factor.
+### 9.2 What this does not protect against — read before approving
 
-ADR-018 records one related decision that *is* settled: PKCE is `S256`-only for all clients including admin tooling. That does not unblock this section.
+Recorded because a security section that only lists protections is misleading:
+
+| Protects against | Does **not** protect against |
+|---|---|
+| A stolen or escalated **user** session reaching admin routes | The administrator themselves, who can act on the database directly |
+| An attacker holding a valid user token escalating to admin | Anyone who already has database access |
+| **Accidental** destructive action, via step-up confirmation | One compromised admin account — **there is nobody else to notice** |
+
+**Separation of duties is absent in this project and cannot be created by adding a second factor.** The single administrator is also the developer with database access. This is an **accepted risk (ADR-019)**, mitigated only by the audit trail (detective, after the fact) and step-up confirmation (accidental damage only) — neither of which stops a determined administrator. A single administrator is also a **single point of failure**: losing the only admin credential makes the service unadministrable, which is why recovery is designed rather than assumed.
+
+### 9.3 Still open
+
+1. **Route shapes.** Request and response bodies, error codes, and idempotency for each admin operation are not written. T-049.
+2. **Whether WebAuthn can actually be enforced** on the admin client is unverified and needs a spike, not a decision (T-049).
+3. **Whether the owner is ever also a user** is a product question nobody has asked. ADR-019 forces "never"; that should be confirmed rather than inherited.
+4. **Automated administration** — if anything administrative is ever performed by a machine rather than the owner (a controller draining relays on deploy, say), that is a **workload identity**, not a second factor, and ADR-019 does not cover it.
 
 ## 10. Tunnel protocol (engine ↔ relay)
 

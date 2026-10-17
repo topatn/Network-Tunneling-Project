@@ -425,6 +425,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-016 | Cited files must exist; expected absences must be declared explicitly | **Accepted 2026-10-17** | 2026-10-17 | High (a demonstrated defect, not a judgement) |
 | ADR-017 | `sqlx migrate` owns `migrations/`; no separate migration library | **Accepted 2026-10-17** | 2026-10-17 | Medium-high; tool not yet executed, T-033 must verify |
 | ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Proposed 2026-10-17** — needs owner confirmation | 2026-10-17 | High for the S256 half (RFC 9700 is normative); low for the deferral half |
+| ADR-019 | The project owner is the sole administrator; admin is a **separate identity** (not a role on `users`); WebAuthn required, no TOTP fallback; short sessions plus step-up before destructive actions; recovery codes. **Separation of duties is absent and recorded as an accepted risk** | **Decided 2026-10-17** by the product owner | 2026-10-17 | [V] that this is the decision; [A] on all design reasoning, none of it tested |
 
 **ADR-016 was missing from this table on 2026-10-17** even though its full record existed 30 lines below it, and ADR-017 was present. Found while adding ADR-018. That is the same defect class ADR-016 was written about: a claim that exists in the document but is not represented where a reader would look. The summary table is now checked by `scripts/audit_traceability.py`, which was extended to require that every `### ADR-nnn` heading in §7 has a matching row above it — the same check that would have caught this.
 
@@ -512,7 +513,9 @@ Added 2026-10-17. `SEC-018` (P0) requires that admin operations "require separat
 3. **Is an operator a human at all?** Automated administration (for example, an autoscaling controller draining relays) would change the design completely — a certificate or workload identity, not a second factor.
 4. **What does "separate" mean operationally** when a one-person project has one administrator who is also likely a developer with database access? Separation of duties is weakest here.
 
-**What is actually needed to unblock SEC-018**: questions 1 and 2 answered. Until then any design would be a guess, and `contracts.md` §9 must stay OPEN. **Confidence: the RFC evidence is [V]; the option assessment is [A] reasoning and explicitly incomplete.**
+**Question 1 was answered by the product owner on 2026-10-17: the administrator is the project owner.** See ADR-019. That answer, plus the consequence recorded there, **decouples admin authentication from the identity provider**, which means question 2 is no longer a blocker for SEC-018 — it remains open for *users* under ADR-009.
+
+**What is actually needed to unblock SEC-018**: recorded in ADR-019, which states the decidable part and names what remains open. **Confidence: the RFC evidence is [V]; the option assessment is [A] reasoning and was explicitly incomplete, and ADR-019 records which parts survived that scrutiny.**
 
 ### ADR-017 — `sqlx migrate` owns the migrations directory
 
@@ -564,6 +567,44 @@ Added 2026-10-17. `SEC-018` (P0) requires that admin operations "require separat
 4. **If the owner rejects the deferral**, DPoP (RFC 9449) is the cheaper of the two mechanisms for a desktop client, because it needs no operator certificate issuance. That is a later decision, not this one.
 
 **Confidence.** High for item 1 — RFC 9700 is normative and was read directly. Low for item 2 — it is a judgement about sequencing, not a technical finding.
+
+### ADR-019 — The project owner is the administrator
+
+**Status: Decided 2026-10-17 by the product owner**, who answered RQ-15 question 1 with "make me the admin". This closes the *who* question. It does **not** close every part of SEC-018, and the consequences below include a weakness that authentication cannot fix.
+
+**Context.** `SEC-018` (P0) requires that admin operations "require separate, stronger authentication". RQ-15 recorded that nobody had defined "stronger", and that four questions blocked a design. The owner has now answered the most important one: **there is one administrator, and it is the project owner.**
+
+**Decision.**
+
+1. **One administrator: the project owner.** A single human identity.
+2. **Admin is a separate identity, not a role on `users`.** `data-model.md` §2 raised this as open; it is now closed toward a separate store. An admin identity is never also a user identity, so an admin session cannot be used to hold tunnels and a user session carries no admin capability.
+3. **Strongest available factor: WebAuthn (passkey) required.** No TOTP fallback for the admin role. Rationale below.
+4. **Short admin sessions, and step-up re-authentication before destructive actions.** "Destructive" = terminate a tunnel, drain a relay, suspend a user, rotate signing keys.
+5. **Recovery is designed, not assumed** — offline recovery codes, hashed at rest, plus a documented database-level recovery path. See the single-point-of-failure consequence.
+6. **All admin actions are audited** as `actor_type = 'admin'`, append-only. `data-model.md` §4 already models this; it becomes a primary control rather than a secondary one.
+
+**The reframe that drives the design — what admin authentication actually protects against here.** The obvious reading of "separate, stronger authentication" is separation of duties: two people, so neither can act alone. **That does not exist in this project and cannot be created by adding a second factor.** The owner is also the developer with database access. So the honest statement of what this control buys is narrower:
+
+| It **does** protect against | It **does not** protect against |
+|---|---|
+| A stolen or escalated **user** session reaching admin routes | The owner themselves, who can act on the database directly |
+| An attacker holding a valid user token escalating to admin | Anyone who has already obtained database access |
+| **Accidental** destructive action by the owner, via step-up confirmation | A single compromised administrator account — there is nobody to notice |
+
+Everything in the right-hand column is why this is recorded as an **accepted risk**, not a mitigated one.
+
+**Consequences, stated plainly.**
+
+1. **Separation of duties is absent and is not fixable at this scale.** Recorded as an accepted risk. The compensating controls are the audit trail (detective, after the fact) and step-up confirmation (accidental damage only). **Neither stops a determined owner.** A future version with a real operator team should revisit this ADR; the audit trail is the thing that makes revisiting possible.
+2. **A single administrator is a single point of failure.** Losing the only admin credential makes the service unadministrable — with no second person to restore it. This is the direct cost of the decision and it is why recovery codes plus a documented database-level path are in the decision rather than left open. **[A] reasoning — the specific recovery mechanism is unverified and should be tested at T-049.**
+3. **WebAuthn is required rather than optional because the blast radius is total.** One identity can suspend every user and rotate every signing key. The enrolment cost is one passkey for one person, which is the cheapest case for a strong factor; there is no fleet to roll it out to.
+4. **The audit trail becomes a primary control, not a formality.** With one administrator, `audit_events` is the only record that distinguishes legitimate admin action from misuse. This raises the bar on INV-5: admin audit rows must never contain the recovery material or tokens, exactly as the existing invariant requires. **Note the tension with SEC-002:** recovery codes are a secret that must exist somewhere, so they are an explicit, narrow exception with a stated location, not a general licence to write secrets to disk.
+5. **This decouples admin auth from the identity provider, so it no longer blocks on ADR-009.** ADR-009 remains open for *users*. A separate admin identity store is verifiable without choosing a user-facing IdP, which is why RQ-15 question 2 stopped being a blocker.
+6. **The audit trail records `actor_type='admin'` already**; no schema change is required for this decision. A separate admin identity store does add an entity, which is a `data-model.md` and migration change for T-033 — flagged, not made here.
+
+**Still open, and honestly so.** Whether WebAuthn can actually be enforced depends on the admin client and is **unverified** — it needs a spike, not a decision, and is added to T-049's scope. Whether the owner is ever also a user is a product question nobody has asked and this ADR does not answer it; the decision above forces "never", which should be confirmed rather than inherited.
+
+**Confidence.** [V] that this is the owner's decision — it was stated directly. [A] on the design reasoning and on every "consequence" above; none of it has been tested.
 
 ## 8. Open experiments
 

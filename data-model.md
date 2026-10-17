@@ -30,7 +30,7 @@ Retention durations and numeric bounds marked *(proposal)* are not validated; th
 | Configuration settings | **Reject as table** | Environment/config files; feature flags can be added later |
 | Idempotency keys | **Accept** `idempotency_keys` | Required by `contracts.md` idempotency semantics (small, TTL-bound) |
 
-Open: whether administrators are a role on `users` or a separate identity system. Not modeled yet; this is a security design decision (see `architecture.md` §20 and `contracts.md` §9).
+Admin identity: **decided 2026-10-17 (ADR-019)** — admin is a **separate identity, not a role on `users`**, and the project owner is the sole administrator. **Not modeled yet.** A separate admin identity store is a new entity and therefore a migration for T-033; it is deliberately *not* a `role` column on `users`, so that an admin session can never hold a tunnel and a user session can never carry admin capability. Recovery codes are hashed at rest and are the one declared, narrow exception to SEC-002. See `contracts.md` §9 for the authentication contract and `research.md` ADR-019 for the reasoning **and the accepted risk that separation of duties is absent**.
 
 ### 2.1 Managed game servers: deliberately not modeled (2026-10-17)
 

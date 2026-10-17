@@ -4,7 +4,7 @@
 
 **Note 2026-10-17:** this file previously also pointed at schemas in `docs/contracts/`. That directory **does not exist in this repository**, so for now `contracts.md` is the only wire-format source of truth. See `contracts.md`'s status paragraph.
 
-Legend — Auth: **user** = access token; **none** = unauthenticated; **relay** = relay credential; **admin** = separate admin authentication (not yet defined). Idem = supports `Idempotency-Key`.
+Legend — Auth: **user** = access token; **none** = unauthenticated; **relay** = relay credential; **admin** = separate admin identity, WebAuthn, short session, step-up before destructive actions (ADR-019, `contracts.md` §9.1). Idem = supports `Idempotency-Key`.
 
 ## User routes (`/v1`)
 
@@ -45,7 +45,7 @@ Rows 15, 16, and 18 depend on guest source-IP admission (experiment E-13).
 
 ## Admin routes (`/admin/v1`)
 
-Not defined. See `contracts.md` §9 (open).
+**Not defined — route shapes remain open (T-049).** Authentication is decided: `contracts.md` §9.1 and ADR-019. Two rules already bind every future admin route: a **user** access token returns `forbidden`, and destructive operations require **step-up re-authentication** (terminate a tunnel, drain a relay, suspend a user, rotate signing keys).
 
 ## Non-HTTP contracts
 
