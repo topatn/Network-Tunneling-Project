@@ -382,15 +382,48 @@ That last one is the clause that covers this entire product: a desktop applicati
 
 #### RQ-13.2 Java Edition (`server.jar`)
 
-- [V] Distributed by Mojang Studios, free of charge, licensed under the EULA linked from `minecraft.net/en-us/eula` (whose text I did not read).
+- [V] Distributed by Mojang Studios, free of charge, licensed under the EULA linked from `minecraft.net/en-us/eula` — **now read in full; see RQ-13.1b**.
 - [V] Object store is **content-addressed by SHA-1**: observed download path form is `piston-data.mojang.com/v1/objects/<sha1>/server.jar`, e.g. release `26.3` at `.../objects/33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c/server.jar`.
 - [V] `version_manifest_v2.json` at `piston-meta.mojang.com` carries a **`sha1` field per version entry** (documented field list). HTTPS throughout.
 - [X] **Not confirmed:** that the manifest was actually fetched and that a manifest-sourced SHA-1 verifies for the `server.jar` object specifically (the manifest hashes the version JSON, not necessarily the server jar). **E-15 must verify the real check end to end before `SRV-002` can be claimed.**
-- [V] **A JRE is required, and the requirement moves with game versions** — JRE 8 historically, 16 from 1.17, 17 from 1.18, **21 from 1.20.5**. The page I read states requirements for `26.3` but does not restate the minimum, so the exact floor for the current release is [X].
+- [V] **A JRE is required, and the requirement moves with game versions** — JRE 8 historically, 16 from 1.17, 17 from 1.18, **21 from 1.20.5**. The page I read states requirements for `26.3` but does not restate the minimum, so the exact floor for the current release is [X]. **Now measured: `javaVersion.majorVersion` is `25` for `26.3` (RQ-13.2b), so the floor question is answered per-version and answerable at download time rather than hard-coded.**
 - [A] **Consequence:** provisioning Java edition means acquiring *two* artifacts — the server jar **and a JRE** — from two different vendors, both verified, neither shipped in our installer. This roughly doubles the supply-chain surface of `SRV-002` and must be budgeted in `SRV-001` scope and disk footprint.
-- [V] Legal acceptance is an explicit user act: `eula.txt` is generated with `eula=false`, the process exits, and `eula` must be set to `true` to start.
+- [V] Legal acceptance is an explicit user act: `eula.txt` is generated with `eula=false`, the process exits, and `eula` must be set to `true` to start. **Confirmed as a design constraint by RQ-13.1b C3 and `SRV-015`: the app must never do this for the host.**
 - [V] `--initSettings` creates `server.properties` and `eula.txt` **without starting the server** — a clean hook for provisioning.
-- [V] Generated files: `server.properties`, `ops.json`, `whitelist.json`, `banned-players.json`, `banned-ips.json`, `logs/latest.log` plus gzipped rotations, world directory named by `level-name`, `libraries/`, `versions/`.
+- [V] Generated files: `server.properties`, `ops.json`, `whitelist.json`, `banned-players.json`, `banned-ips.json`, `logs/latest.log` plus gzipped rotations, world directory named by `level-name`, `libraries/`, `versions/`. **Superseded in part by RQ-13.2b: the shipped artifact is now a self-contained bundler jar, so `libraries/` and `versions/` are inside the jar rather than written beside it.**
+
+#### RQ-13.2b The Java Edition integrity chain was verified end to end (2026-10-17)
+
+This closes the `[X]` above and is the evidence `SRV-002` needs. Run live against Mojang's endpoints on 2026-10-17. **Everything here is `[V]` — measured, not read off a documentation page.**
+
+**The chain, and the correction that makes it correct.**
+
+| Step | Result |
+|---|---|
+| 1. `https://piston-meta.mojang.com/mc/game/version_manifest_v2.json` | HTTP 200, `application/json`, **277,821 bytes**, **919 versions**. Latest release **`26.3`**, released `2026-09-15T11:23:02+00:00`, manifest updated `2026-10-13T06:43:38+00:00` |
+| 2. Manifest entry for `26.3` | `url` = `https://piston-meta.mojang.com/v1/packages/11f1aefe473eefba0af62e3286c33b692807b2eb/26.3.json`, and `sha1` = `11f1aefe…` |
+| 3. **What that `sha1` actually covers** | **The version JSON, not the server jar.** I downloaded the version JSON and computed SHA-1 over it: `11f1aefe473eefba0af62e3286c33b692807b2eb` — **exact match.** This confirms the caveat I had recorded as `[X]` and is the single most important finding here, because verifying the server jar against the *manifest* hash would **always fail** and an implementer who assumed otherwise would conclude the artifact was tampered |
+| 4. The **correct** hash for the artifact | It lives at `downloads.server.sha1` **inside the version JSON**: `33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c`, with `size` `62294556` and the content-addressed URL |
+| 5. End-to-end verification | Downloaded **62,294,556 bytes**; streamed SHA-1 = `33680f5f…5f4c` — **exact match.** Byte count matched the declared `size`. **So the working chain is: manifest → version JSON → `downloads.server.sha1` → download → SHA-1 → compare.** `SRV-002` is satisfiable for Java Edition |
+| 6. Is there a sidecar checksum? | **No.** `server.jar.sha1` and `server.jar.sha256` both return HTTP 404. The version JSON is the **only** published source of the expected hash, so an implementation cannot skip that fetch |
+| 7. Unattended download | **Plain HTTPS GET, no cookies, no authentication, no special headers.** 62 MB in ~1.0 s (~68 MB/s) on this connection. Satisfies the no-elevation and no-account constraints |
+| 8. Required runtime | `javaVersion` = `{"component": "java-runtime-epsilon", "majorVersion": 25}` — **Java 25 is required.** This is readable from the version JSON at download time, so the floor never has to be hard-coded |
+| 9. Host has Java 25? | **Yes** — `java version "25.0.1" 2025-10-21 LTS`, plus `C:\Program Files\Java\jdk-25`. **[V] for this machine only** — it says nothing about a typical host, which is the real `SRV-001` risk |
+
+**The artifact is a self-contained Mojang Bundler jar, not a plain server jar.** `META-INF/MANIFEST.MF` reads `Main-Class: net.minecraft.bundler.Main` and `Bundler-Format: 1.0`. 165 entries. It **contains its own 40 dependency jars** under `META-INF/libraries/` (Netty 4.2.16, Guava 33.6.0-jre, Log4j 2.26.0, JNA 5.17.0, fastutil 8.5.18, gson 2.14.0, authlib 10.0.77, brigadier 1.3.11, …) and the real server at `META-INF/versions/26.3/server-26.3.jar` (23.3 MB compressed, 26.7 MB uncompressed).
+
+**Two consequences, both good, both worth recording because they change provisioning scope:**
+
+1. **No library resolution is needed at install time.** Historically a server jar fetched its dependencies from a separate endpoint; bundling them means provisioning downloads and verifies **one** artifact. That is a smaller supply-chain surface than the `[A]` note above assumed, and it removes a whole class of "a library 404s at provision time" failure.
+2. **No Windows native is bundled.** The Netty native jars present are `linux-aarch_64`, `linux-x86_64`, `osx-aarch_64`, `osx-x86_64` only. On Windows Netty falls back to its pure-Java NIO transport. **[A]** this is the expected and correct behaviour for Windows, not a packaging defect — but it is a performance-relevant fact for `PERF-001`, which must measure the Windows path and cannot assume Linux-class numbers.
+
+**A correction to my own work, recorded because it nearly produced a false finding.** My first download script opened the output file with `"wb"` **inside** the per-chunk loop, truncating it on every iteration. The saved file ended up 428,572 bytes instead of 62 MB, and `zipfile` then reported entries with **negative header offsets** and 7.95 bits/byte of entropy. I briefly concluded the jar was encrypted or obfuscated. **That conclusion was wrong and was an artefact of my own bug, not a property of the artifact.** The SHA-1 had been computed over every streamed byte and was valid throughout. Re-downloaded with a single file handle: first four bytes are `50 4b 03 04` (ZIP magic), 165 entries, all offsets sane. **Lesson recorded rather than quietly fixed: a truncated file that still hashes correctly will silently corrupt every structural conclusion drawn from it, so size must be checked against the manifest before the bytes are interpreted.**
+
+**What E-15 still does not answer, and why.**
+
+1. **The server has never been started.** `java -jar server.jar` is *plausible* — the bundler bootstrap is a normal `Main-Class` and the manifest is well-formed — but **plausible is not verified**. Confirming it means accepting the EULA on this machine, which is a legal act and which `SRV-015` forbids the app from doing for a host. **Not done here; it needs the owner's explicit go-ahead.**
+2. **The JRE supply question is open.** `SRV-010` forbids a system-wide install, and Mojang's `java-runtime-epsilon` component name suggests a published runtime, but **I did not find and verify a download endpoint for it** — the `launchermeta.mojang.com` runtime-manifest paths I tried returned 404, and guessing further URLs would be exactly the kind of invention `AGENTS.md` forbids. **[X] open.** Options remain: detect a suitable host JRE and refuse clearly if absent, bundle a redistributable runtime, or document a prerequisite.
+3. **Standard-user footprint is unmeasured.** E-19's VM half has still not been run, and now has more to check: the bundler unpacks into memory rather than to disk, so disk use and the `libraries/`+`versions/` directories in the older file list may not apply.
 - [V] **RCON and query exist**: `enable-rcon`, `rcon.password`, `rcon.port`, `enable-query`, `query.port`, `broadcast-rcon-to-ops` (present since 1.0.0–1.0.15).
 - [V] **New since 1.21.9: the Minecraft Server Management Protocol (MSMP)**, a server management API. From 25w35a MSMP clients must authenticate to access it; from 25w37a MSMP TLS is on by default. **Read in full — see RQ-13.4, which changes ADR-014.**
 - [V] A GUI appears unless `--nogui`; headless operation is supported. Size ≈ 54 MiB jar, ≈ 114 MiB with generated data.
@@ -690,7 +723,7 @@ Everything in the right-hand column is why this is recorded as an **accepted ris
 | E-12 | Sign-in spike: system browser + loopback/device flow + credential store | ADR-009 |
 | E-13 | Source-IP admission of guests at the relay: behavior with CGNAT, mobile, shared NAT | Guest access design (ADR-007) |
 | E-14 | Fallback carrier for tunnel when UDP to relay is blocked | Restrictive-network support |
-| E-15 | Minecraft Java server artifact: official channel, terms, unattended download, integrity check, standard-user install, required runtime | ADR-013, SRV-001, SRV-002 |
+| E-15 | Minecraft Java server artifact: official channel, terms, unattended download, integrity check, standard-user install, required runtime. **Channel, terms, unattended download, integrity check and required runtime all answered 2026-10-17 (§5 RQ-13.2b, `[V]`). Remaining: start-up needs a legal EULA acceptance, JRE supply for hosts without Java 25, and the standard-user footprint** | ADR-013, SRV-001, SRV-002 |
 | E-16 | Minecraft Bedrock server artifact: same questions, plus the license-acceptance step and the settings that must be generated | ADR-013, SRV-001, SRV-002 |
 | E-17 | Supervising a headless server process: start, graceful stop, bounded crash restart, log capture, exit-code handling | ADR-012, SRV-007 |
 | E-18 | Update, rollback, world backup/restore, and per-server disk/CPU/memory footprint | SRV-008, SRV-009 |
