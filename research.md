@@ -411,7 +411,20 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-014 | Treatment of a generated game-server credential that the server must read from its configuration file | Open, **narrowed twice** — now Java-only (Bedrock has no RCON), and RQ-13.4 offers a better answer | 2026-10-17 | n/a |
 | ADR-015 | Prefer MSMP over RCON for Java server management; never enable RCON; let the server generate its own MSMP secret; pass the TLS keystore password by environment variable | Proposed | 2026-10-17 | Medium (documented behaviour read; not exercised) |
 
-Each ADR still needs full context, options, rationale, and consequences sections. Not yet written.
+Each ADR still needs full context, options, rationale, and consequences sections. Not yet written. **ADR-016 added 2026-10-17** (see below).
+
+### ADR-016 — Cited files must exist, and expected absences must be declared
+
+**Status:** Accepted, applied immediately | 2026-10-17 | High (a demonstrated defect, not a judgement)
+
+**Context.** On 2026-10-17 it was discovered that `docs/contracts/` and `contracts/examples.json` did not exist, while `contracts.md`, `api.md`, `data-model.md` §7, `tasks.md` T-031, and `review-report.md` §2 all described or validated them. The claim had survived an entire review cycle. Two distinct failures were involved: the claim was false, and **every existing mechanical check passed anyway.**
+
+**Decision.**
+1. `scripts/audit_traceability.py` now verifies that every cited repository path exists. This is a **hard error**, because a document set that points at files which were never written is broken regardless of internal consistency.
+2. Files a task will legitimately *produce* are declared in an `EXPECTED_ABSENT` set and reported as **warnings**, not errors — a planning-phase repository is allowed to name artifacts that do not exist yet. Removing an entry from that set is a deliberate act that should be reviewed, and the set carries a comment naming the task that owns each file.
+3. The defect class is named so it can be recognised: **an internally self-consistent document set can still be wrong.** Identifier and count checks cannot catch a file that was never authored, because the identifier is spelled consistently everywhere.
+
+**Consequences.** T-031's "Done when" is now known to be unachievable as written and was corrected. `contracts.md` records itself as the only wire-format source of truth that exists. The audit's self-test gained a sixth planted defect (a cited path that does not exist) so the new check cannot silently stop working.
 
 ## 8. Open experiments
 

@@ -171,7 +171,52 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
             if ref not in known:
                 errors.append(f"{label} {ref} referenced but never defined")
 
-    # 7. Declared counts must match what is actually there.
+    # 7. Cited files and paths must actually exist.
+    #
+    #    Added 2026-10-17 after finding that contracts.md, api.md,
+    #    data-model.md and tasks.md all cited docs/contracts/ and
+    #    contracts/examples.json as authoritative while neither existed. Every
+    #    earlier check passed cleanly on that state, because they only validated
+    #    identifiers. A document set can be perfectly self-consistent and still
+    #    point at files that were never written.
+    path_refs: set[str] = set()
+    for text in (req_text, task_text, plan_text, research_text, model_text,
+                 contracts_text, arch_text):
+        for m in re.finditer(
+            r"`((?:docs|contracts|migrations|profiles|crates|tests|infra|apps|scripts)"
+            r"(?:/[A-Za-z0-9._-]+)+)`",
+            text,
+        ):
+            path_refs.add(m.group(1))
+
+    # Not-yet-written files are legitimate for a planning-phase repository: a
+    # task may name the artifact it will produce. These are expected absences,
+    # recorded so the gate stays green while the fact stays visible. Removing an
+    # entry from this set is a deliberate act that should be reviewed.
+    EXPECTED_ABSENT = {
+        # To be authored by T-031 (protocol crate: schemas and examples).
+        "contracts/examples.json",
+        "contracts/error.schema.json",
+        "contracts/tunnel-hello.schema.json",
+        "contracts/tunnel-hello-ack.schema.json",
+        "contracts/create-tunnel-request.schema.json",
+        "contracts/start-tunnel-response.schema.json",
+        "contracts/create-invitation-request.schema.json",
+        "contracts/create-invitation-response.schema.json",
+        "contracts/claim-invitation-request.schema.json",
+        "contracts/claim-invitation-response.schema.json",
+        "contracts/tunnel.schema.json",
+        "contracts/error-response.schema.json",
+    }
+
+    missing_paths = sorted(p for p in path_refs if not (root / p).exists())
+    for p in missing_paths:
+        if p in EXPECTED_ABSENT:
+            warnings.append(f"cited path not written yet (expected): {p}")
+        else:
+            errors.append(f"cited path does not exist: {p}")
+
+    # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
     if m:
         if int(m.group(1)) != len(declared):
@@ -332,6 +377,14 @@ def self_test(root: Path) -> int:
                 "### T-001 — Create repository and CI skeleton [CP]\n\n- [ ] **Prerequisites:** T-004",
             ),
             "allowed; IDs are stable",
+        ),
+        (
+            "cited file that does not exist",
+            "contracts.md",
+            lambda t: t.replace(
+                "`contracts.md`", "`contracts/does-not-exist.schema.json`", 1
+            ),
+            "cited path does not exist",
         ),
         (
             "wrong declared count",
