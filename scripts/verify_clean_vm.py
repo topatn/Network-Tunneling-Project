@@ -75,14 +75,25 @@ class Report:
 
     def __init__(self) -> None:
         self.checks: list[dict] = []
+        self.skipped: list[dict] = []
         self.notes: list[str] = []
         self.facts: dict = {}
 
     def check(self, name: str, ok: bool, detail: str = "") -> bool:
         self.checks.append({"name": name, "ok": bool(ok), "detail": detail})
         mark = "PASS" if ok else "FAIL"
-        print(f"  [{mark}] {name}" + (f" - {detail}" if detail else ""))
+        print(f"  [{mark}] {name}" + (f" — {detail}" if detail else ""))
         return bool(ok)
+
+    def skip(self, name: str, reason: str) -> None:
+        """Record a check that could not be evaluated here.
+
+        Distinct from both pass and fail on purpose. Passing asserts something nobody
+        measured; failing asserts the opposite. Neither is true when the environment
+        prevents the measurement.
+        """
+        self.skipped.append({"name": name, "reason": reason})
+        print(f"  [SKIP] {name} — {reason}")
 
     def note(self, text: str) -> None:
         self.notes.append(text)
@@ -95,23 +106,30 @@ class Report:
     def emit(self, as_json: bool) -> int:
         if as_json:
             print(json.dumps(
-                {"checks": self.checks, "notes": self.notes, "facts": self.facts},
+                {"checks": self.checks, "skipped": self.skipped,
+                 "notes": self.notes, "facts": self.facts},
                 indent=2,
             ))
         print()
         print("=" * 72)
         total = len(self.checks)
         bad = len(self.failed)
-        print(f"{total - bad}/{total} checks passed")
+        print(f"{total - bad}/{total} checks passed" +
+              (f", {len(self.skipped)} skipped" if self.skipped else ""))
         for c in self.failed:
-            print(f"  FAILED: {c['name']} - {c['detail']}")
+            print(f"  FAILED: {c['name']} — {c['detail']}")
+        for s in self.skipped:
+            print(f"  SKIPPED (not evaluable here): {s['name']}")
         if bad:
             print("\nVERDICT: provisioning is NOT verified on this machine.")
             return EXIT_FAIL
         print("\nVERDICT: provisioning completed end to end on this machine, with no")
         print("         elevation and no writes outside the working directory.")
+        if self.skipped:
+            print(f"         {len(self.skipped)} check(s) could not be evaluated here and")
+            print("         are recorded as skipped, not passed.")
         print("         This is evidence for SRV-001 and E-19 only if the machine was")
-        print("         genuinely clean - a developer machine is not a clean VM.")
+        print("         genuinely clean — a developer machine is not a clean VM.")
         return EXIT_OK
 
 
@@ -519,9 +537,35 @@ def check_side_effects(report: Report, workdir: Path) -> None:
             report.note(f"{label}: could not verify ({type(exc).__name__})")
 
     print("\n--- containment ---")
-    report.check("working directory is inside the user profile",
-                 str(workdir).lower().startswith(str(Path.home()).lower()),
-                 str(workdir))
+    # SRV-010 asks that provisioning write only inside the user's profile directory.
+    # This check is a PROXY: it can confirm where the harness deliberately pointed the
+    # workdir, but it cannot detect a write escaping that directory. Say so.
+    #
+    # When the harness chose a workdir OUTSIDE the profile -- which a hosted CI runner
+    # does, since RUNNER_TEMP lives on a separate volume -- the proxy cannot evaluate the
+    # product's behaviour at all. The first version of this reported that as a FAILURE,
+    # and a hosted run duly failed 11/12 with every substantive check green. Making it a
+    # failure was wrong twice over: it blamed the product for the harness's path choice,
+    # and it converted "cannot evaluate here" into "requirement violated".
+    #
+    # It is now SKIPPED with a reason. Not passed -- that would assert something nobody
+    # measured -- and not failed -- that would assert the opposite.
+    home = Path.home().resolve()
+    try:
+        workdir.resolve().relative_to(home)
+        inside = True
+    except ValueError:
+        inside = False
+    if inside:
+        report.check("working directory is inside the user profile", True, str(workdir))
+    else:
+        report.skip(
+            "working directory is inside the user profile",
+            f"{workdir} is outside {home} (typical for a CI runner, whose scratch is a "
+            f"separate volume). The harness chose this path, not the product, so SRV-010 "
+            f"cannot be evaluated here. Re-run with a workdir under the profile to "
+            f"exercise it.",
+        )
 
 
 # ---------------------------------------------------------------------------- main

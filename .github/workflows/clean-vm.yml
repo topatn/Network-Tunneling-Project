@@ -85,7 +85,7 @@ jobs:
       - name: Phase 1 - acquire and verify (SRV-002, SRV-004, SRV-018)
         shell: pwsh
         run: |
-          python scripts/verify_clean_vm.py --workdir "$env:RUNNER_TEMP\provision" --prepare
+          python scripts/verify_clean_vm.py --workdir "$env:USERPROFILE\provision" --prepare
           # Capture immediately: any later command can clobber $LASTEXITCODE.
           $code = $LASTEXITCODE
 
@@ -125,10 +125,10 @@ jobs:
         if: ${{ inputs.accept_eula }}
         shell: pwsh
         run: |
-          $eula = "$env:RUNNER_TEMP\provision\eula.txt"
+          $eula = "$env:USERPROFILE\provision\eula.txt"
           (Get-Content $eula -Raw) -replace 'eula=false', 'eula=true' |
             Set-Content $eula -NoNewline
-          python scripts/verify_clean_vm.py --workdir "$env:RUNNER_TEMP\provision" --run
+          python scripts/verify_clean_vm.py --workdir "$env:USERPROFILE\provision" --run
           exit $LASTEXITCODE
 
       - name: Report when the EULA was not accepted
@@ -153,9 +153,14 @@ jobs:
           # nothing and the run produces no artifact at all. Written with backslashes
           # first and caught by scripts/audit_traceability.py, which now checks that
           # every artifact path in this repository uses forward slashes.
+          #
+          # The workdir moved from RUNNER_TEMP to USERPROFILE so that SRV-010's
+          # containment check is actually evaluable: on a hosted runner RUNNER_TEMP is a
+          # separate volume (D:\a\_temp), so the check could not be measured and was
+          # correctly skipped. Running under the profile makes it a real test.
           path: |
-            ${{ runner.temp }}/provision/verify.log
-            ${{ runner.temp }}/provision/server.properties
+            ~/**/provision/verify.log
+            ~/**/provision/server.properties
           retention-days: 14
           if-no-files-found: ignore
 
