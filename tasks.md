@@ -252,6 +252,7 @@ Counts: 86 tasks across 10 milestones.
 - **Requirements:** TEST-001, NET-007
 - **Verification:** Unit tests including invalid inputs
 - **Done when:** All example payloads in `contracts/examples.json` pass or fail as specified; malformed frames return errors without panic.
+- **Correction 2026-10-17 — the referenced files do not exist.** `contracts/examples.json` and `docs/contracts/` are absent from this repository, although this task, `contracts.md`, `api.md`, and `data-model.md` §7 all cite them as authoritative. **This task must therefore *author* the JSON Schemas and the example payloads before it can validate against them**; the validation cannot be inherited from any earlier pass, because none was ever run. The withdrawn claim is recorded in `contracts.md`'s status paragraph and in `review-report.md`. Writing the schemas is a prerequisite to this task's own verification, not part of it.
 
 ### T-032 — Implement profile loader and five profile files
 

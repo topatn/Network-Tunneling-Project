@@ -1,6 +1,8 @@
 # api.md — API Route Inventory
 
-**Status:** DRAFT. Inventory only. Request/response definitions, errors, and rules are in `contracts.md` and the schemas in `docs/contracts/`; they are not repeated here, so they cannot drift.
+**Status:** DRAFT. Inventory only. Request/response definitions, errors, and rules are in `contracts.md`; they are not repeated here, so they cannot drift.
+
+**Note 2026-10-17:** this file previously also pointed at schemas in `docs/contracts/`. That directory **does not exist in this repository**, so for now `contracts.md` is the only wire-format source of truth. See `contracts.md`'s status paragraph.
 
 Legend — Auth: **user** = access token; **none** = unauthenticated; **relay** = relay credential; **admin** = separate admin authentication (not yet defined). Idem = supports `Idempotency-Key`.
 

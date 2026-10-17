@@ -179,7 +179,7 @@ pub struct MappingRequest {
 }
 ```
 
-Validation layering: (1) the JSON Schema in `docs/contracts/` is the wire-level contract; (2) typed deserialization rejects unknown fields; (3) a domain validation function checks profile rules (INV-2) and quotas; (4) database constraints are the last line of defense. A mismatch between layers is a test failure, not a runtime surprise.
+Validation layering: (1) the wire-level contract, currently the definitions in `contracts.md` §15 and the message tables in `contracts.md` §§5 and 10 — **note 2026-10-17:** this originally cited a JSON Schema in `docs/contracts/`, which does not exist in this repository; T-031 must author the schemas, so until then `contracts.md` is authoritative; (2) typed deserialization rejects unknown fields; (3) a domain validation function checks profile rules (INV-2) and quotas; (4) database constraints are the last line of defense. A mismatch between layers is a test failure, not a runtime surprise.
 
 ## 8. Migration strategy and compatibility rules
 

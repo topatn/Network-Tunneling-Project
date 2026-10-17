@@ -3,7 +3,16 @@
 **Status:** DRAFT v0.1. Authoritative for API and component contracts. Route inventory: `api.md`. Entities: `data-model.md`.
 **Last updated:** 2026-10-16
 
-**Verification status.** The JSON Schemas in `docs/contracts/` are valid draft 2020-12 schemas, and the example payloads in this document (also stored in `contracts/examples.json`) were checked against them, including payloads that must be rejected. Nothing is implemented. Whether the validator enforced the `uuid` and `date-time` string formats was not independently confirmed. All numeric limits, timeouts, and lifetimes marked *(proposal)* are unvalidated starting points that `requirements.md` must fix after experiments. Items depending on guest source-IP admission carry **[E-13]**.
+**Verification status — corrected 2026-10-17.** This paragraph previously claimed that "the JSON Schemas in `docs/contracts/` are valid draft 2020-12 schemas" and that the example payloads "were checked against them". **That claim could not be true of this repository:** `docs/contracts/` and `contracts/examples.json` **do not exist here** (confirmed by directory listing, 2026-10-17). Eleven JSON Schemas are described throughout this document, and `api.md`, `data-model.md` §7, and `tasks.md` T-031 all reference them as if they were present.
+
+Consequences, recorded rather than papered over:
+
+- **This document is the only wire-format source of truth that exists.** Where a schema is cited elsewhere, read the definition here.
+- **No schema validation has been performed on anything in this repository**, so the earlier claim that example payloads were validated — including payloads that must be rejected — is withdrawn as unverifiable. `review-report.md` §2 repeats it and is corrected there.
+- **T-031's "Done when" references `contracts/examples.json`, a file that must still be written.** T-031 must create the schemas and examples before it can validate anything, and that writing is a prerequisite to its verification rather than part of it.
+- **Whether the `uuid` and `date-time` string formats are actually enforced remains unknown**, since no validator has ever run here. This is now an open question for T-031 rather than a caveat on a completed check.
+
+Nothing is implemented. All numeric limits, timeouts, and lifetimes marked *(proposal)* are unvalidated starting points that `requirements.md` must fix after experiments. Items depending on guest source-IP admission carry **[E-13]**.
 
 ## 1. Scope and conventions
 
