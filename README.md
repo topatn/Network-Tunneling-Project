@@ -97,10 +97,8 @@ run, because there is no application code.**
 
 What *has* been checked in the documentation set:
 
-- The draft database schema parses with the PostgreSQL parser (syntax only; not run against a database).
-- The 11 JSON Schemas are valid and example payloads were checked against them.
-- All Mermaid diagrams parse with Mermaid 10.9.8 (syntax only).
-- Requirement-to-task traceability was checked by script at generation time.
+- All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
+- The traceability audit passes and catches 5 of 5 planted defects.
 
 ## Configuration example
 

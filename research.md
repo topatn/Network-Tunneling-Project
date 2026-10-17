@@ -14,6 +14,8 @@ Every finding carries one of four labels:
 
 Nothing here is benchmark data. No performance, compatibility, or cost figure has been measured.
 
+**Mechanical verification, 2026-10-17.** All 11 Mermaid diagrams across this document set render with `@mermaid-js/mermaid-cli` **12.0.0**, including the container diagram amended for the server-manager component; a malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to reject bad input. Syntax and rendering only — **visual layout has not been reviewed**, and that remains T-004 work. The traceability audit is at `scripts/audit_traceability.py`. The previous report recorded Mermaid 10.9.8 as a parser-only check; rendering was not attempted until now.
+
 ## 1. Coverage status
 
 | Required topic (prompt §6 F1) | Status |

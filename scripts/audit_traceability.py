@@ -194,6 +194,7 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
     else:
         warnings.append("plan.md has no 'Total: N tasks, N requirements' line")
 
+    chain = longest_chain(graph)
     stats = {
         "requirements declared": len(declared),
         "traceability rows": len(appendix),
@@ -201,8 +202,52 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
         "experiments": len(experiments),
         "ADRs": len(adrs),
         "invariants": len(invariants),
+        "longest chain (tasks)": len(chain),
     }
-    return errors, warnings, stats
+    chain_text = " -> ".join(chain)
+    errors, warnings, stats = errors, warnings, stats
+    return errors, warnings, stats, chain_text
+
+
+def longest_chain(graph: dict[str, list[str]]) -> list[str]:
+    """Longest prerequisite chain, counted in tasks.
+
+    Replaces the hand-derived critical path. Depth is computed with an
+    order-independent DFS, so a task depending on a higher-numbered task is
+    handled correctly. Ties are broken deterministically (alphabetically) so the
+    output is stable between runs.
+    """
+    memo: dict[str, int] = {}
+
+    def depth(node: str, seen: frozenset[str] = frozenset()) -> int:
+        if node in memo:
+            return memo[node]
+        if node in seen:  # defensive; find_cycles reports real cycles
+            return 0
+        best = 1
+        for dep in graph.get(node, []):
+            if dep in graph:
+                best = max(best, 1 + depth(dep, seen | {node}))
+        memo[node] = best
+        return best
+
+    best_node = ""
+    best_depth = 0
+    for node in sorted(graph):
+        d = depth(node)
+        if d > best_depth:
+            best_node, best_depth = node, d
+    if not best_node:
+        return []
+
+    chain: list[str] = []
+    node = best_node
+    while True:
+        chain.append(node)
+        nxt = [d for d in graph.get(node, []) if d in graph and depth(d) == depth(node) - 1]
+        if not nxt:
+            return list(reversed(chain))
+        node = sorted(nxt)[0]
 
 
 def find_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
@@ -304,7 +349,7 @@ def self_test(root: Path) -> int:
                 shutil.copy2(f, tree / f.name)
             original = (tree / filename).read_text(encoding="utf-8-sig")
             (tree / filename).write_text(mutate(original), encoding="utf-8")
-            errs, warns, _ = audit(tree)
+            errs, warns, _, _ = audit(tree)
             # A defect may surface as an error or a warning depending on severity,
             # so the planted defect is considered detected if either mentions it.
             found = errs + warns
@@ -330,9 +375,11 @@ def main() -> int:
     if args.self_test:
         return self_test(ROOT)
 
-    errors, warnings, stats = audit(ROOT)
+    errors, warnings, stats, chain_text = audit(ROOT)
     for k, v in stats.items():
         print(f"{k:24}: {v}")
+    print()
+    print(f"longest chain:\n  {chain_text}")
     print()
     for w in warnings:
         print(f"WARN  {w}")

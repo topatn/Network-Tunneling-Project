@@ -850,14 +850,14 @@ Counts: 86 tasks across 10 milestones.
 
 T-001 → T-002 → T-004 → T-010 → T-012 → T-020 → T-022 → T-030 → T-033 → T-034 → T-041 → T-042 → T-047 → T-070 → T-071 → T-072 → T-082 → T-083 → T-084 → T-091 → T-120 → T-121 → T-122
 
-This is the longest chain of prerequisites (23 tasks), computed from the prerequisite fields by task count. **No effort or duration estimates exist yet**, so it shows structural dependency depth, not calendar time; re-compute it once estimates are added. Tasks outside this chain can still block a release if they slip.
+This is the longest chain of prerequisites, computed by `scripts/audit_traceability.py` on 2026-10-17 — **not** by hand, unlike earlier versions of this note. It is **23 tasks** long. **No effort or duration estimates exist yet**, so this shows structural dependency depth, not calendar time. Tasks outside this chain can still block a release if they slip.
 
 **Recomputed 2026-10-17 after adding T-023 to T-027 as prerequisites of T-022.** The chain length is unchanged at 23 tasks, and the chain above is still one of the longest. Two further chains of the same length now exist, through the new provisioning experiments:
 
 - via the game join experiment: T-001 → T-002 → T-004 → T-010 → T-013 → T-014 → T-022 → … (same tail)
 - via the provisioning experiments: T-001 → T-002 → T-004 → T-023 → T-025 → T-026 → T-022 → … (same tail)
 
-**This chain length has NOT been machine-verified.** It was derived by hand from the prerequisite fields; `scripts/audit_traceability.py` checks for cycles and forward references but does not compute chain depth. T-120 must compute it properly.
+**This chain length is machine-computed** as of 2026-10-17. The script resolves ties alphabetically, so where several chains share the maximum depth (see below) it reports one deterministically; the count of 23 is the part that matters and it is now verified rather than hand-derived.
 
 **Known forward references (all confirmed benign, reported by the audit as warnings):** T-022 → T-023…T-027 (introduced when the provisioning experiments were added as prerequisites of gate G1), and two pre-existing ones: **T-043 → T-050** (start/stop needs signing-key management) and **T-098 → T-109** (privacy tests need the retention jobs). The last two predate this work and were found by the audit, not introduced by it. Per rule 2, the Prerequisites field is authoritative, so no renumbering is required; renumbering T-022 would have meant editing 14 references across four files for cosmetic ordering.
 

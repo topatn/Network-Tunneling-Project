@@ -30,7 +30,7 @@ Task counts are computed from `tasks.md` data. Total: 86 tasks, 110 requirements
 6. **M7** (testing) is partly parallel with M5–M6; **M8** (packaging, operations, privacy tests) follows.
 7. **M9** closes with the audit and release checklist.
 
-Computed longest prerequisite chain: T-001 → T-002 → T-004 → T-010 → T-012 → T-020 → T-022 → T-030 → T-033 → T-034 → T-041 → T-042 → T-047 → T-070 → T-071 → T-072 → T-082 → T-083 → T-084 → T-091 → T-120 → T-121 → T-122 (23 tasks). It reflects dependency depth only; relay tasks T-060 to T-063 are not on this chain but are essential and gate M5.
+Computed longest prerequisite chain, **verified by script 2026-10-17** (`scripts/audit_traceability.py`): T-001 → T-002 → T-004 → T-010 → T-012 → T-020 → T-022 → T-030 → T-033 → T-034 → T-041 → T-042 → T-047 → T-070 → T-071 → T-072 → T-082 → T-083 → T-084 → T-091 → T-120 → T-121 → T-122 (**23 tasks**). It reflects dependency depth only; relay tasks T-060 to T-063 are not on this chain but are essential and gate M5.
 
 ## Decision gates and conditions
 
