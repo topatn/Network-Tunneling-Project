@@ -1,0 +1,5 @@
+# Effective rustfmt configuration.
+# Standard defaults are used deliberately: no opinionated style is imposed beyond
+# what rustfmt ships with, so that "format" in CI matches "cargo fmt" locally.
+edition = "2021"
+max_width = 100

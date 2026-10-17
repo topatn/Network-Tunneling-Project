@@ -1,0 +1,11 @@
+# Non-lint clippy configuration.
+#
+# Lint policy deliberately lives in the root Cargo.toml under [workspace.lints],
+# because crates must opt in with `[lints] workspace = true`. Putting it here
+# instead does not work: clippy.toml only accepts clippy lint names, and an
+# earlier draft that used this file for policy failed to compile. That failure is
+# the reason for this comment.
+
+# Minimum supported Rust version, so clippy does not suggest APIs newer than the
+# declared `rust-version` in Cargo.toml. Keep the two in step.
+msrv = "1.77"

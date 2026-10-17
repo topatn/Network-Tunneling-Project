@@ -1,0 +1,58 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/protocol",
+    "crates/profiles",
+    "crates/engine",
+    "crates/relay",
+    "crates/control-plane",
+    "crates/server-manager",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.77"
+license = "UNLICENSED"
+publish = false
+
+# Centralised dependency declaration. Every dependency added here MUST also be
+# recorded in the dependency register (T-030) with purpose, licence, and
+# maintenance notes, in the same change (AGENTS.md section 5).
+[workspace.dependencies]
+# Intentionally empty. T-030 adds entries; each needs a register row first.
+
+# ---------------------------------------------------------------------------
+# Workspace lints. Crates opt in with `[lints] workspace = true`, so this is the
+# single place a policy change is made. Levels are `deny` because AGENTS.md
+# section 4 states that lint failures block merging.
+#
+# VERIFIED on rustc/clippy 1.99.1 — these names were checked against the real
+# toolchain after an earlier draft put an invalid rustc lint in clippy.toml.
+# ---------------------------------------------------------------------------
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Correctness and risk first.
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+# Untrusted input is everywhere here (network data, files, user text) and
+# AGENTS.md section 4 forbids panics, so the panic-prone lints are denied.
+panic = { level = "deny", priority = -1 }
+unwrap_used = { level = "deny", priority = -1 }
+expect_used = { level = "deny", priority = -1 }
+# Bounds checks are removed by indexing, which on untrusted input is a panic path.
+indexing_slicing = { level = "deny", priority = -1 }
+# Performance is a product concern for a data-plane relay (NET-002, PERF-002).
+perf = { level = "deny", priority = -1 }
+# Hygiene.
+style = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+
+# Deliberately NOT denied, with a reason (AGENTS.md section 5.1 analogue):
+#   integer_arithmetic — a byte-level protocol implementation does bit and
+#     arithmetic manipulation constantly. Denying it guarantees a stream of
+#     suppressions, and a policy that is routinely silenced protects nothing.
+#     Reconsider once real framing code exists (T-031).

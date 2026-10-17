@@ -1,0 +1,15 @@
+﻿[package]
+name = "gtt-protocol"
+description = "Message types, framing, and state machines shared by engine, relay, and control plane."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Intentionally empty. T-031 adds dependencies; each needs a register row first
+# (AGENTS.md section 5). No placeholder crates are committed.
+
+[lints]
+workspace = true

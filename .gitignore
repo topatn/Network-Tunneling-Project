@@ -1,0 +1,35 @@
+# Build output
+/target/
+**/target/
+
+# Rust
+**/*.rs.bk
+
+# Node / Tauri UI (apps/desktop) — created when the desktop task begins
+node_modules/
+dist/
+apps/desktop/src-tauri/target/
+apps/desktop/gen/
+
+# Local environment and secrets. Never commit these (AGENTS.md section 3.5).
+.env
+.env.*
+*.pem
+*.key
+!docs/**/*.md
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test and coverage output
+*.profraw
+coverage.xml
+lcov.info
+
+# Experiment scratch area (M1 prototype code must not enter the production tree —
+# tasks.md rule 4). Nothing from here is committed.
+scratch/
