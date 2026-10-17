@@ -35,7 +35,7 @@ the tree, which §5.1 forbids.
 | `serde`, `serde_json` | Protocol message encoding (contracts.md §10) | Proposed |
 | `tokio` | Async runtime for engine, relay, control plane | Proposed |
 | `axum` | Control-plane HTTP API (ADR-008) | Proposed — **ADR-008 confidence is low; backend stack is reasoning only** |
-| `sqlx` or `postgres` | PostgreSQL access | Proposed — choice deferred to T-003/T-030 |
+| `sqlx` (0.9.0, **measured 2026-10-17**) | PostgreSQL access **and** `sqlx migrate` for T-003 | MIT OR Apache-2.0; `rust-version = 1.94.0`, above this repo's declared 1.77, so it forces an MSRV decision. **145 transitive crates.** Builds only on the GNU toolchain here. Both driver and migration tool are still unchosen — see `research.md` §5 RQ-14 and ADR-008 |
 | `tracing`, `tracing-subscriber` | Structured logging (ADR-010) | Proposed |
 | `keyring` | OS credential store (SEC-002) | Proposed |
 | `cargo-deny` | Licences, advisories, and bans (SEC-017) | Dev/CI tool; policy file at `deny.toml`. **Use the official prebuilt binary**, not `cargo install` — compiling it needs a linker this environment lacks (see the T-001 verification section) |
@@ -74,6 +74,8 @@ Two process notes, because both nearly produced a false pass:
 ### Configuration errors found and fixed by actually running it
 
 `deny.toml` had never been parsed by a real `cargo-deny`, and it was wrong in three
+
+`deny.toml` had never been parsed by a real `cargo-deny`, and it was wrong in three
 ways. All three are fixed:
 
 - **`[licenses] deny = [...]` was removed in this release** and made the entire
@@ -90,6 +92,19 @@ ways. All three are fixed:
 
 The toolchain gap remains for *compiling* Rust tooling, but it is no longer what
 stands between this repository and a proven dependency gate.
+
+### Trialed and rejected: adding `sqlx` as a real dependency (2026-10-17)
+
+For T-003's migration-tool research, `sqlx 0.9.0` was added to `gtt-control-plane` temporarily to measure what it costs and whether it builds here. **Removed in the same change; the workspace is back to zero dependencies and `git status` is clean.**
+
+What it showed, recorded because the numbers matter for the ADR:
+
+- **`sqlx` resolves 145 transitive crates.** That is the cost of the `sqlx-cli` tool plus its query layer.
+- **It does not build on the MSVC toolchain** — `link.exe` missing, no Windows SDK, so `quote`, `proc-macro2` and other build scripts fail to link.
+- **It does build on `stable-x86_64-pc-windows-gnu`**, which needs no SDK. Note that toolchain ships **without** `clippy` and `rustfmt`; add them with `rustup component add clippy rustfmt --toolchain stable-x86_64-pc-windows-gnu`, otherwise `cargo clippy` fails with a misleading "not installed for the toolchain" error.
+- **`cargo deny` passes on the real 145-crate graph** — advisories ok, bans ok, licences ok — with seven `duplicate` warnings (two versions of `block-buffer`, `cpufeatures`, `crypto-common`, `digest`, `hashbrown`, `sha2`, `syn`). Those are advisory-only under `multiple-versions = "warn"`, but the duplicate-version signal becomes real as soon as a substantial dependency exists, so the policy needs revisiting when T-030 picks dependencies.
+- **`sqlx` declares `rust-version = "1.94.0"`**, above this repo's declared 1.77, which forces a decision about the workspace MSRV.
+- The dead-code lint proved itself here: the temporary probe module was rejected by `clippy -D warnings` with `function 'probe' is never used`. The lint gate works on real code, not only on the synthetic `unwrap()` test.
 
 ## What *was* verified locally (2026-10-17)
 

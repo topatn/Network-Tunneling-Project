@@ -258,6 +258,31 @@ Proposed compatibility test levels (ADR-011, proposed):
 
 A game is not marked "supported" until L2 passes for it. Experiment E-11: determine whether any headless or scriptable client exists for each game.
 
+### RQ-14: Which migration tool should own `migrations/`?
+
+Added 2026-10-17 for T-003. Survey only — **no decision is recorded and none should be until ADR-008 is settled**, because every candidate implies a database driver and ADR-008's confidence is *low* (`research.md` §5 RQ-10: "reasoning only, no evidence gathered"). Choosing a migration tool now would quietly endorse a driver that has never been justified.
+
+Constraints the tool must satisfy, from `schema.md` and `data-model.md` §8 rather than preference:
+
+- Forward-only, one migration step per deploy, applied before new code starts.
+- **Never edit an applied migration.** Rollback is a compensating forward migration.
+- Expand/contract: add nullable/defaulted columns first, backfill, switch reads, drop later.
+- Indexes built concurrently where supported.
+- CI applies every migration to an empty database and checks the result.
+- `schema-draft.sql` must be deleted in the same change that adds the first migration.
+
+Candidates
+
+| Candidate | Evidence read 2026-10-17 | Notes |
+|---|---|---|
+| **`sqlx-cli`** (`sqlx migrate`) | crates.io: latest **0.9.0**, published **2026-05-21**; licence `MIT OR Apache-2.0` per its own `sqlx-cli/Cargo.toml`; repo `launchbadge/sqlx`; workspace `rust-version = "1.94.0"`, edition 2021; has a `migrate` feature and reversible `.up.sql`/`.down.sql` pairs | Actively maintained and the default choice in Rust/PostgreSQL circles. **Cost: 145 transitive crates** for the CLI, measured here. Doubles as the query layer, so one dependency instead of two. Its MSRV (1.94) is above this repo's declared 1.77, which needs a decision |
+| **`refinery`** | Not examined | Common lightweight alternative, single binary, embeds migrations. Needs the same comparison before it can be preferred or dismissed |
+| **Hand-rolled numbered `.sql` files** | Already described in `schema.md` | Zero dependencies, fully under our control, and the documented workflow is already tool-neutral. But the bookkeeping (ordering, checksums, "applied" tracking) becomes ours to get right, and `data-model.md` §8 forbids editing history, which a naive runner may not enforce |
+
+**[A] Reasoning, not evidence:** given `SEC-017` (CI must fail on a known-vulnerable dependency) and a still-empty dependency graph, a zero-dependency option has a real advantage, but hand-rolling migration bookkeeping is exactly where subtle corruption bugs live. Do not pick the smallest dependency count as a tiebreaker without the ADR-008 decision first.
+
+**Open:** whether `sqlx` MSRV 1.94 forces the workspace `rust-version` up from 1.77; whether `refinery` is materially better; whether the project accepts a 145-crate CLI dependency.
+
 ### RQ-13: Can the app safely provision and supervise a game server on the host's own PC?
 
 Added 2026-10-17 for the scope change in `context.md` G-7. Scope agreed for the first cut: **host-local only, Minecraft Java and Minecraft Bedrock.** Operator-hosted servers are out of scope (NG-1).
