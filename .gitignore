@@ -30,6 +30,12 @@ Thumbs.db
 coverage.xml
 lcov.info
 
+# Python bytecode. Added 2026-10-18 after scripts/__pycache__/*.pyc was found TRACKED:
+# importing the audit and clean-VM scripts from a test put compiled bytecode in the index,
+# and .gitignore does not apply to files that are already tracked.
+__pycache__/
+*.py[cod]
+
 # Experiment scratch area (M1 prototype code must not enter the production tree —
 # tasks.md rule 4). Nothing from here is committed.
 scratch/

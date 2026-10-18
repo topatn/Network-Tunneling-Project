@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator
@@ -767,6 +768,50 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                         f"(for example treating 10 as success) will otherwise fail with "
                         f"that code"
                     )
+
+    # 12. Repository hygiene: no build artefacts tracked, and tracked text files must
+    #     match the line-ending policy in .gitattributes.
+    #
+    #     Added 2026-10-18 after two real findings. scripts/__pycache__/*.pyc was TRACKED:
+    #     importing the audit and clean-VM scripts from a test put compiled bytecode in the
+    #     index, and .gitignore does not apply to files that are already tracked. And
+    #     audit_traceability.py had 1109 CRLF pairs despite `.gitattributes` declaring
+    #     `*.py text eol=lf`, because PowerShell WriteAllLines writes CRLF. Neither shows up
+    #     in a normal `git status`, and neither breaks anything until it does.
+    tracked: list[str] = []
+    if shutil.which("git"):
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(root), "ls-files", "-z"],
+                capture_output=True, timeout=60, check=True,
+            )
+            tracked = [p.decode("utf-8", "replace")
+                       for p in proc.stdout.split(b"\0") if p]
+        except Exception:  # noqa: BLE001 - a warning, never a silent skip
+            warnings.append("could not list tracked files; hygiene checks skipped")
+    for path in tracked:
+        base = path.rsplit("/", 1)[-1]
+        if "__pycache__/" in path or base.endswith((".pyc", ".pyo")):
+            errors.append(
+                f"{path} is tracked but is compiled Python bytecode. Build output does "
+                f"not belong in the repository, and .gitignore does not apply once a file "
+                f"is tracked -- untrack it with `git rm --cached`"
+            )
+        if path.endswith((".py", ".yml", ".yaml", ".md", ".toml", ".json",
+                          ".sql", ".rs")):
+            fp = root / path
+            if not fp.is_file():
+                continue
+            try:
+                raw = fp.read_bytes()
+            except OSError:
+                continue
+            if b"\r\n" in raw:
+                errors.append(
+                    f"{path} contains CRLF line endings, but .gitattributes declares this "
+                    f"type as `text eol=lf`. Normalise it before committing, or every "
+                    f"checkout produces diff churn"
+                )
 
     # 8. Declared counts must match what is actually there.
     m = COUNTS_LINE.search(req_text)
