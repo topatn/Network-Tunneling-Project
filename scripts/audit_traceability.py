@@ -517,38 +517,58 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
     #    schema-draft.sql for physical shape, and nothing compared them. A column
     #    could be added to one and not the other indefinitely and every other check
     #    would still pass, because identifiers would all still resolve.
-    ddl_file = root / "schema-draft.sql"
-    if not ddl_file.exists():
-        warnings.append("schema-draft.sql not found; skipping model/DDL agreement check")
-    else:
-        ddl = ddl_columns(ddl_file.read_text(encoding="utf-8-sig"))
-        doc = documented_columns(model_text)
-        if not ddl or not doc:
-            errors.append(
-                "model/DDL agreement check parsed nothing "
-                f"(DDL tables={len(ddl)}, documented={len(doc)}) -- the check is broken"
+    #    Source of truth switched 2026-10-18 (schema.md rule 2): once migrations/ exists
+    #    it is authoritative for the physical schema and schema-draft.sql is retired. The
+    #    check follows that and reads every *.up.sql, so data-model.md is still compared
+    #    against what actually gets applied. Silently falling back to the retired draft
+    #    would let the two drift apart the moment the draft is deleted.
+    ddl_sources: list[tuple[str, str]] = []
+    mig_dir = root / "migrations"
+    if mig_dir.is_dir():
+        for up in sorted(mig_dir.glob("*.up.sql")):
+            ddl_sources.append((f"migrations/{up.name}",
+                                up.read_text(encoding="utf-8-sig")))
+    if not ddl_sources:
+        draft = root / "schema-draft.sql"
+        if draft.exists():
+            ddl_sources.append(("schema-draft.sql",
+                                draft.read_text(encoding="utf-8-sig")))
+            warnings.append(
+                "migrations/ has no *.up.sql; falling back to schema-draft.sql, which "
+                "schema.md rule 2 no longer treats as authoritative"
             )
-        for table in sorted(set(ddl) - set(doc)):
-            errors.append(
-                f"table {table} exists in the DDL but is not documented in data-model.md"
-            )
-        for table in sorted(set(doc) - set(ddl)):
-            errors.append(
-                f"table {table} is documented in data-model.md but absent from the DDL"
-            )
-        for table in sorted(set(ddl) & set(doc)):
-            only_ddl = [c for c in ddl[table] if c not in doc[table]]
-            only_doc = [c for c in doc[table] if c not in ddl[table]]
-            if only_ddl:
-                errors.append(
-                    f"{table}: column(s) {', '.join(only_ddl)} are in the DDL but not "
-                    f"in data-model.md"
-                )
-            if only_doc:
-                errors.append(
-                    f"{table}: column(s) {', '.join(only_doc)} are in data-model.md but "
-                    f"not in the DDL"
-                )
+        else:
+            warnings.append("no migrations/*.up.sql and no schema-draft.sql; skipping "
+                            "the model/DDL agreement check")
+
+    ddl: dict[str, list[str]] = {}
+    for _src_name, src_text in ddl_sources:
+        for tbl, cols in ddl_columns(src_text).items():
+            if tbl in ddl:
+                errors.append(f"table {tbl} is created by more than one migration "
+                               f"source; the merged view would hide a conflict")
+            ddl[tbl] = cols
+    doc = documented_columns(model_text)
+    if ddl_sources and (not ddl or not doc):
+        errors.append(
+            f"model/DDL agreement check parsed nothing "
+            f"(DDL tables={len(ddl)}, documented={len(doc)}) -- the check is broken"
+        )
+    for tbl in sorted(set(ddl) - set(doc)):
+        errors.append(f"table {tbl} exists in the DDL but is not documented in "
+                       f"data-model.md")
+    for tbl in sorted(set(doc) - set(ddl)):
+        errors.append(f"table {tbl} is documented in data-model.md but absent from the "
+                       f"DDL")
+    for tbl in sorted(set(ddl) & set(doc)):
+        only_ddl = [c for c in ddl[tbl] if c not in doc[tbl]]
+        only_doc = [c for c in doc[tbl] if c not in ddl[tbl]]
+        if only_ddl:
+            errors.append(f"{tbl}: column(s) {', '.join(only_ddl)} are in the DDL but "
+                           f"not in data-model.md")
+        if only_doc:
+            errors.append(f"{tbl}: column(s) {', '.join(only_doc)} are in data-model.md "
+                           f"but not in the DDL")
 
     # 10. api.md and contracts.md must agree on every route.
     #
@@ -845,7 +865,7 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
         "ADRs (table rows)": len(adrs),
         "ADRs (full records)": len(adr_sections),
         "invariants": len(invariants),
-        "model/DDL tables compared": len(ddl) if ddl_file.exists() else 0,
+        "model/DDL tables compared": len(ddl),
         "longest chain (tasks)": len(chain),
     }
     chain_text = " -> ".join(chain)
@@ -1088,8 +1108,15 @@ def self_test(root: Path) -> int:
             tree = Path(tmp)
             for f in root.glob("*.md"):
                 shutil.copy2(f, tree / f.name)
-            # schema-draft.sql is copied too: without it the model/DDL check skips
-            # itself and the two planted defects below would pass for the wrong reason.
+            # The DDL source is copied too, whichever is authoritative: without it the
+            # model/DDL check skips itself and its two planted defects would pass for the
+            # wrong reason. migrations/ wins when present (schema.md rule 2); the retired
+            # draft is copied only as a fallback.
+            mig_src = root / "migrations"
+            if mig_src.is_dir():
+                (tree / "migrations").mkdir(parents=True, exist_ok=True)
+                for f in mig_src.glob("*.sql"):
+                    shutil.copy2(f, tree / "migrations" / f.name)
             ddl_src = root / "schema-draft.sql"
             if ddl_src.exists():
                 shutil.copy2(ddl_src, tree / ddl_src.name)

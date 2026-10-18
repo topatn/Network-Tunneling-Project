@@ -116,15 +116,30 @@ jobs:
         run: cargo deny check advisories bans licenses
 
   migrate:
-    name: Migrations apply to an empty database
-    # TEST-007. Disabled until T-003 chooses a migration tool and T-033 creates
-    # migrations/. Enabling it before then would fail for the wrong reason.
-    if: false
+    name: Migrations apply to an empty database (T-033)
+    # TEST-007, unblocked by T-033 (2026-10-18). Previously `if: false` because no
+    # migration tool had been chosen and migrations/ did not exist.
+    #
+    # This job is also the ONLY way the normal-connection verification happens at all.
+    # The authoring machine cannot fork a PostgreSQL backend (STATUS_DLL_INIT_FAILED),
+    # so the schema was only ever applied through `postgres --single`. A service container
+    # exercises the real client path: connection handling, statement boundaries, and
+    # transaction behaviour, none of which `--single` touches.
+    #
+    # Run against BOTH supported major versions. schema.md records that the schema was
+    # applied cleanly on 16.10 and 17.6, but through the line-oriented path; only this job
+    # confirms it through a normal client.
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["16", "17"]
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres }}
         env:
+          # A disposable value for an ephemeral CI container. Not a secret: it exists only
+          # for the lifetime of the job and reaches nothing but localhost.
           POSTGRES_PASSWORD: ci-only-not-a-secret
           POSTGRES_DB: gtt_test
         ports: ["5432:5432"]
@@ -133,10 +148,140 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:ci-only-not-a-secret@localhost:5432/gtt_test
     steps:
       - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Install sqlx-cli
+        # sqlx-cli has no prebuilt binary and must be compiled. It cannot be compiled on
+        # the authoring machine (no Windows SDK, no assembler in the GNU bundle), which is
+        # why this verification was impossible until CI existed. Version pinned rather
+        # than floating, so the tool cannot change under the schema.
+        run: cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+
+      - name: Show the migration set
+        run: ls -1 migrations/
+
       - name: Apply all migrations to an empty database
-        run: echo "Not implemented. Replaced by T-033."
+        run: |
+          sqlx migrate info
+          sqlx migrate run
+
+      - name: Re-running must be a no-op
+        # Idempotency is a property of the tool, not of luck. If migrate run is not
+        # idempotent, a retry after a partial failure would corrupt the schema.
+        run: |
+          sqlx migrate run
+          sqlx migrate run
+
+      - name: Revert and re-apply
+        # The .down.sql files exist for local and test teardown (schema.md rule 4: a
+        # deployed system rolls back with a compensating forward migration, never a
+        # revert). Left untested they rot, and a down file that cannot run is worse
+        # than none. Verified locally on 2026-10-18 by applying up, then down, then up
+        # again: 12 tables -> 0 -> 12, zero errors on PostgreSQL 16.10.
+        run: |
+          sqlx migrate revert
+          # `_sqlx%` is sqlx's own bookkeeping table. It survives a revert (the ROW is
+          # removed, the table is not), so a bare count would be 1, not 0. Excluding it is
+          # what makes this assert about the schema rather than about the tool.
+          test "$(psql -v ON_ERROR_STOP=1 -tAc "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname not like '\_sqlx%'")" = "0" \
+            || { echo "revert left tables behind"; exit 1; }
+          echo "revert left 0 tables, as expected"
+          sqlx migrate run
+
+      - name: Verify the resulting structure
+        run: |
+          set -euo pipefail
+          q() { psql -v ON_ERROR_STOP=1 -tAc "$1"; }
+          fail=0
+          check() {
+            local label="$1" actual="$2" expected="$3"
+            if [ "$actual" = "$expected" ]; then
+              echo "  OK   $label = $actual"
+            else
+              echo "  FAIL $label = $actual (expected $expected)"
+              fail=1
+            fi
+          }
+
+          # Counts MEASURED from the catalog on 2026-10-18 by applying this exact
+          # migration, not copied from a document. Identical on PostgreSQL 16.10 and 17.6,
+          # so a single assertion is safe across the matrix.
+          #
+          # Read from pg_constraint, NOT information_schema.table_constraints. The
+          # information_schema view reported 102 CHECK constraints where pg_constraint
+          # reports 23, and 611 across all schemas -- using it would have hardcoded a
+          # wrong number into this gate. schema.md's documented 57 constraints matches
+          # pg_constraint's total exactly, so the original measurement was right and the
+          # mistake here would have been mine.
+          NS="connamespace = 'public'::regnamespace"
+          # Excludes `_sqlx_migrations`, which sqlx creates in the target schema. The
+          # expected 12 was measured locally via `postgres --single`, which has no such
+          # table; counting it here would report 13 and fail for a tool reason.
+          check "tables"            "$(q "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname not like '\_sqlx%'")" 12
+          check "foreign keys"      "$(q "select count(*) from pg_constraint where contype='f' and $NS")" 13
+          check "check constraints" "$(q "select count(*) from pg_constraint where contype='c' and $NS")" 23
+          check "unique constraints" "$(q "select count(*) from pg_constraint where contype='u' and $NS")" 9
+          check "primary keys"      "$(q "select count(*) from pg_constraint where contype='p' and $NS")" 12
+          check "constraints total" "$(q "select count(*) from pg_constraint where $NS")" 57
+          check "indexes"           "$(q "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='i'")" 35
+          echo "  info audit_events has no foreign keys (INV-5): $(q "select count(*) from pg_constraint where contype='f' and conrelid='audit_events'::regclass")"
+          check "PRIV-006 email columns" "$(q "select count(*) from information_schema.columns where table_schema='public' and column_name like '%email%'")" 0
+          check "INV-1 local/target columns" "$(q "select count(*) from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and a.attnum>0 and not a.attisdropped and (a.attname like '%local\_%' or a.attname like '%target\_%')")" 0
+          check "gen_random_uuid needs no extension" "$(q "select count(*) from pg_proc where proname='gen_random_uuid'")" 1
+          exit $fail
+
+      - name: Constraints actually reject bad data
+        # Counts alone do not prove a CHECK constraint is enforced. Every statement below
+        # was executed against a real PostgreSQL 16 cluster before being committed, and
+        # that caught two mistakes in the first draft: tunnels.expires_at is NOT NULL with
+        # no default, so a "valid row" insert without it failed for the wrong reason; and a
+        # second insert reused an idp_issuer an earlier step had already taken, hitting
+        # users_idp_uniq instead of the constraint under test. Keys are now distinct and
+        # the statements are order-independent.
+        run: |
+          set -uo pipefail
+          fail=0
+          must_reject() {
+            local label="$1" sql="$2"
+            if psql -v ON_ERROR_STOP=1 -tAc "$sql" >/dev/null 2>&1; then
+              echo "  FAIL $label was ACCEPTED but must be rejected"
+              fail=1
+            else
+              echo "  OK   $label rejected"
+            fi
+          }
+          must_accept() {
+            local label="$1" sql="$2"
+            if psql -v ON_ERROR_STOP=1 -tAc "$sql" >/dev/null 2>&1; then
+              echo "  OK   $label accepted"
+            else
+              echo "  FAIL $label was REJECTED but should be valid"
+              fail=1
+            fi
+          }
+          # Owner row the tunnel statements reference.
+          psql -v ON_ERROR_STOP=1 -tAc "insert into users (idp_issuer,idp_subject) values ('seed','seed')"
+
+          must_reject "users_status_chk" \
+            "insert into users (idp_issuer,idp_subject,status) values ('r1','s','bogus')"
+          must_reject "tunnels_profile_version_chk" \
+            "insert into tunnels (owner_id,name,game_profile_id,profile_version,expires_at) select id,'n2','p',0,now()+interval '1 day' from users where idp_issuer='seed'"
+          must_reject "tunnels_expiry_chk" \
+            "insert into tunnels (owner_id,name,game_profile_id,profile_version,expires_at) select id,'n3','p',1,now() from users where idp_issuer='seed'"
+          must_reject "tunnels_stopped_consistency_chk" \
+            "insert into tunnels (owner_id,name,game_profile_id,profile_version,expires_at,state) select id,'n4','p',1,now()+interval '1 day','stopped' from users where idp_issuer='seed'"
+
+          must_accept "users valid row" \
+            "insert into users (idp_issuer,idp_subject) values ('a1','s')"
+          must_accept "tunnels valid row" \
+            "insert into tunnels (owner_id,name,game_profile_id,profile_version,expires_at) select id,'n1','p',1,now()+interval '1 day' from users where idp_issuer='seed'"
+          exit $fail
 
 # HISTORY -- verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
 # cargo-deny 0.20.2 (official prebuilt Windows binary, checksum verified):

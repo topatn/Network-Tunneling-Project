@@ -1,6 +1,6 @@
 # data-model.md — Domain and Persistence Model
 
-**Status:** DRAFT v0.1.1. Authoritative for the domain and persistence *design*. Physical DDL draft: `schema-draft.sql` (see `schema.md` for precedence).
+**Status:** DRAFT v0.1.1. Authoritative for the domain and persistence *design*. Physical DDL draft: `migrations/` (see `schema.md` for precedence).
 **Last updated:** 2026-10-17
 
 Retention durations and numeric bounds marked *(proposal)* are not validated; they must be fixed in `requirements.md` (privacy and quota requirements) before implementation. Nothing here has been run against a database; the DDL was syntax-checked with the PostgreSQL parser only.
@@ -191,4 +191,4 @@ Validation layering: (1) the wire-level contract, currently the definitions in `
 
 ## 9. Links
 
-`architecture.md`, `contracts.md` (wire formats), `schema.md`, `schema-draft.sql`, `research.md`, `requirements.md` (retention, quotas).
+`architecture.md`, `contracts.md` (wire formats), `schema.md`, `migrations/`, `research.md`, `requirements.md` (retention, quotas).

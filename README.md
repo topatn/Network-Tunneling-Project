@@ -102,7 +102,7 @@ What *has* been checked in the documentation set:
 
 - All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
 - The traceability audit passes and catches **18 of 18** planted defects, including two that verify every ADR in `research.md` §7 has a summary-table row — added after ADR-016 was found to have a full record but no row, while ADR-017 had both.
-- **`data-model.md` and `schema-draft.sql` are compared mechanically** — all 12 tables, column by column. Added after `T-120` was found to name this as a standing gap.
+- **`data-model.md` and `migrations/` are compared mechanically** — all 12 tables, column by column. Added after `T-120` was found to name this as a standing gap.
 - **`api.md` and `contracts.md` are cross-checked route by route** — 20 routes, checking method, path, and success status, in both directions. This found a real gap: `contracts.md` §5.12 and §5.13 stated no success code at all while `api.md` asserted one.
 - **Colour contrast is recomputed, not asserted.** `scripts/check_contrast.py` re-derives all 22 ratios in `DESIGN.md` §3 from the token table in §2, after validating its own implementation against three WCAG reference pairs. All 22 matched, and it was confirmed to fail on a planted overstated ratio and a planted wrong threshold. Hover, disabled, and high-contrast states are still unchecked.
 - **The database schema has been executed**, not merely parser-checked: applied cleanly to an empty database on **PostgreSQL 16.10 and 17.6**, producing 12 tables, 35 indexes, 57 constraints and 13 foreign keys with zero errors. PRIV-006 (no email column) and INV-1 (no local destination column) were checked against the live schema, and four negative tests confirmed the CHECK constraints reject bad input. Method, version matrix, and one environment limitation are recorded in `schema.md`.
@@ -124,7 +124,7 @@ Application troubleshooting will be documented when there is an application. For
 | `context.md`, `idea.md` | Product context, scope, brief |
 | `research.md` | Evidence, experiments, ADRs |
 | `architecture.md` | System architecture |
-| `data-model.md`, `schema.md`, `schema-draft.sql` | Data model and schema |
+| `data-model.md`, `schema.md`, `migrations/` | Data model and schema |
 | `contracts.md`, `api.md`, `contracts/` | API and protocol contracts, JSON Schemas |
 | `requirements.md`, `spec.md` | Requirements and index |
 | `tasks.md`, `plan.md` | Implementation checklist and execution plan |
