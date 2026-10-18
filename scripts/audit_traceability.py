@@ -739,6 +739,65 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                         f"scripts/verify_clean_vm.py defines EXIT_OPERATOR={expected}"
                     )
 
+            # sqlx creates `_sqlx_migrations` in the target schema, and it declares
+            # `version BIGINT PRIMARY KEY`, so it contributes a table, a pkey INDEX, and a
+            # primary-key CONSTRAINT. Any count of every pg_class or pg_constraint row in
+            # the target schema is therefore too high unless it excludes sqlx's objects.
+            #
+            # This was fixed once incompletely and only CI found it: `_sqlx` was excluded
+            # from the table count but not from the index or constraint counts, so the
+            # job saw 13 tables (caught) but also 36 indexes, 13 primary keys and 58
+            # constraints (missed). Requiring every count to exclude it closes that.
+            #
+            # A count may reference the exclusion through a shell variable, since
+            # factoring it into one is the better fix, so `$VAR` references are resolved
+            # one level deep against the workflow's own assignments.
+            if re.search(r"sqlx[ \t]+migrate\b", text):
+                assignments = {
+                    m.group(1): m.group(2)
+                    for m in re.finditer(
+                        r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\"([^\n]*)\"", text, re.M
+                    )
+                }
+
+                def _expanded(sql: str) -> str:
+                    # Bounded: a self-referential assignment must not loop.
+                    seen, out = {sql}, sql
+                    for _ in range(3):
+                        new = out
+                        for var, val in assignments.items():
+                            new = new.replace(f"${{{var}}}", val).replace(f"${var}", val)
+                        if new in seen:
+                            break
+                        seen.add(new)
+                        out = new
+                    return out
+
+                for raw in text.splitlines():
+                    # Skip comments: the workflow documents the SQL it runs, and quoting
+                    # a query in prose is not a query.
+                    line = raw.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "count(*)" not in line:
+                        continue
+                    query = _expanded(line)
+                    if "pg_class" not in query and "pg_constraint" not in query:
+                        continue
+                    # A count already scoped to one named table cannot be affected by
+                    # sqlx's table, so it is not required to exclude it.
+                    if re.search(r"\b(conrelid|relname)\s*=", query):
+                        continue
+                    if "_sqlx" not in query:
+                        errors.append(
+                            f"{wf.name}: counts every pg_class/pg_constraint row in the "
+                            f"schema without excluding sqlx's own `_sqlx_migrations` "
+                            f"objects. That table has a PRIMARY KEY, so it adds a table, "
+                            f"a pkey index and a primary-key constraint, and this count "
+                            f"will be too high. Reference one shared exclusion variable "
+                            f"so a count cannot be missed: {line[:80]}"
+                        )
+
             # `psql` does NOT read DATABASE_URL. sqlx does; libpq does not. It uses
             # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE, so a job that sets only
             # DATABASE_URL has every psql call silently fail to connect.
@@ -1119,6 +1178,14 @@ def self_test(root: Path) -> int:
             "EXIT_OPERATOR=10",
         ),
         (
+            # The defect that fixed itself once and only CI noticed: the `_sqlx`
+            # exclusion applied to the table counts but not to the constraint counts.
+            "catalog count that omits sqlx's bookkeeping exclusion",
+            ".github/workflows/ci.yml",
+            lambda t: _drop_sqlx_exclusion(t),
+            "excluding sqlx's own `_sqlx_migrations` objects",
+        ),
+        (
             # The defect that broke the migrate job's first real run: DATABASE_URL alone
             # is not enough for psql.
             "workflow invoking psql without libpq PG* connection variables",
@@ -1219,6 +1286,19 @@ def _strip_pg_env(text: str) -> str:
             continue
         out.append(line)
     return "".join(out)
+
+
+def _drop_sqlx_exclusion(text: str) -> str:
+    """Remove the `_sqlx` exclusion from the constraint-count variable only.
+
+    This is the exact partial fix that shipped once: the pg_class counts kept the
+    exclusion and the pg_constraint counts lost it. Written as a function because a
+    long lambda that silently fails to match would make this planted defect pass for
+    the wrong reason, which is the failure mode this self-test exists to prevent.
+    """
+    old = 'where n.nspname = \'public\' and $NOTSQLX"'
+    new = 'where n.nspname = \'public\'"'
+    return text.replace(old, new, 1)
 
 
 def main() -> int:

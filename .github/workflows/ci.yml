@@ -247,24 +247,38 @@ jobs:
           # Read from pg_constraint, NOT information_schema.table_constraints. The
           # information_schema view reported 102 CHECK constraints where pg_constraint
           # reports 23, and 611 across all schemas -- using it would have hardcoded a
-          # wrong number into this gate. schema.md's documented 57 constraints matches
-          # pg_constraint's total exactly, so the original measurement was right and the
-          # mistake here would have been mine.
-          NS="connamespace = 'public'::regnamespace"
-          # Excludes `_sqlx_migrations`, which sqlx creates in the target schema. The
-          # expected 12 was measured locally via `postgres --single`, which has no such
-          # table; counting it here would report 13 and fail for a tool reason.
-          check "tables"            "$(q "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname not like '\_sqlx%'")" 12
-          check "foreign keys"      "$(q "select count(*) from pg_constraint where contype='f' and $NS")" 13
-          check "check constraints" "$(q "select count(*) from pg_constraint where contype='c' and $NS")" 23
-          check "unique constraints" "$(q "select count(*) from pg_constraint where contype='u' and $NS")" 9
-          check "primary keys"      "$(q "select count(*) from pg_constraint where contype='p' and $NS")" 12
-          check "constraints total" "$(q "select count(*) from pg_constraint where $NS")" 57
-          check "indexes"           "$(q "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='i'")" 35
-          echo "  info audit_events has no foreign keys (INV-5): $(q "select count(*) from pg_constraint where contype='f' and conrelid='audit_events'::regclass")"
-          check "PRIV-006 email columns" "$(q "select count(*) from information_schema.columns where table_schema='public' and column_name like '%email%'")" 0
-          check "INV-1 local/target columns" "$(q "select count(*) from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and a.attnum>0 and not a.attisdropped and (a.attname like '%local\_%' or a.attname like '%target\_%')")" 0
-          check "gen_random_uuid needs no extension" "$(q "select count(*) from pg_proc where proname='gen_random_uuid'")" 1
+          # wrong number into this gate.
+          #
+          # EXCLUDING sqlx's OWN TABLE. sqlx creates `_sqlx_migrations` in the target
+          # schema, and it declares `version BIGINT PRIMARY KEY`, so it contributes a
+          # table AND a pkey index AND a primary-key constraint. The expected values were
+          # measured with `postgres --single`, which has no sqlx at all.
+          #
+          # This was fixed once INCOMPLETELY: `_sqlx` was excluded from the table count but
+          # not from the index or constraint counts, so the first real run saw 13 tables
+          # (caught) but also 36 indexes, 13 primary keys and 58 constraints (missed). The
+          # constraint queries join pg_class as `c` so one exclusion covers all of them.
+          # `left(relname,5) <> '_sqlx'` rather than a backslash-escaped LIKE, so there is
+          # no shell escaping between here and PostgreSQL.
+          NOTSQLX="left(c.relname, 5) <> '_sqlx'"
+          CAT="from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and $NOTSQLX"
+          CON="from pg_constraint k join pg_class c on c.oid = k.conrelid join pg_namespace n on n.oid = k.connamespace where n.nspname = 'public' and $NOTSQLX"
+
+          check "tables"             "$(q "select count(*) $CAT and c.relkind = 'r'")" 12
+          check "indexes"            "$(q "select count(*) $CAT and c.relkind = 'i'")" 35
+          check "foreign keys"       "$(q "select count(*) $CON and k.contype = 'f'")" 13
+          check "check constraints"  "$(q "select count(*) $CON and k.contype = 'c'")" 23
+          check "unique constraints" "$(q "select count(*) $CON and k.contype = 'u'")" 9
+          check "primary keys"       "$(q "select count(*) $CON and k.contype = 'p'")" 12
+          check "constraints total"  "$(q "select count(*) $CON")" 57
+
+          echo "  info audit_events has no foreign keys (INV-5): $(q "select count(*) from pg_constraint where contype = 'f' and conrelid = 'audit_events'::regclass")"
+          check "PRIV-006 email columns" "$(q "select count(*) from information_schema.columns where table_schema = 'public' and column_name like '%email%'")" 0
+          check "INV-1 local/target columns" "$(q "select count(*) from information_schema.columns where table_schema = 'public' and (column_name like '%local\_%' or column_name like '%target\_%')")" 0
+          check "gen_random_uuid needs no extension" "$(q "select count(*) from pg_proc where proname = 'gen_random_uuid'")" 1
+
+          # Proves the exclusion is doing what it claims, rather than hiding a real object.
+          echo "  info sqlx bookkeeping table present and excluded: $(q "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and left(c.relname, 5) = '_sqlx'")"
           exit $fail
 
       - name: Constraints actually reject bad data
