@@ -81,9 +81,23 @@ pub async fn add_usage(pool: &PgPool, delta: &UsageDelta) -> Result<UsageRecord>
 }
 
 /// Total bytes for a tunnel since a point, for quota checks.
+///
+/// **PostgreSQL widens `sum()` over `bigint` to `numeric`,** because a sum of bigints need
+/// not fit in a bigint. Decoding the result straight into an `i64` therefore fails with a
+/// `ColumnDecode` error, which is what the first run of these tests found.
+///
+/// The cast is in SQL rather than in Rust because decoding `numeric` would mean adding
+/// `rust_decimal` or `bigdecimal` for one aggregate, and `AGENTS.md` §5.2 does not allow a
+/// dependency for a few lines of code. The `least(...)` bound is not decoration: without it a
+/// hostile relay reporting enormous figures could push the total past `i64` and turn a quota
+/// check into a decode failure. Clamping reports the ceiling, which is the answer a quota
+/// check wants anyway.
 pub async fn usage_since(pool: &PgPool, tunnel_id: Uuid, since: DateTime<Utc>) -> Result<i64> {
     let total = sqlx::query_scalar::<_, i64>(
-        "select coalesce(sum(bytes_from_guests + bytes_to_guests), 0)
+        "select coalesce(
+                    least(sum(bytes_from_guests + bytes_to_guests), 9223372036854775807),
+                    0
+                )::bigint
          from usage_records where tunnel_id = $1 and interval_start >= $2",
     )
     .bind(tunnel_id)

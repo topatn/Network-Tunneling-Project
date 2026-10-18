@@ -170,6 +170,43 @@ async fn make_tunnel(p: &PgPool, owner: &str, name: &str) -> IdResult {
 /// run of these tests did, four times over, with an error message that blamed the wrong
 /// thing ("fixture relay was not created", when it had been created and merely was not yet
 /// allocatable).
+/// A tunnel carrying both a UDP and a TCP mapping.
+///
+/// Needed by INV-6's "same numeric port, different protocol" case.
+/// `allocation_ports` has a composite foreign key `(mapping_id, protocol)` to
+/// `tunnel_mappings`, so a mapping's protocol is **not** a free choice at the call site:
+/// asking to publish a UDP-only mapping as TCP violates the FK, which is exactly what the
+/// first version of that assertion did. The database was right; the test was wrong.
+async fn make_tunnel_with_both_protocols(p: &PgPool, owner: &str, name: &str) -> IdResult {
+    let owner_id = user_id(p, owner).await?;
+    let spec = profile();
+    let tunnel = tunnels::create_tunnel(
+        p,
+        &NewTunnel {
+            owner_id,
+            name,
+            game_profile_id: &spec.profile_id,
+            profile_version: spec.version,
+            mappings: &[
+                NewMapping {
+                    mapping_key: "query".to_owned(),
+                    protocol: Protocol::Udp,
+                    enabled: true,
+                },
+                NewMapping {
+                    mapping_key: "rccon".to_owned(),
+                    protocol: Protocol::Tcp,
+                    enabled: false,
+                },
+            ],
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+        },
+        &spec,
+    )
+    .await?;
+    Ok(tunnel.id)
+}
+
 async fn make_relay(
     p: &PgPool,
     name: &str,
@@ -259,48 +296,91 @@ async fn inv3_allows_one_live_allocation_and_refuses_a_second() -> TestResult {
 async fn inv6_refuses_two_live_mappings_on_one_public_port() -> TestResult {
     let p = require_db!(pool().await);
     let owner = user_id(&p, "inv6-owner").await?;
-    let tunnel_a = make_tunnel(&p, "inv6-owner", "inv6-a").await?;
-    let tunnel_b = make_tunnel(&p, "inv6-owner", "inv6-b").await?;
+    let tunnel_a = make_tunnel_with_both_protocols(&p, "inv6-owner", "inv6-a").await?;
+    let tunnel_b = make_tunnel_with_both_protocols(&p, "inv6-owner", "inv6-b").await?;
     let node = make_relay(&p, "inv6-relay").await?;
     let expires = Utc::now() + chrono::Duration::hours(1);
 
-    let mapping_a = tunnels::list_mappings(&p, owner, tunnel_a)
+    // Selected by protocol, not by position: `position` 0 is the UDP `query`, and picking
+    // "the first mapping" is how the previous version ended up asking to publish a UDP
+    // mapping as TCP.
+    let mappings_a = tunnels::list_mappings(&p, owner, tunnel_a).await?;
+    let mapping_a_udp = mappings_a
+        .iter()
+        .find(|m| m.protocol == Protocol::Udp.as_str())
+        .ok_or("tunnel A has no UDP mapping")?;
+    let mapping_a_tcp = mappings_a
+        .iter()
+        .find(|m| m.protocol == Protocol::Tcp.as_str())
+        .ok_or("tunnel A has no TCP mapping")?;
+    let mapping_b_udp = tunnels::list_mappings(&p, owner, tunnel_b)
         .await?
         .into_iter()
-        .next()
-        .ok_or("tunnel A has no mapping")?;
-    let mapping_b = tunnels::list_mappings(&p, owner, tunnel_b)
-        .await?
-        .into_iter()
-        .next()
-        .ok_or("tunnel B has no mapping")?;
+        .find(|m| m.protocol == Protocol::Udp.as_str())
+        .ok_or("tunnel B has no UDP mapping")?;
 
     let alloc_a = relay::reserve_allocation(&p, tunnel_a, node.id, expires).await?;
     let alloc_b = relay::reserve_allocation(&p, tunnel_b, node.id, expires).await?;
 
-    // Passing case: the first live mapping may hold the port.
-    let port =
-        relay::publish_allocation_port(&p, alloc_a.id, mapping_a.id, node.id, Protocol::Udp, 30111)
-            .await?;
+    // Passing case: the first live UDP mapping may hold the port.
+    let port = relay::publish_allocation_port(
+        &p,
+        alloc_a.id,
+        mapping_a_udp.id,
+        node.id,
+        Protocol::Udp,
+        30111,
+    )
+    .await?;
     assert_eq!(port.public_port, 30111);
 
-    // Failing-input case: a second live mapping on the same (relay, protocol, port).
-    let clash =
-        relay::publish_allocation_port(&p, alloc_b.id, mapping_b.id, node.id, Protocol::Udp, 30111)
-            .await;
+    // Failing-input case: a second live UDP mapping on the same (relay, protocol, port).
+    let clash = relay::publish_allocation_port(
+        &p,
+        alloc_b.id,
+        mapping_b_udp.id,
+        node.id,
+        Protocol::Udp,
+        30111,
+    )
+    .await;
     assert!(
         clash.is_err(),
         "INV-6 allowed two live mappings to share (relay, udp, 30111)"
     );
 
-    // And the same port on a different protocol is a different resource, which is what the
-    // index's `protocol` column is there to express.
-    let tcp =
-        relay::publish_allocation_port(&p, alloc_b.id, mapping_b.id, node.id, Protocol::Tcp, 30111)
-            .await;
+    // And the same numeric port on a *different* protocol is a different resource, which is
+    // what the `protocol` column in the live-port index exists to express. This needs the TCP
+    // mapping specifically, because the composite FK will not let a UDP mapping be published
+    // as TCP.
+    let tcp = relay::publish_allocation_port(
+        &p,
+        alloc_a.id,
+        mapping_a_tcp.id,
+        node.id,
+        Protocol::Tcp,
+        30111,
+    )
+    .await;
     assert!(
         tcp.is_ok(),
-        "the same numeric port on a different protocol must not collide"
+        "the same numeric port on a different protocol must not collide: {tcp:?}"
+    );
+
+    // Releasing the UDP port frees it again, proving the index is on unreleased rows.
+    assert!(relay::release_allocation_port(&p, alloc_a.id, mapping_a_udp.id).await?);
+    let reused = relay::publish_allocation_port(
+        &p,
+        alloc_b.id,
+        mapping_b_udp.id,
+        node.id,
+        Protocol::Udp,
+        30111,
+    )
+    .await;
+    assert!(
+        reused.is_ok(),
+        "a released port must be reusable: {reused:?}"
     );
     Ok(())
 }
@@ -727,49 +807,76 @@ async fn listing_is_bounded_regardless_of_what_the_caller_asks_for() -> TestResu
 async fn expired_tunnels_are_swept_in_bounded_batches() -> TestResult {
     let p = require_db!(pool().await);
     let owner = user_id(&p, "sweep-owner").await?;
-    let spec = profile();
-    let tunnel = tunnels::create_tunnel(
+
+    // A raw INSERT, deliberately, because the schema does not permit arranging this any
+    // other way. `tunnels_expiry_chk` is `expires_at > created_at`, and `created_at` defaults
+    // to the *transaction* start time, which is later than the `Utc::now()` Rust computed a
+    // moment earlier -- so a one-second margin is a race, and it lost. Making a tunnel "due"
+    // by moving `expires_at` into the past violates the very same CHECK.
+    //
+    // So both timestamps go in explicitly, two hours and one hour ago: the CHECK holds and the
+    // row is already expired. `active` is not terminal, so INV-7 wants `stopped_at` null,
+    // which is what is inserted.
+    let tunnel_id: Uuid = sqlx::query_scalar(
+        "insert into tunnels
+             (owner_id, name, game_profile_id, profile_version, state, created_at,
+              started_at, expires_at)
+         values ($1, 'sweep-tunnel', 'minecraft-java', 1, 'active',
+                 now() - interval '2 hours', now() - interval '2 hours',
+                 now() - interval '1 hour')
+         returning id",
+    )
+    .bind(owner)
+    .fetch_one(&p)
+    .await?;
+
+    // Not due yet: a tunnel expiring far in the future must not be swept.
+    let far = tunnels::create_tunnel(
         &p,
         &NewTunnel {
             owner_id: owner,
-            name: "sweep-tunnel",
-            game_profile_id: &spec.profile_id,
-            profile_version: spec.version,
+            name: "sweep-future",
+            game_profile_id: "minecraft-java",
+            profile_version: 1,
             mappings: &[NewMapping {
                 mapping_key: "query".to_owned(),
                 protocol: Protocol::Udp,
                 enabled: true,
             }],
-            expires_at: Utc::now() + chrono::Duration::seconds(1),
+            expires_at: Utc::now() + chrono::Duration::hours(1),
         },
-        &spec,
+        &profile(),
     )
     .await?;
-    assert!(tunnels::start_tunnel(&p, owner, tunnel.id).await?);
 
-    // Not yet due.
+    // Passing case: the already-due tunnel is swept. The sweep sets `state='expired'` and
+    // `stopped_at` in the same statement, so INV-7's CHECK is satisfied by the statement that
+    // changes the state rather than needing a second write.
+    let swept = tunnels::expire_due_tunnels(&p, 100).await?;
+    assert!(
+        swept >= 1,
+        "the due tunnel should have been swept, swept={swept}"
+    );
+
+    let after = tunnels::get_tunnel(&p, owner, tunnel_id)
+        .await?
+        .ok_or("the swept tunnel disappeared")?;
+    assert_eq!(after.state, "expired");
+    assert!(
+        after.stopped_at.is_some(),
+        "INV-7 applies to the sweep too: a terminal state must carry stopped_at"
+    );
+
+    let untouched = tunnels::get_tunnel(&p, owner, far.id)
+        .await?
+        .ok_or("the future tunnel disappeared")?;
     assert_eq!(
-        tunnels::expire_due_tunnels(&p, 100).await?,
-        0,
+        untouched.state, "created",
         "a tunnel that has not expired must not be swept"
     );
 
-    // Due. The sweep sets `state='expired'` and `stopped_at`, so INV-7's CHECK is satisfied by
-    // the same statement that changes the state.
-    sqlx::query("update tunnels set expires_at = now() - interval '1 minute' where id = $1")
-        .bind(tunnel.id)
-        .execute(&p)
-        .await?;
-
-    assert_eq!(tunnels::expire_due_tunnels(&p, 100).await?, 1);
-    let after = tunnels::get_tunnel(&p, owner, tunnel.id)
-        .await?
-        .ok_or("the tunnel disappeared")?;
-    assert_eq!(after.state, "expired");
-    assert!(after.stopped_at.is_some(), "INV-7 applies to the sweep too");
-
-    // Idempotent: a second sweep finds nothing.
-    assert_eq!(tunnels::expire_due_tunnels(&p, 100).await?, 0);
-
+    // Idempotent: a second sweep finds nothing more to do.
+    let again = tunnels::expire_due_tunnels(&p, 100).await?;
+    assert_eq!(again, 0, "a second sweep must find nothing left to expire");
     Ok(())
 }
