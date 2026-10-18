@@ -461,7 +461,12 @@ fn structural_faults_are_rejected_by_the_types() -> TestResult {
 fn a_profile_file_larger_than_the_bound_is_refused_before_it_is_read() -> TestResult {
     let scratch = Scratch::new("too-large")?;
     // Valid JSON throughout, so size is the only available reason to refuse it.
-    let filler = "x".repeat(2000);
+    //
+    // The filler is sized **from the constant**, not written as a literal. The first version
+    // used `"x".repeat(2000)` against a 64 KiB bound, so the file was well within the limit
+    // and the assertion below refused to run a vacuous test. Deriving the size from the bound
+    // means raising or lowering the bound cannot silently turn this into a test of nothing.
+    let filler = "x".repeat(gtt_profiles::MAX_PROFILE_BYTES as usize + 1024);
     let body = format!(
         r#"{{"id":"huge","version":1,"display_name":"{filler}","mappings":[
              {{"key":"game","protocol":"tcp","default_port":1,"optional":false,"evidence":"verified"}}]}}"#

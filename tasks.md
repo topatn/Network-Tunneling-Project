@@ -312,7 +312,21 @@ Counts: 86 tasks across 10 milestones.
   - **A seventh scripted edit failed to land**, caught by a guard rather than by reading the
     file: the note anchor `- [ ] **Prerequisites:** T-030` also matches T-031, which has the
     same prerequisite. The guard refused and the note was not written to the wrong section.
-  - **Not yet verified: anything.** `cargo test` cannot run in this environment. Before
+  - **First run (496b59d): 18 of 19 passed. The one failure was my own guard refusing to run
+    a vacuous test**, which is the guard working rather than the guard failing.
+  - **`a_profile_file_larger_than_the_bound_is_refused_before_it_is_read` asserted that its
+    own fixture was big enough, and caught it.** The filler was `"x".repeat(2000)` against a
+    **64 KiB** bound — a file three percent of the limit, so the loader would have
+    correctly *accepted* it and the size bound would never have been exercised. The assertion
+    `body.len() > MAX_PROFILE_BYTES` failed first. The filler is now sized **from the
+    constant** (`MAX_PROFILE_BYTES + 1024`), so raising or lowering the bound cannot silently
+    turn the test into a test of nothing.
+  - **This is the second time a self-check has caught my own fixture in this project**, after
+    the T-034 case where a `skip` guard made a green job assert nothing. Both were found by
+    writing an assertion that could only pass if the test were really testing something, and
+    both were worth more than the bug they replaced.
+  - **Not yet verified: the corrected run.** Nothing in `crates/profiles` has executed
+    successfully yet. Before
     pushing, a script transcribed the loader's rules and ran them against the real files in
     `profiles/`: **72 assertions, all passing** — five files parse and validate, the
     default-enabled set per profile is `game` for four and empty for `l4d1`, every profile has
