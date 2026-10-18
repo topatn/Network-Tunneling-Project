@@ -261,8 +261,8 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-032 — Implement profile loader and five profile files
 
-- [ ] **Prerequisites:** T-030
-- **Progress 2026-10-18 — BUILT, LINT-CLEAN, NOT YET RUN. THE BOX STAYS UNCHECKED.**
+- [x] **Prerequisites:** T-030
+- **Progress 2026-10-18 — VERIFIED AND TICKED, with two ADR candidates open.**
   `crates/profiles` is a working loader; `profiles/` holds the five games. `serde`,
   `serde_json` and `uuid` are added to that crate, but **all three were already direct
   workspace dependencies**, so `Cargo.lock` gains five lines and **no new crate** — the
@@ -325,8 +325,34 @@ Counts: 86 tasks across 10 milestones.
     the T-034 case where a `skip` guard made a green job assert nothing. Both were found by
     writing an assertion that could only pass if the test were really testing something, and
     both were worth more than the bug they replaced.
-  - **Not yet verified: the corrected run.** Nothing in `crates/profiles` has executed
-    successfully yet. Before
+  - **VERIFIED. Run `efba5a7`: all 10 jobs green, read out of the logs.** `Test` **67 passed, 0
+    failed**; the database suite **17 passed, 0 failed on each of PostgreSQL 16 and 17**.
+    **202 tests across all jobs, 0 failed.**
+  - **All five suite/job combinations are an exact name-for-name match** with the source:
+    `profiles.rs` 19/19, `policy_unit.rs` 13/13, `invariants_unit.rs` 18/18, and `invariants_db.rs`
+    17/17 on **both** PostgreSQL majors. Not just a passing count — each declared test is
+    individually confirmed present in the log.
+  - **Each of T-032's three Done-when clauses maps to a named test**, so the tick rests on the
+    clause rather than on the suite passing: *invalid profile is rejected* →
+    `invalid_profiles_are_rejected_with_a_reason`,
+    `structural_faults_are_rejected_by_the_types`, the oversize and too-many-mappings tests;
+    *default-enabled mappings match each profile* →
+    `shipped_profiles_expose_only_their_default_enabled_mappings`, which reads the real files in
+    `profiles/` rather than a copy, so editing a profile without updating the table fails here;
+    *a sixth sample profile loads with no code change* →
+    `a_sixth_profile_loads_with_no_code_change` and
+    `a_sixth_profile_alongside_the_five_loads_without_interference`.
+  - **What this does and does not establish.** It establishes that the loader loads, validates
+    and bounds profile files, and that the five shipped profiles are what `research.md` RQ-1
+    says. It says **nothing** about whether those facts are correct — that is what E-1 and the
+    L4D1 primary-source search are for, and neither has run. It also says nothing about the
+    control plane: `crates/control-plane/src/db/profile.rs` still accepts a `ProfileSpec` as a
+    value from its caller, because wiring the registry in belongs to the API layer (T-040/T-042)
+    and doing it here would create a `control-plane -> gtt-profiles` edge in a task whose scope
+    is the loader.
+  - **Two candidates are now open for the owner**: ADR-020 (T-041, authorization error codes)
+    and ADR-021 (T-032, evidence gating default exposure). Neither is a blocker for further
+    work; both change one match arm and one named test if the preference differs. Before
     pushing, a script transcribed the loader's rules and ran them against the real files in
     `profiles/`: **72 assertions, all passing** — five files parse and validate, the
     default-enabled set per profile is `game` for four and empty for `l4d1`, every profile has
