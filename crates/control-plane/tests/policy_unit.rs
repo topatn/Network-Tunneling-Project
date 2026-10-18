@@ -83,6 +83,35 @@ fn exempt_from_indistinguishability(actor: Actor) -> bool {
     matches!(actor, Actor::Admin)
 }
 
+/// Which kind of target an operation actually carries.
+///
+/// The indistinguishability property is only meaningful over a pairing that can occur. An
+/// earlier version fed `CreateTunnel` a `UserOwned` target -- which never happens, because
+/// nothing resolves a tunnel id when creating one -- and the resulting mismatch looked like a
+/// policy bug until the pairing was noticed. In practice the API layer resolves a tunnel id to
+/// a user-owned target and a relay id to a relay-owned one; nothing else exists to pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TargetKind {
+    /// A user's resource, or the absence of one.
+    User,
+    /// A relay's resource, or the absence of one.
+    Relay,
+    /// No resource at all.
+    None,
+}
+
+fn target_kind(operation: Operation) -> TargetKind {
+    match operation {
+        Operation::CreateTunnel | Operation::ListTunnels | Operation::ClaimInvitation => {
+            TargetKind::None
+        }
+        Operation::ReportHealth | Operation::ReportUsage | Operation::FetchRelayState => {
+            TargetKind::Relay
+        }
+        _ => TargetKind::User,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The property
 // ---------------------------------------------------------------------------
@@ -99,32 +128,44 @@ fn a_strangers_resource_and_a_missing_one_give_the_same_answer() {
             if exempt_from_indistinguishability(actor) {
                 continue;
             }
-
-            // Someone else's tunnel, and a tunnel that does not exist. The data layer cannot
-            // tell these apart -- scoping the query by owner makes both come back empty -- so
-            // neither may the policy.
-            let someone_elses = Target::UserOwned {
-                owner: Some(&owner),
-            };
-            let missing = Target::UserOwned { owner: None };
-            assert_eq!(
-                decide(actor, op, someone_elses),
-                decide(actor, op, missing),
-                "{actor_name} / {op_name}: a stranger's resource and a missing one are \
-                 answered differently, which confirms whether the identifier exists"
-            );
-
-            // Same for another relay's state.
-            let other_relays = Target::RelayOwned {
-                owner: Some(&other_relay),
-            };
-            let no_such_relay = Target::RelayOwned { owner: None };
-            assert_eq!(
-                decide(actor, op, other_relays),
-                decide(actor, op, no_such_relay),
-                "{actor_name} / {op_name}: another relay's state and a missing one are \
-                 answered differently"
-            );
+            match target_kind(op) {
+                // Someone else's tunnel, and a tunnel that does not exist. The data layer
+                // cannot tell these apart -- scoping the query by owner makes both come back
+                // empty -- so neither may the policy.
+                TargetKind::User => {
+                    assert_eq!(
+                        decide(
+                            actor,
+                            op,
+                            Target::UserOwned {
+                                owner: Some(&owner)
+                            }
+                        ),
+                        decide(actor, op, Target::UserOwned { owner: None }),
+                        "{actor_name} / {op_name}: a stranger's resource and a missing one are \
+                         answered differently, which confirms whether the identifier exists"
+                    );
+                }
+                TargetKind::Relay => {
+                    assert_eq!(
+                        decide(
+                            actor,
+                            op,
+                            Target::RelayOwned {
+                                owner: Some(&other_relay)
+                            }
+                        ),
+                        decide(actor, op, Target::RelayOwned { owner: None }),
+                        "{actor_name} / {op_name}: another relay's state and a missing one are \
+                         answered differently, which confirms existence"
+                    );
+                }
+                TargetKind::None => {
+                    // Nothing whose existence could leak, so the property is vacuous here.
+                    // `only_operations_without_a_resource_are_exempt` pins which operations
+                    // fall in this bucket.
+                }
+            }
         }
     }
 }
@@ -249,14 +290,21 @@ fn unauthenticated_is_answered_before_anything_else() {
 #[test]
 fn a_guest_never_reaches_the_control_plane() {
     // ADR-007 G2: the guest has no account and no client; the relay enforces the admission
-    // set. So the guest column is "no" by construction. `unauthenticated` rather than
-    // `forbidden`, because answering `forbidden` would imply this layer is on the guest's
-    // path at all.
+    // set. So the guest column of the matrix is "no" by construction for every operation that
+    // needs credentials, and answered `unauthenticated` rather than `forbidden` -- because
+    // answering `forbidden` would imply this layer is on the guest's path at all.
+    //
+    // The single exception is the claim row: the guest presenting an invitation secret *is*
+    // the claimant, and it reaches that row with `Target::None`.
     let guest = Actor::Guest {
         tunnel_id: Uuid::new_v4(),
     };
     let owner = Uuid::new_v4();
+
     for (name, op) in operations() {
+        if matches!(op, Operation::ClaimInvitation) {
+            continue;
+        }
         assert_eq!(
             decide(
                 guest,
@@ -269,6 +317,11 @@ fn a_guest_never_reaches_the_control_plane() {
             "a guest must not be permitted to {name} through the control plane"
         );
     }
+
+    assert!(
+        decide(guest, Operation::ClaimInvitation, Target::None).is_allowed(),
+        "a guest presenting an invitation secret is the claimant and must reach the claim row"
+    );
 }
 
 #[test]
@@ -451,15 +504,25 @@ fn a_suspended_account_cannot_create_or_start_but_can_still_clean_up() {
 
 #[test]
 fn claiming_an_invitation_is_authorised_by_the_secret_not_the_account() {
-    // The matrix marks this row "anyone with the secret", so the policy does not refuse it
-    // on capability grounds. The secret is checked when presented, and the refusal there is
+    // The matrix marks this row "anyone with the secret", so the policy does not refuse it on
+    // capability grounds. The secret is checked when presented, and the refusal there is
     // `invitation_invalid`, which says nothing about whether the invitation exists.
-    let owner = Uuid::new_v4();
+    //
+    // Answered **without credentials**, because under ADR-007 G2 the claimant is anonymous:
+    // the guest has no account and no client. Refusing anonymous callers before reaching this
+    // row would make the route unreachable, which is what the first version of the policy did.
     for (name, actor) in [
+        ("an anonymous claimant", Actor::Anonymous),
+        (
+            "a guest",
+            Actor::Guest {
+                tunnel_id: Uuid::new_v4(),
+            },
+        ),
         (
             "the owner",
             Actor::User {
-                id: owner,
+                id: Uuid::new_v4(),
                 status: UserStatus::Active,
             },
         ),
@@ -470,21 +533,35 @@ fn claiming_an_invitation_is_authorised_by_the_secret_not_the_account() {
                 status: UserStatus::Active,
             },
         ),
-        (
-            "a suspended stranger",
-            Actor::User {
-                id: Uuid::new_v4(),
-                status: UserStatus::Suspended,
-            },
-        ),
-        ("a relay", Actor::Relay { id: Uuid::new_v4() }),
-        ("an admin", Actor::Admin),
     ] {
         assert!(
             decide(actor, Operation::ClaimInvitation, Target::None).is_allowed(),
             "{name} must be able to attempt a claim; the secret decides"
         );
     }
+
+    // The matrix marks the relay and admin columns "no" for this row.
+    for (name, actor) in [
+        ("a relay", Actor::Relay { id: Uuid::new_v4() }),
+        ("an admin", Actor::Admin),
+    ] {
+        assert_eq!(
+            decide(actor, Operation::ClaimInvitation, Target::None),
+            Decision::Deny(ErrorCode::Forbidden),
+            "the matrix marks the {name} column \"no\" for the claim row"
+        );
+    }
+
+    // And a claim must not carry a target, or the route could be used to probe a resource.
+    assert_eq!(
+        decide(
+            Actor::Anonymous,
+            Operation::ClaimInvitation,
+            Target::UserOwned { owner: None }
+        ),
+        Decision::Deny(ErrorCode::Forbidden),
+        "a claim must not accept a target; the invitation is named by its secret"
+    );
 }
 
 // ---------------------------------------------------------------------------

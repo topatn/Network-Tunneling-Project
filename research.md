@@ -694,7 +694,7 @@ Which is what T-041 implemented, and it divides the cells into two kinds:
 
 | Kind | Cells | Answer | Why it leaks nothing |
 |---|---|---|---|
-| **Capability** — an actor class can never do this | relay creating tunnels, user reporting health, non-admin suspending, non-admin terminating (including the owner) | `forbidden`, for **every** target | the answer is the same whether the target exists or not, so existence is not confirmed |
+| **Capability** — an actor class can never do this | relay creating tunnels, user reporting health, non-admin suspending, non-admin terminating | `forbidden` where the caller can see the resource; `not_found` where it cannot | the caller can always tell "mine" from "not mine", so neither answer reveals anything new — and the pair that must match, *someone else's* against *missing*, is `not_found` on both |
 | **Visibility** — the caller is reaching for someone else's resource | cross-owner tunnel, invitation and admission access; another relay's state | `not_found`, for **every** resource not theirs | likewise uniform |
 
 The two rules are only safe because each is *uniform*. Answering `forbidden` for a resource
@@ -704,17 +704,27 @@ that exists and `not_found` for one that does not would be the oracle; so would 
 
 **Terminate tunnel, called by the owner.** The matrix says "no" in the owner column, so an
 owner cannot terminate their own tunnel — terminate is the operator action, distinct from the
-owner choosing to stop. Implemented as a **capability** failure (`forbidden`), uniformly for
-every target.
+owner choosing to stop.
 
-The alternative reading is that it is a visibility question and should answer `not_found` for
-a tunnel the caller does not own. Both are safe under the property above, so the property does
-not settle it. Chosen because the matrix grants the row to nobody but the admin, and granting
-it to nobody is a statement about the *caller*, not about the target.
+Implemented as:
 
-**If the owner prefers the other reading, the change is one match arm** in
-`crates/control-plane/src/policy.rs`, and `tests/policy_unit.rs::terminate_and_suspend_are_admin_only_even_for_the_owner`
-is the test that would change.
+| Target | Answer | Why it leaks nothing |
+|---|---|---|
+| The caller's **own** tunnel | `forbidden` | The caller already knows it exists and is theirs; the refusal is about capability, and is the same whatever they were targeting |
+| **Someone else's** tunnel | `not_found` | Indistinguishable from the next row |
+| A tunnel that **does not exist** | `not_found` | Indistinguishable from the row above |
+
+**This corrects an earlier draft of this section**, which claimed the answer was `forbidden`
+"for every target". A test proved that wrong: the data layer resolves both "someone else's
+tunnel" and "no such tunnel" to the same value, so any policy that answered them differently
+would be leaking. The pair that must match is rows 2 and 3, and it does.
+
+The alternative reading — that an owner terminating someone else's tunnel is a *visibility*
+question — is also safe under the property, so the property does not settle which word is used.
+Chosen as above because the matrix grants the row to nobody but the admin, and granting it to
+nobody is a statement about the *caller*. **If the owner prefers otherwise it is one match
+arm**, and `policy_unit.rs::terminate_and_suspend_are_admin_only_even_for_the_owner` is the
+test that would change.
 
 ### Also assumed, and worth confirming
 
@@ -729,6 +739,16 @@ is the test that would change.
 3. **Admins see all users' resources.** The matrix says admins act "via admin API"; an admin
    asking about a resource that does not exist is told `not_found`, not `allowed`. An earlier
    draft exempted admins from visibility entirely and had that bug.
+4. **The claim row has no column for the anonymous claimant, and that is a gap in the matrix
+   rather than in the implementation.** Under ADR-007 G2 the guest has no account, so the
+   entity presenting an invitation secret is anonymous. The matrix predates that: it has
+   columns for Owner / Other user / Guest / Relay / Admin and marks the claim row "n/a" for
+   both Owner and Guest. Implemented so that **any** actor except a relay or an admin may
+   attempt a claim, since the secret is the authority; the relay and admin columns say "no"
+   and are honoured. **The matrix should gain an "anonymous" column, or the claim row should
+   be re-worded to say "anyone, authenticated or not".** Raised here rather than changed in
+   `contracts.md`, because the API surface belongs to T-040 and re-wording a contract is not
+   this task's to do.
 
 ## 7. Architecture Decision Records (drafts)
 

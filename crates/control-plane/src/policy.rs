@@ -229,32 +229,35 @@ impl Decision {
 ///
 /// Checks run in this order, and the order is load-bearing:
 ///
-/// 1. **Credentials.** Nothing below is meaningful without them.
-/// 2. **Reachability of a guest at all.** Under ADR-007 G2 a guest never calls the control
-///    plane, so this is not "denied", it is "wrong layer".
-/// 3. **Visibility.** Before entitlement, so a suspended account learns nothing about
+/// 0. **A claim carries no target.** An invitation is identified by its secret, never by an
+///    id, so requiring `Target::None` stops the claim route being used to probe resources.
+/// 1. **Visibility**, before entitlement, so a suspended account learns nothing about
 ///    resources that are not its own.
-/// 4. **Entitlement** — a suspended account.
-/// 5. **Capability**, from the matrix.
+/// 2. **Entitlement** — a suspended account.
+/// 3. **Capability**, dispatched by actor kind, so every matrix column is visible in one
+///    place and a new actor variant fails to compile rather than falling through.
+///
+/// There is deliberately **no early return for unauthenticated callers.** Under ADR-007 G2
+/// the guest has no account, so the entity presenting an invitation secret is anonymous by
+/// design; refusing anonymous callers before reaching the claim row would make the route
+/// unreachable. An earlier version did exactly that and a test caught it.
 pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decision {
-    // 1. No credentials at all.
-    if matches!(actor, Actor::Anonymous) {
-        return Decision::Deny(ErrorCode::Unauthenticated);
+    let claiming = matches!(operation, Operation::ClaimInvitation);
+
+    // 0. A claim must not carry a target.
+    if claiming && !matches!(target, Target::None) {
+        return Decision::Deny(ErrorCode::Forbidden);
     }
 
-    // 2. Guests. `unauthenticated` rather than `forbidden`, because answering `forbidden`
-    //    would imply the control plane is on the guest's path. It is not: the relay
-    //    enforces the live admission set.
-    if matches!(actor, Actor::Guest { .. }) {
-        return Decision::Deny(ErrorCode::Unauthenticated);
+    // 1. Visibility, before entitlement. A claim is authorised by the secret rather than by
+    //    ownership of anything, so it has no visibility to decide.
+    if !claiming {
+        if let Some(code) = visibility_failure(actor, target) {
+            return Decision::Deny(code);
+        }
     }
 
-    // 3. Visibility, before entitlement.
-    if let Some(code) = visibility_failure(actor, operation, target) {
-        return Decision::Deny(code);
-    }
-
-    // 4. Entitlement. A suspended account is authenticated but not allowed, which is exactly
+    // 2. Entitlement. A suspended account is authenticated but not allowed, which is exactly
     //    what `forbidden` means in the error model.
     if let Actor::User { status, .. } = actor {
         if status == UserStatus::Suspended && !suspended_user_may(operation) {
@@ -262,7 +265,7 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
         }
     }
 
-    // 5. Capability, dispatched by actor kind so each matrix column is explicit.
+    // 3. Capability.
     match actor {
         Actor::Admin => match operation {
             Operation::TerminateTunnel
@@ -274,12 +277,14 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
             | Operation::StopTunnel
             | Operation::CreateInvitation
             | Operation::RevokeInvitation
-            | Operation::ListAdmissions
-            | Operation::ClaimInvitation => Decision::Allow,
-            // An admin has no relay of its own.
-            Operation::ReportHealth | Operation::ReportUsage | Operation::FetchRelayState => {
-                Decision::Deny(ErrorCode::Forbidden)
-            }
+            | Operation::ListAdmissions => Decision::Allow,
+            // An admin has no relay of its own, and the matrix marks the claim row "no" for
+            // it. `forbidden` rather than `unauthenticated`: the credential is fine, the
+            // capability is not.
+            Operation::ReportHealth
+            | Operation::ReportUsage
+            | Operation::FetchRelayState
+            | Operation::ClaimInvitation => Decision::Deny(ErrorCode::Forbidden),
         },
 
         Actor::User { .. } => match operation {
@@ -290,29 +295,36 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
             | Operation::StopTunnel
             | Operation::CreateInvitation
             | Operation::RevokeInvitation
-            | Operation::ListAdmissions
-            | Operation::ClaimInvitation => Decision::Allow,
+            | Operation::ListAdmissions => Decision::Allow,
+            // The matrix marks the claim row "anyone with the secret", so the secret decides
+            // and the policy does not refuse on capability grounds. The refusal, if the
+            // secret is wrong, is `invitation_invalid`, which says nothing about whether the
+            // invitation exists.
+            Operation::ClaimInvitation => Decision::Allow,
             // The relay row and the admin-only row: both "no" for a user.
-            Operation::ReportHealth | Operation::ReportUsage | Operation::FetchRelayState => {
-                Decision::Deny(ErrorCode::Forbidden)
-            }
-            Operation::TerminateTunnel | Operation::SuspendUser => {
-                Decision::Deny(ErrorCode::Forbidden)
-            }
+            Operation::ReportHealth
+            | Operation::ReportUsage
+            | Operation::FetchRelayState
+            | Operation::TerminateTunnel
+            | Operation::SuspendUser => Decision::Deny(ErrorCode::Forbidden),
         },
 
         Actor::Relay { .. } => match operation {
             Operation::ReportHealth | Operation::ReportUsage | Operation::FetchRelayState => {
                 Decision::Allow
             }
-            // A relay has no tunnels and no invitations. Terminate and SuspendUser are
-            // operator actions on someone else's resources.
+            // A relay has no tunnels and no invitations, and the matrix marks the claim row
+            // "no" for it. Terminate and SuspendUser are operator actions on someone else's
+            // resources.
             _ => Decision::Deny(ErrorCode::Forbidden),
         },
 
-        // Handled above; listed so adding an actor kind fails to compile rather than
-        // silently falling through.
-        Actor::Anonymous | Actor::Guest { .. } => Decision::Deny(ErrorCode::Unauthenticated),
+        // No credentials, and under ADR-007 G2 a guest has none by design. The one row they
+        // may reach is the claim, whose authority is the secret.
+        Actor::Anonymous | Actor::Guest { .. } => match operation {
+            Operation::ClaimInvitation => Decision::Allow,
+            _ => Decision::Deny(ErrorCode::Unauthenticated),
+        },
     }
 }
 
@@ -335,13 +347,7 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
 /// An earlier version exempted admins from visibility altogether, which meant an admin
 /// asking about a tunnel that did not exist was told it was allowed -- the same leak, aimed
 /// the other way.
-fn visibility_failure(actor: Actor, operation: Operation, target: Target<'_>) -> Option<ErrorCode> {
-    // Claiming an invitation is authorised by the secret, not by ownership of anything, so
-    // there is no resource whose visibility is in question.
-    if matches!(operation, Operation::ClaimInvitation) {
-        return None;
-    }
-
+fn visibility_failure(actor: Actor, target: Target<'_>) -> Option<ErrorCode> {
     match target {
         Target::None => None,
 
