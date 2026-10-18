@@ -21,7 +21,7 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-001 — Create repository and CI skeleton [CP]
 
-- [ ] **Prerequisites:** none
+- [x] **Prerequisites:** none
 - **Scope:** Initialize repository, workspace layout from `architecture.md` §4, formatting and lint config, empty CI pipeline with a dependency-scan step; place `README.md`, `AGENTS.md`, and `CLAUDE.md` at the repository root and fix their relative links.
 - **Deliverables:** Repo, CI config, CONTRIBUTING pointer to `AGENTS.md`.
 - **Requirements:** TEST-007, SEC-017
@@ -30,6 +30,7 @@ Counts: 86 tasks across 10 milestones.
 
 **Recorded inconsistency (decide at T-004):** `architecture.md` §4 describes `docs/` as holding the documentation set, but the 20 documents live at the repository root and only `docs/dependency-register.md` is under `docs/`. Not changed here — moving 20 files would break every relative link and is outside T-001's scope.
 - **Done when:** CI runs format, lint, and dependency scan steps and passes on the skeleton; a seeded known-vulnerable test dependency makes the scan fail.
+  - **Condition (2) met on 2026-10-18 — box ticked.** The migration-apply job was the last open item: it was `if: false` because no migration tool had been chosen and `migrations/` did not exist, so it showed as *skipped* rather than passed. T-033 supplied both, the job was enabled, and **CI run 10ac6f4 passed all 8 jobs including both migration matrix legs**. With that, both Done-when conditions are demonstrated by their stated verification. **The environment gaps recorded above still stand and are not resolved by this:** no Windows SDK, so MSVC cannot link, and no `dlltool.exe` in the GNU bundle, so neither toolchain can compile Rust tooling from source. Those blocked T-003's local path and are worked around on the CI runner instead.
 
 ### T-002 — Replace reported game facts with primary sources [CP]
 
@@ -43,7 +44,7 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-003 — Choose migration tool and verify DDL on real PostgreSQL [CP]
 
-- [ ] **Prerequisites:** T-001
+- [x] **Prerequisites:** T-001
 - **Scope:** Select a migration tool (record as ADR); run `schema-draft.sql` on real PostgreSQL versions; record supported versions and any fixes.
 - **Deliverables:** ADR; corrected `schema-draft.sql`; version matrix.
 - **Requirements:** TEST-007, PRIV-006
@@ -51,6 +52,7 @@ Counts: 86 tasks across 10 milestones.
 - **Done when:** DDL applies cleanly to an empty database on every version in the matrix; no email column exists.
 - **Environment blocker, recorded 2026-10-17.** Compiling Rust tooling from source is impossible on this machine and **cannot be fixed from an unelevated session**: the MSVC toolchain has no Windows SDK, and the GNU toolchain's self-contained MinGW bundle ships no assembler, so `dlltool` cannot spawn one. `cargo install sqlx-cli` therefore fails, which is why ADR-017's chosen migration tool has never been executed. Fixing it needs elevation — the Windows SDK (~1–2 GB), MinGW-w64 (~100 MB), or building on a Linux/CI runner. **Owner action.** Details in `docs/dependency-register.md`.
 - **Progress 2026-10-17 — SUBSTANTIALLY COMPLETE. Two parts still open.** **ADR-008 was Accepted on 2026-10-17** (Rust control plane with `axum`, PostgreSQL via `sqlx`); consequences recorded: the workspace MSRV rises **1.77 → 1.94**, and the control plane gains a 145-crate dependency tree for T-030 to register. **The DDL has now been executed for real**, on official EDB standalone binaries extracted to a temporary directory — no system install, no service, no registry change. Results on **PostgreSQL 16.10 and 17.6**: the schema applies cleanly to an empty database with **zero errors**, producing **12 tables, 35 indexes, 57 constraints, 13 foreign keys** identically on both; **PRIV-006 verified** (0 columns matching `%email%`); **INV-1 verified** (no local address/port/target column; the only `%port%` columns are the relay's own public ports, which is the distinction INV-1 draws); `audit_events` confirmed to have 0 foreign keys; and four negative tests rejected by `users_status_chk`, `tunnels_profile_version_chk`, `tunnels_expiry_chk`, `tunnels_stopped_consistency_chk`. `gen_random_uuid()` needs no extension on either version. Full matrix and method in `schema.md`. **Migration tool decided: `sqlx migrate`** (ADR-017, accepted 2026-10-17). The driver is already `sqlx` under ADR-008, so this adds **no further dependency**; `refinery` would have meant a second migration library, and hand-rolled SQL was rejected because `data-model.md` §8's "never edit an applied migration" rule is best enforced by a tool that tracks applied checksums. **`sqlx-cli` could not be executed here** — `dlltool.exe` is missing from the GNU toolchain, MSVC has no Windows SDK, and no prebuilt binary is published — so T-033 must verify it rather than assume it. **Still open, and why the box stays unchecked:** (1) **verification ran through `postgres --single`, not a normal client connection**, because forked backends crash in this environment with `STATUS_DLL_INIT_FAILED` — so concurrency, isolation, and connection handling are untested, and T-033's CI job must provide that; (2) the chosen tool itself has never been run, so its statement-boundary parsing in particular is unconfirmed — the exact defect class that produced a zero-table schema during the manual verification. A harness defect was found and fixed on the way: line-oriented submission split multi-line `CREATE TABLE`s, which would silently do the same in any line-based runner.
+  - **Final blocker cleared on 2026-10-18 — box ticked.** The remaining item was that verification had only ever run through `postgres --single`, because forked backends crash in this environment with `STATUS_DLL_INIT_FAILED`, so concurrency, isolation and connection handling were untested. **CI run 10ac6f4 runs the whole migration through a normal client connection against PostgreSQL 16 and 17 service containers and passes**, which is the verification this task asked for. Every claim in the version matrix above is now backed either by the local `--single` apply or by that run. **The local limitation itself is unchanged and still recorded:** nothing here proves concurrency or isolation under load, and `sqlx-cli` still cannot be built on this machine. Do not read this tick as the environment being fixed.
 
 ### T-004 — Independent documentation review (gate G0) [CP]
 
@@ -268,7 +270,7 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-033 — Create migrations from the data model [CP]
 
-- [ ] **Prerequisites:** T-003, T-030
+- [x] **Prerequisites:** T-003, T-030
 - **Scope:** Translate `schema-draft.sql` into `sqlx migrate` migrations (ADR-017); add CI step applying all migrations to an empty DB; retire the draft file per `schema.md`.
 - **Deliverables:** `migrations/`; CI step.
 - **Requirements:** TEST-007, PRIV-006
@@ -289,7 +291,7 @@ Counts: 86 tasks across 10 milestones.
   - **Not yet verified: that the revert, the structural assertions, and the six negative tests pass end to end.**
   - **Second run (34ffe78) got further and failed differently, which is the useful signal.** `psql can actually connect` passed — the credential fix works — and so did `Apply all migrations`, `Re-running must be a no-op`, and **`Revert and re-apply`, so the `.down.sql` is now confirmed to run through `sqlx migrate revert` on both PostgreSQL 16 and 17.** The failure moved to `Verify the resulting structure`, and the cause was the same `_sqlx_migrations` mistake made once already: **I excluded `_sqlx%` from the table count but not from the index or constraint counts.** sqlx's table declares `version BIGINT PRIMARY KEY`, so it contributes a table, a pkey index, and a primary-key constraint — CI would have seen 36 indexes, 13 primary keys and 58 constraints. **All catalog counts now share one exclusion**, and the constraint queries join `pg_class` so a single exclusion covers every one. Verified locally against real PostgreSQL 16 twice: once with only the schema, and once after creating `_sqlx_migrations` exactly as sqlx does. The counts were identical in both (12 tables / 35 indexes / 13 FK / 23 CHECK / 9 UNIQUE / 12 PK / 57 constraints) while sqlx's objects went from 0 to 2, so the exclusion is what is keeping them right.
   - **`audit_traceability.py` now rejects this class of partial fix**, with a planted defect that reproduces it exactly by dropping the exclusion from the constraint counts only. It resolves `$VAR` references, so a workflow can keep the exclusion in one shared variable, which is the better fix. It was also wrong twice while being written: the first version flagged prose inside YAML comments, a count already scoped to `audit_events`, and the diagnostic that deliberately counts sqlx's objects. A count scoped to one named table cannot be affected by sqlx's table, so those are correctly exempt now.
-  - **Not yet verified: the structural assertions and the six negative tests pass.** They have still never executed; the run aborted one step before them again. The box stays unchecked.
+  - **CI run 10ac6f4 is GREEN: all 8 jobs, including both migration matrix legs.** This is the first time the structural assertions and the six negative tests have executed, and they passed. **The Done-when condition — "Migrations apply to an empty database in CI; `schema-draft.sql` removed in the same change" — is therefore demonstrated by its stated verification, so the box is ticked.** What is verified: `sqlx-cli 0.9.0` installs; the migration applies to an empty PostgreSQL 16 and 17 service container over a normal client connection; re-running is a no-op; `sqlx migrate revert` executes the `.down.sql` and leaves 0 tables; all seven structural counts match the measured baseline; and the four must-reject inserts are rejected by their intended constraints while the two must-accept inserts succeed. **What is still not verified, and is not claimed:** concurrency, transaction isolation under load, and live performance — those need a workload, not a schema, and no run has tested them.
 ### T-034 — Implement persistence layer and invariant tests [CP]
 
 - [ ] **Prerequisites:** T-033

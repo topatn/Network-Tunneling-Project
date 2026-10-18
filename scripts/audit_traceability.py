@@ -1075,14 +1075,21 @@ def self_test(root: Path) -> int:
         (
             "true prerequisite cycle (T-001 -> T-002 -> T-001)",
             "tasks.md",
-            lambda t: t.replace(
-                "### T-002 — Replace reported game facts with primary sources [CP]\n\n"
-                "- [ ] **Prerequisites:** T-001",
-                "### T-002 — Replace reported game facts with primary sources [CP]\n\n"
-                "- [ ] **Prerequisites:** T-001, T-001",
+            # Regex, not literal text. This mutator matched `- [ ] **Prerequisites:**`
+            # exactly, so ticking T-001 to `- [x]` silently stopped it mutating and the
+            # planted defect started passing for the wrong reason. The self-test caught
+            # that the moment the box was ticked -- which is the failure mode it exists
+            # to catch. A planted defect must not depend on incidental formatting.
+            lambda t: re.sub(
+                r"(### T-002 [^\n]*\n\n- \[[ x]\] \*\*Prerequisites:\*\* )T-001(?!\s*,\s*T-001)",
+                r"\1T-001, T-001",
+                t,
+                count=1,
             ).replace(
-                "### T-001 — Create repository and CI skeleton [CP]\n\n- [ ] **Prerequisites:** none",
-                "### T-001 — Create repository and CI skeleton [CP]\n\n- [ ] **Prerequisites:** T-002",
+                # T-001 declares `none`; make it depend on T-002 to close the loop.
+                "**Prerequisites:** none",
+                "**Prerequisites:** T-002",
+                1,
             ),
             "prerequisite cycle",
         ),
