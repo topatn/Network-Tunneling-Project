@@ -23,7 +23,41 @@ publish = false
 # recorded in the dependency register (T-030) with purpose, licence, and
 # maintenance notes, in the same change (AGENTS.md section 5).
 [workspace.dependencies]
-# Intentionally empty. T-030 adds entries; each needs a register row first.
+# Added by T-034. Each has a register row in docs/dependency-register.md, as
+# AGENTS.md section 5.1 requires in the same change.
+
+# PostgreSQL driver and migration runner (ADR-008, ADR-017).
+#
+# `default-features = false` on purpose: the defaults enable `sqlite`, `mysql` and
+# `native-tls`. This project is PostgreSQL-only, and the CI migrate job already builds
+# `sqlx-cli --no-default-features --features postgres,rustls` successfully, so this
+# combination is proven rather than assumed.
+#
+# `macros` and `derive` are both deliberately NOT enabled. `macros` would enable
+# `query!`/`query_as!`, which type-check SQL at compile time and so need either a live
+# database or a checked-in `.sqlx` cache -- unavailable here (see schema.md). `derive`
+# was tried and reverted: it pulls in `sqlx-macros`, a proc-macro crate, and a proc macro
+# must be linked to a dylib, which this machine cannot do at all (no assembler on the GNU
+# side, no Windows SDK on the MSVC side). Losing `cargo check`, `clippy` and `test`
+# entirely to save boilerplate is a bad trade, so `FromRow` is implemented with a
+# `macro_rules!` macro instead -- see crates/control-plane/src/db/entities.rs.
+# The runtime-checked `sqlx::query` / `query_as` API is used throughout.
+# Revisit when `.sqlx` offline data can be generated; not a silent omission.
+sqlx = { version = "0.9.0", default-features = false, features = [
+    "postgres",
+    "runtime-tokio",
+    "uuid",
+    "chrono",
+    "json",
+] }
+tokio = { version = "1", default-features = false, features = [
+    "macros",
+    "rt-multi-thread",
+] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # ---------------------------------------------------------------------------
 # Workspace lints. Crates opt in with `[lints] workspace = true`, so this is the

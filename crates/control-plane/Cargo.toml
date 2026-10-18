@@ -8,8 +8,20 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Intentionally empty. Dependencies are added by the task that needs them; each
-# requires a dependency-register row in the same change (AGENTS.md section 5).
+# T-034: the persistence layer. Versions are pinned centrally in the workspace
+# manifest; each has a register row in docs/dependency-register.md.
+sqlx = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# Integration tests need an async runtime and a live database. `tokio` is a
+# dev-dependency only: nothing in this crate starts a runtime itself yet, and adding
+# it to `[dependencies]` before the HTTP layer exists would be a dependency the code
+# does not use (the dead-code lint would reject it).
+tokio = { workspace = true }
 
 [lints]
 workspace = true

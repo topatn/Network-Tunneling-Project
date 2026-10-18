@@ -750,54 +750,59 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
             # constraints (missed). Requiring every count to exclude it closes that.
             #
             # A count may reference the exclusion through a shell variable, since
-            # factoring it into one is the better fix, so `$VAR` references are resolved
-            # one level deep against the workflow's own assignments.
+            # factoring it into one is the better fix, so `$VAR` references are resolved.
+            #
+            # Resolution is PER STEP, and that scoping is load-bearing. A whole-file
+            # assignment table was tried first and the self-test caught the result: with two
+            # jobs each defining `CAT=`, the last definition won, so a planted defect that
+            # removed the exclusion from one job was checked against the other job's
+            # correct definition and reported nothing. That is exactly the "checker that
+            # quietly stops seeing" failure this file exists to prevent.
             if re.search(r"sqlx[ \t]+migrate\b", text):
-                assignments = {
-                    m.group(1): m.group(2)
-                    for m in re.finditer(
-                        r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\"([^\n]*)\"", text, re.M
-                    )
-                }
-
-                def _expanded(sql: str) -> str:
-                    # Bounded: a self-referential assignment must not loop.
-                    seen, out = {sql}, sql
-                    for _ in range(3):
-                        new = out
-                        for var, val in assignments.items():
-                            new = new.replace(f"${{{var}}}", val).replace(f"${var}", val)
-                        if new in seen:
-                            break
-                        seen.add(new)
-                        out = new
-                    return out
-
-                for raw in text.splitlines():
-                    # Skip comments: the workflow documents the SQL it runs, and quoting
-                    # a query in prose is not a query.
-                    line = raw.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "count(*)" not in line:
-                        continue
-                    query = _expanded(line)
-                    if "pg_class" not in query and "pg_constraint" not in query:
-                        continue
-                    # A count already scoped to one named table cannot be affected by
-                    # sqlx's table, so it is not required to exclude it.
-                    if re.search(r"\b(conrelid|relname)\s*=", query):
-                        continue
-                    if "_sqlx" not in query:
-                        errors.append(
-                            f"{wf.name}: counts every pg_class/pg_constraint row in the "
-                            f"schema without excluding sqlx's own `_sqlx_migrations` "
-                            f"objects. That table has a PRIMARY KEY, so it adds a table, "
-                            f"a pkey index and a primary-key constraint, and this count "
-                            f"will be too high. Reference one shared exclusion variable "
-                            f"so a count cannot be missed: {line[:80]}"
+                for step_text, _ in iter_steps(text):
+                    assignments = {
+                        m.group(1): m.group(2)
+                        for m in re.finditer(
+                            r"^\s*([A-Za-z_][A-Za-z0-9_]*)=\"([^\n]*)\"", step_text, re.M
                         )
+                    }
 
+                    def _expanded(sql: str, _a=assignments) -> str:
+                        # Bounded: a self-referential assignment must not loop.
+                        seen, out = {sql}, sql
+                        for _ in range(3):
+                            new = out
+                            for var, val in _a.items():
+                                new = new.replace(f"${{{var}}}", val).replace(f"${var}", val)
+                            if new in seen:
+                                break
+                            seen.add(new)
+                            out = new
+                        return out
+
+                    for raw in step_text.splitlines():
+                        line = raw.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "count(*)" not in line:
+                            continue
+                        query = _expanded(line)
+                        if "pg_class" not in query and "pg_constraint" not in query:
+                            continue
+                        # A count already scoped to one named table cannot be affected by
+                        # sqlx's table, so it is not required to exclude it.
+                        if re.search(r"\b(conrelid|relname)\s*=", query):
+                            continue
+                        if "_sqlx" not in query:
+                            errors.append(
+                                f"{wf.name}: counts every pg_class/pg_constraint row in "
+                                f"the schema without excluding sqlx's own "
+                                f"`_sqlx_migrations` objects. That table has a PRIMARY "
+                                f"KEY, so it adds a table, a pkey index and a "
+                                f"primary-key constraint, and this count will be too high. "
+                                f"Reference one shared exclusion variable so a count "
+                                f"cannot be missed: {line[:80]}"
+                            )
             # `psql` does NOT read DATABASE_URL. sqlx does; libpq does not. It uses
             # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE, so a job that sets only
             # DATABASE_URL has every psql call silently fail to connect.

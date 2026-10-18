@@ -8,4 +8,9 @@
 
 # Minimum supported Rust version, so clippy does not suggest APIs newer than the
 # declared `rust-version` in Cargo.toml. Keep the two in step.
-msrv = "1.77"
+# Raised from 1.77 to 1.94 on 2026-10-18 when sqlx was actually added: sqlx 0.9.0
+# declares rust-version 1.94.0. The mismatch had been live since ADR-008 (2026-10-17) --
+# clippy only started reporting it once a crate in the workspace actually depended on
+# something that needed the newer MSRV, so it was linting against 1.77 semantics in the
+# meantime.
+msrv = "1.94"

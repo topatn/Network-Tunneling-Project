@@ -115,6 +115,107 @@ jobs:
       - name: Check advisories, licences, and bans
         run: cargo deny check advisories bans licenses
 
+  db-tests:
+    name: Invariant tests against a real database (T-034)
+    # T-034's stated verification is "Integration tests on a real database".
+    #
+    # These cannot run anywhere else. The authoring machine cannot open a normal
+    # PostgreSQL client connection -- forked backends die with STATUS_DLL_INIT_FAILED
+    # (see schema.md) -- and since the workspace gained dependencies it can no longer
+    # link a test binary either: the GNU bundle has no assembler and MSVC has no Windows
+    # SDK. So this job is the ONLY execution of the database-backed invariant tests, and
+    # it runs on both supported PostgreSQL majors for the same reason the migrate job
+    # does.
+    #
+    # The tests skip when DATABASE_URL is unset, which is why
+    # `db_tests_must_not_silently_skip_in_ci` fails the build in that case: seven
+    # invariant tests must not quietly become seven no-ops.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: ci-only-not-a-secret
+          POSTGRES_DB: gtt_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # PGPORT/PGUSER/PGPASSWORD/PGDATABASE as well as DATABASE_URL: psql does not read
+      # DATABASE_URL (that was the migrate job's first failure), and sqlx reads DATABASE_URL
+      # only. Both sets are needed so the tests and the migration step use one connection.
+      DATABASE_URL: postgres://postgres:ci-only-not-a-secret@localhost:5432/gtt_test
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: ci-only-not-a-secret
+      PGDATABASE: gtt_test
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: db-tests-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install sqlx-cli for the migration step
+        run: cargo install sqlx-cli --version 0.9.0 --locked --no-default-features --features postgres,rustls
+
+      - name: Apply migrations
+        # The tests assume the schema exists. `sqlx migrate run` is ADR-017's tool and is
+        # already proven by the migrate job; running it here means the tests exercise the
+        # same schema an operator would get, rather than a hand-made approximation.
+        run: sqlx migrate run
+
+      - name: Confirm the schema the tests will run against
+        # A test failure is hard to read if the schema behind it is not what was expected.
+        # These counts are the measured baseline from schema.md.
+        run: |
+          set -euo pipefail
+          NS="connamespace = 'public'::regnamespace"
+          NOTSQLX="left(c.relname, 5) <> '_sqlx'"
+          CAT="from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and $NOTSQLX"
+          CON="from pg_constraint k join pg_class c on c.oid = k.conrelid join pg_namespace n on n.oid = k.connamespace where n.nspname = 'public' and $NOTSQLX"
+          t=$(psql -v ON_ERROR_STOP=1 -tAc "select count(*) $CAT and c.relkind = 'r'")
+          i=$(psql -v ON_ERROR_STOP=1 -tAc "select count(*) $CAT and c.relkind = 'i'")
+          k=$(psql -v ON_ERROR_STOP=1 -tAc "select count(*) $CON")
+          echo "tables=$t indexes=$i constraints=$k"
+          [ "$t" = "12" ] && [ "$i" = "35" ] && [ "$k" = "57" ] || {
+            echo "schema does not match the measured baseline; the tests would be testing something else"
+            exit 1
+          }
+
+      - name: Invariant and isolation tests
+        run: cargo test -p gtt-control-plane --test invariants_db -- --nocapture
+
+      - name: Prove the database tests actually ran
+        # A skipped test is not a passing test. This fails the job if the run reported no
+        # database test at all, which is what would happen if DATABASE_URL were lost, the
+        # test names changed, or the suite silently stopped matching anything.
+        run: |
+          set -euo pipefail
+          cargo test -p gtt-control-plane --test invariants_db -- --list > listed.txt
+          n=$(grep -c ': test$' listed.txt || true)
+          echo "database tests discovered: $n"
+          if [ "$n" -lt 8 ]; then
+            echo "expected at least 8 database tests; the suite may have been emptied"
+            exit 1
+          fi
+
   migrate:
     name: Migrations apply to an empty database (T-033)
     # TEST-007, unblocked by T-033 (2026-10-18). Previously `if: false` because no

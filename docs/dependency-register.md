@@ -18,24 +18,62 @@ finding requires a written justification **in this file**, in the same change.
 
 ## Rust dependencies
 
+Every crate below is a **direct** dependency. The transitive tree is governed by `deny.toml`
+and enforced by `cargo deny`, which is what makes that sufficient; enumerating 167
+transitive rows here would be a list nobody maintains and would not be a control.
+
 | Crate | Version | Purpose | Licence | Maintenance note | Added by |
 |---|---|---|---|---|---|
-| _(none yet)_ | | | | | |
+| `sqlx` | 0.9.0 | PostgreSQL driver for the persistence layer, and `sqlx migrate` (ADR-008, ADR-017) | Apache-2.0 | Repo pushed 2026-10-16, not archived. `rust-version = 1.94.0`, which is why the workspace MSRV is 1.94 rather than 1.77. Added with **`default-features = false`** and only `postgres`, `runtime-tokio`, `uuid`, `chrono`, `json`: the defaults pull `sqlite`, `mysql` and `native-tls`, none of which this project uses. **`macros` and `derive` are both deliberately off** — see below | T-034 |
+| `tokio` | 1.53.3 | Async runtime. A **dev-dependency of `gtt-control-plane` only** for now | MIT | Repo pushed 2026-10-16, not archived. Will move to `[dependencies]` when the HTTP server exists (T-040); until then it would be a dependency the library does not use | T-034 |
+| `uuid` | 1.28.0 | Tunnel, user, session and allocation identifiers | MIT OR Apache-2.0 | Active; a dependency of `sqlx`, so it would be in the tree regardless | T-034 |
+| `chrono` | 0.4.45 | `timestamptz` columns | MIT OR Apache-2.0 | Active; a dependency of `sqlx`, so it would be in the tree regardless | T-034 |
+| `serde` | 1.0.229 | Derives, and `jsonb` binding via `sqlx`'s `json` feature | MIT OR Apache-2.0 | Active | T-034 |
+| `serde_json` | 1.0.154 | `jsonb` values: `audit_events.metadata`, `idempotency_keys.response_body` | MIT OR Apache-2.0 | Active | T-034 |
 
-**Status 2026-10-17:** the workspace has **no dependencies**. All six crate
-manifests declare an empty `[dependencies]` block on purpose. Adding a
-placeholder crate to prove the scan works would put an unreviewed dependency in
-the tree, which §5.1 forbids.
+### Why `sqlx`'s `macros` and `derive` features are off
+
+Both were tried and both were reverted. Recorded because the reasoning is not obvious and
+the default is to turn them on.
+
+- **`macros`** provides `query!` and `query_as!`, which type-check SQL at compile time.
+  That requires either a live database or a checked-in `.sqlx` cache of query metadata
+  (`sqlx-core/offline`). No normal PostgreSQL client connection is possible in the authoring
+  environment (`schema.md`), so enabling it would make `cargo check` fail there. The
+  runtime-checked `sqlx::query` / `query_as` API is used throughout instead. **Revisit when
+  `.sqlx` offline data can be generated** — that is a follow-up, not a permanent answer.
+- **`derive`** provides `#[derive(sqlx::FromRow)]`. It pulls in `sqlx-macros`, a proc-macro
+  crate, and a proc macro must be **linked** to a dylib. This machine cannot link
+  anything: the GNU bundle ships no assembler so `dlltool` cannot spawn one, and the MSVC
+  toolchain has no Windows SDK so `link.exe` does not exist. Verified, not assumed — see
+  the environment section below. Enabling it would have cost `cargo check`, `cargo clippy`
+  and `cargo test` for the whole crate locally, in exchange for removing about 150 lines of
+  boilerplate. `sqlx::FromRow` the *trait* needs no feature, so
+  `crates/control-plane/src/db/entities.rs` generates the impls with a `macro_rules!` macro
+  instead. CI can build proc macros either way; this was a local-verification decision.
+
+### What the real graph costs, measured
+
+| Measurement | Result |
+|---|---|
+| `[[package]]` entries in `Cargo.lock` after adding these six | **167** (the register previously measured 145 for `sqlx` with its default features) |
+| `cargo deny check advisories bans licenses` on that graph | **Pass, exit 0** — advisories ok, bans ok, licences ok |
+| Duplicate versions | 7 pairs warned (`block-buffer`, `cpufeatures`, `crypto-common`, `digest`, `hashbrown`, `sha2`, `syn`), advisory-only under `multiple-versions = "warn"` |
+| Workspace MSRV | Raised 1.77 → **1.94** by `sqlx`. `clippy.toml` said 1.77 until 2026-10-18, so clippy had been linting against the wrong MSRV since ADR-008; corrected |
+
+**Status 2026-10-17 (superseded):** the workspace had **no dependencies**. All six crate
+manifests declared an empty `[dependencies]` block on purpose — adding a placeholder crate
+to prove the scan works would have put an unreviewed dependency in the tree, which §5.1
+forbids. **Superseded 2026-10-18 by T-034**, which needed `sqlx` to do real work.
 
 ## Planned dependencies (not yet added — each needs a row here first)
+
+`sqlx`, `tokio`, `serde` and `serde_json` were planned here and are now **added**; see the table above. They remain on this list only for the parts not yet reached.
 
 | Crate | For | Status |
 |---|---|---|
 | `quinn` | QUIC with datagram support for engine and relay (ADR-001) | Proposed; RQ-6 confidence medium on datagrams, low on production fitness until E-6 |
-| `serde`, `serde_json` | Protocol message encoding (contracts.md §10) | MIT/Apache-2.0; 1.0.229 and 1.0.154, both recent |
-| `tokio` | Async runtime for engine, relay, control plane | **1.53.3, MIT, repo pushed 2026-10-16, not archived.** Required by `axum`, so ADR-008 commits to it |
 | `axum` | Control-plane HTTP API (ADR-008) | **0.8.9, MIT, repo pushed 2026-10-15, not archived, 27.5k stars. Accepted by ADR-008 on 2026-10-17** |
-| `sqlx` | PostgreSQL driver **and** the `sqlx migrate` migration tool (ADR-008, ADR-017) | **0.9.0, Apache-2.0, repo pushed 2026-10-16, not archived. Accepted by ADR-008 on 2026-10-17.** `rust-version = 1.94.0`, verified on the released `v0.9.0` tag, which raised the workspace MSRV from 1.77 to 1.94. **145 transitive crates**, measured here. Chosen as the migration tool too, so it is one dependency rather than driver-plus-tool. **`sqlx-cli` could not be executed in this environment** — `dlltool.exe` missing on GNU, no Windows SDK on MSVC, no prebuilt binary published — so T-033 must verify its behaviour rather than assume it |
 | `tracing`, `tracing-subscriber` | Structured logging (ADR-010) | `tracing` 0.1.44, MIT |
 | `keyring` | OS credential store (SEC-002) | Proposed |
 | `cargo-deny` | Licences, advisories, and bans (SEC-017) | Dev/CI tool; policy file at `deny.toml`. **Use the official prebuilt binary**, not `cargo install` — compiling it needs a linker this environment lacks (see the T-001 verification section) |
@@ -114,7 +152,13 @@ dlltool could not create import library with ...\self-contained\dlltool.exe ... 
 
 **Conclusion, recorded so it is not retried blindly.** To compile Rust tooling from source, this machine needs **one** of: the Windows SDK (admin, ~1–2 GB, for MSVC), a full MinGW-w64 installation (admin, ~100 MB, for GNU), or a Linux/CI runner for builds. All three need elevation, which this session does not have. **This is an owner action, not an agent action**, and it is now the one blocker standing between "all gates verified locally" and "tooling can be compiled at all".
 
-What this does *not* block: `cargo check`, `cargo clippy`, `cargo fmt`, `cargo test` (GNU, linking via `ld.exe`), `cargo deny` (prebuilt binary), and PostgreSQL verification via `--single`. **Every gate currently passes.**
+What this does *not* block: `cargo check`, `cargo clippy`, `cargo fmt`, `cargo deny` (prebuilt binary), and PostgreSQL verification via `--single`.
+
+> **Superseded 2026-10-18.** This paragraph listed `cargo test` (GNU, linking via `ld.exe`)
+> as unaffected. That was true only while the workspace had no dependencies. With `sqlx`
+> added, linking anything at all fails, and `cargo test` no longer runs here. See "What
+> changed on 2026-10-18" above. The gates that still pass locally are listed there
+> accurately; the ones that do not are named.
 
 For T-003's migration-tool research, `sqlx 0.9.0` was added to `gtt-control-plane` temporarily to measure what it costs and whether it builds here. **Removed in the same change; the workspace is back to zero dependencies and `git status` is clean.**
 
@@ -126,6 +170,48 @@ What it showed, recorded because the numbers matter for the ADR:
 - **`cargo deny` passes on the real 145-crate graph** — advisories ok, bans ok, licences ok — with seven `duplicate` warnings (two versions of `block-buffer`, `cpufeatures`, `crypto-common`, `digest`, `hashbrown`, `sha2`, `syn`). Those are advisory-only under `multiple-versions = "warn"`, but the duplicate-version signal becomes real as soon as a substantial dependency exists, so the policy needs revisiting when T-030 picks dependencies.
 - **`sqlx` declares `rust-version = "1.94.0"`**, above this repo's declared 1.77, which forces a decision about the workspace MSRV.
 - The dead-code lint proved itself here: the temporary probe module was rejected by `clippy -D warnings` with `function 'probe' is never used`. The lint gate works on real code, not only on the synthetic `unwrap()` test.
+
+## What changed on 2026-10-18: `cargo test` no longer runs locally
+
+**This supersedes the claim above that `cargo test` works under the GNU toolchain.** That
+was true only while the workspace had **no dependencies** — with nothing to link, there
+was nothing to link *with*. Adding `sqlx` on 2026-10-18 changed it.
+
+| Check | Before `sqlx` | After `sqlx` |
+|---|---|---|
+| `cargo check --workspace --all-targets` | Pass | **Pass** — `check` does not link |
+| `cargo clippy --workspace --all-targets` | Pass | **Pass** — clippy does not link |
+| `cargo fmt --all -- --check` | Pass | **Pass** |
+| `cargo test --workspace` | Pass (0 tests) | **Cannot run** |
+
+The failure is reproducible and is not a configuration mistake:
+
+```
+error: error calling dlltool 'dlltool.exe': program not found
+error: could not compile `getrandom` (lib) due to 1 previous error
+```
+
+Adding the self-contained bundle to `PATH` (as the register's earlier note recommends) moves
+the failure along, exactly as that note predicts, and no further:
+
+```
+dlltool could not create import library with ...\self-contained\dlltool.exe ... : CreateProcess
+```
+
+`dlltool.exe` runs (`GNU Binutils 2.44`) but cannot spawn the assembler it shells out to.
+Confirmed there is **no `as.exe` anywhere under `~/.rustup`**, and `link.exe` does not exist
+for the MSVC side.
+
+**Consequence, and it is a real loss.** The persistence layer's test suite and its
+clippy-clean, compiling state can be verified locally, but **the tests cannot be executed
+here.** They execute in CI: the `db-tests` job, which is also the only place the
+database-backed tests can run at all, since a normal client connection is impossible here
+either. This is recorded rather than worked around, because the workaround would be to
+stop writing tests that need a database, which is the opposite of correct.
+
+Nothing in this section is an owner action that would help. A Windows SDK, a full MinGW-w64,
+or a Linux runner all fix it; the first two need elevation and the third is what CI already
+is.
 
 ## What *was* verified locally (2026-10-17)
 
