@@ -495,3 +495,27 @@ fn statement_timeout_literal_matches_the_constant() {
     // timeout would have to be written into the literal deliberately, and the shape
     // assertion above catches that.
 }
+
+#[test]
+fn an_invalid_source_ip_is_refused_without_echoing_it_back() {
+    // PRIV-002: `source_ip` is guest personal data, and error text ends up in logs. The
+    // rejection must name the rule, not the value it broke.
+    //
+    // Lives here rather than in `invariants_db.rs` because it is a pure function of a string:
+    // no database is involved, so putting it there gated a privacy property behind the
+    // `db-tests` job and left it unrun on the plain `test` job.
+    assert!(sharing::assert_valid_source_ip("203.0.113.5").is_ok());
+
+    let outcome = sharing::assert_valid_source_ip("not-an-ip");
+    assert!(outcome.is_err(), "an invalid address must be refused");
+    let message = match outcome {
+        // Unreachable given the assertion above; keeps the second assertion non-vacuous
+        // without reaching for `unwrap`, which clippy denies here.
+        Ok(()) => String::from("accepted, which the assertion above rules out"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        !message.contains("not-an-ip"),
+        "the rejection message echoed the offending value: {message}"
+    );
+}

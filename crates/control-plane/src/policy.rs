@@ -16,26 +16,41 @@
 //! than a list of expected answers per cell. Two consequences follow:
 //!
 //! * A **capability** failure — an actor class that can never perform this operation — is
-//!   answered `forbidden` for *every* target. Whether the target exists or not, the answer
-//!   is the same, so nothing is confirmed. Answering `not_found` for existing targets and
-//!   `forbidden` for missing ones would be the leak.
+//!   answered `forbidden` for any target the caller can already see is theirs. Answering
+//!   `not_found` for a visible one and `forbidden` for a missing one would be the leak.
 //! * A **visibility** failure — a caller reaching for a resource that belongs to someone
-//!   else — is answered `not_found` for *every* resource not owned by the caller. Again
-//!   uniform, so nothing is confirmed.
+//!   else — is answered `not_found` for *every* resource not owned by the caller. Uniform,
+//!   so nothing is confirmed.
+//!
+//! **The pairing that has to match is "someone else's" against "does not exist",** because
+//! the data layer resolves both to the same value: scoping a query by owner makes a
+//! stranger's tunnel and a nonexistent one come back identically. The caller can always tell
+//! "mine" from "not mine" — that is their own data — so the two answers to *those* may
+//! differ. An earlier draft of this module and of `research.md` §6a claimed they could not,
+//! and a test proved it wrong.
 //!
 //! The ordering matters too. Visibility is decided before entitlement, so a **suspended**
 //! user asking about someone else's tunnel gets `not_found` rather than `forbidden`, and
-//! learns nothing about the tunnel; a suspended user asking about their own gets
-//! `forbidden`, which is what the error model says a suspended account should see.
+//! learns nothing about it. `data-model.md` forbids a suspended account *creating or
+//! starting* tunnels; it does not forbid reading, and refusing reads would leave a suspended
+//! owner unable to see or stop what they still have. So a suspended user asking about their
+//! own tunnel is allowed to view, stop, revoke and list, and refused only `create` and
+//! `start`.
 //!
 //! ## One cell the document does not settle
 //!
-//! "Suspend user / terminate tunnel" is `no` for every actor except the admin, *including
-//! the owner*. Terminate is an operator action, so a user calling it fails on capability
-//! rather than on visibility, and the answer is `forbidden` whether or not the tunnel
-//! exists. That is safe under the rule above -- the response does not vary with existence
-//! -- but it is a reading, not a quotation, and it is recorded as an ADR candidate in
-//! `research.md`.
+//! "Terminate tunnel" is `no` for every actor except the admin, *including the owner*.
+//! Terminate is an operator action, so a user calling it fails on capability:
+//!
+//! | Target | Answer |
+//! |---|---|
+//! | The caller's own tunnel | `forbidden` |
+//! | Someone else's tunnel | `not_found` |
+//! | No such tunnel | `not_found` |
+//!
+//! The lower two match, which is what the property requires; the caller already knew about
+//! the first. **Which word the second row uses is a reading, not a quotation**, and it is
+//! recorded as an ADR candidate in `research.md` §6a.
 //!
 //! ## Guests
 //!
@@ -108,8 +123,15 @@ pub enum Actor {
         /// `forbidden` means in the error model.
         status: UserStatus,
     },
-    /// The separate admin identity (ADR-019). Never a role on `users`, so an admin session
-    /// can never hold a tunnel and a user session can never carry admin capability.
+    /// The separate admin identity (ADR-019). Never a role on `users`, so a user session can
+    /// never carry admin capability and an admin session has no `users` row of its own.
+    ///
+    /// "Can never hold a tunnel" means **can never be its owner**: `tunnels.owner_id` is
+    /// `NOT NULL REFERENCES users (id)`, so a tunnel always has a user owner. The matrix
+    /// grants the admin `CreateTunnel` and the rest "via admin API", which is permission to
+    /// act **on a user's behalf**, not to own anything. If an admin session ever appeared as
+    /// a tunnel's owner, ADR-019's separation of duties would be broken and this enum would
+    /// be the wrong place for it to show up first.
     Admin,
     /// A relay presenting its own credential.
     Relay {
@@ -240,10 +262,12 @@ impl Decision {
 /// 4. **Capability**, dispatched by actor kind, so every matrix column is visible in one
 ///    place and a new actor variant fails to compile rather than falling through.
 ///
-/// There is deliberately **no early return for unauthenticated callers.** Under ADR-007 G2
-/// the guest has no account, so the entity presenting an invitation secret is anonymous by
-/// design; refusing anonymous callers before reaching the claim row would make the route
-/// unreachable. An earlier version did exactly that and a test caught it.
+/// Step 1 exempts the claim row, and that exemption is deliberate. Under ADR-007 G2 the guest
+/// has no account, so the entity presenting an invitation secret is anonymous by design;
+/// refusing anonymous callers before reaching the claim row would make the route
+/// unreachable, which an earlier version did and a test caught. The exemption is narrow --
+/// it is the claim row only, and a claim must carry no target (step 0), so it cannot be used
+/// to probe anything.
 pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decision {
     let claiming = matches!(operation, Operation::ClaimInvitation);
 
@@ -284,6 +308,10 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
 
     // 4. Capability.
     match actor {
+        // The matrix grants the admin these "via admin API". Note that permitted here is not
+        // the same as owning: an admin may create a tunnel, but `tunnels.owner_id` must
+        // reference a `users` row, so the tunnel is created for a user and the admin never
+        // holds it. See [`Actor::Admin`].
         Actor::Admin => match operation {
             Operation::TerminateTunnel
             | Operation::SuspendUser

@@ -904,8 +904,9 @@ async fn sec009_policy_and_data_layer_cannot_disagree() -> TestResult {
         status: UserStatus::Active,
     };
 
-    // (owner, operation, query the data layer) triples where the policy allows bob but the
-    // data layer must still return nothing.
+    // (description, operation, did the data layer refuse bob) triples. The policy denies all
+    // four with `not_found`; the data layer must independently come back empty. Either half
+    // alone would be a claim about one component -- this is where they are held to each other.
     let cases: Vec<(&str, policy::Operation, bool)> = vec![
         ("view", policy::Operation::ViewTunnel, {
             tunnels::get_tunnel(&p, bob, alice_tunnel).await?.is_none()
@@ -1057,23 +1058,5 @@ async fn sec009_guest_admissions_are_scoped_to_their_tunnel() -> TestResult {
         .ok_or("no admission to revoke")?;
     assert!(!sharing::revoke_admission(&p, tunnel_b, admission_id).await?);
     assert!(sharing::revoke_admission(&p, tunnel_a, admission_id).await?);
-    Ok(())
-}
-
-#[tokio::test]
-async fn an_invalid_source_ip_is_refused_without_echoing_it_back() -> TestResult {
-    // PRIV-002: `source_ip` is guest personal data, and error text ends up in logs. The
-    // rejection must name the rule, not the value.
-    assert!(sharing::assert_valid_source_ip("203.0.113.5").is_ok());
-    let outcome = sharing::assert_valid_source_ip("not-an-ip");
-    assert!(outcome.is_err(), "an invalid address must be refused");
-    let message = match outcome {
-        Ok(()) => String::from("accepted, which should not happen"),
-        Err(e) => e.to_string(),
-    };
-    assert!(
-        !message.contains("not-an-ip"),
-        "the rejection message echoed the offending value: {message}"
-    );
     Ok(())
 }
