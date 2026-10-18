@@ -231,10 +231,13 @@ impl Decision {
 ///
 /// 0. **A claim carries no target.** An invitation is identified by its secret, never by an
 ///    id, so requiring `Target::None` stops the claim route being used to probe resources.
-/// 1. **Visibility**, before entitlement, so a suspended account learns nothing about
+/// 1. **Credentials**, before visibility. An anonymous caller learns the same thing whatever
+///    they ask for; folding this into the dispatch lets existence leak through the choice of
+///    code.
+/// 2. **Visibility**, before entitlement, so a suspended account learns nothing about
 ///    resources that are not its own.
-/// 2. **Entitlement** — a suspended account.
-/// 3. **Capability**, dispatched by actor kind, so every matrix column is visible in one
+/// 3. **Entitlement** — a suspended account.
+/// 4. **Capability**, dispatched by actor kind, so every matrix column is visible in one
 ///    place and a new actor variant fails to compile rather than falling through.
 ///
 /// There is deliberately **no early return for unauthenticated callers.** Under ADR-007 G2
@@ -249,7 +252,21 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
         return Decision::Deny(ErrorCode::Forbidden);
     }
 
-    // 1. Visibility, before entitlement. A claim is authorised by the secret rather than by
+    // 1. Credentials, before visibility.
+    //
+    //    Order matters and getting it wrong is a leak in its own right: an earlier version
+    //    folded this into the dispatch below, so an anonymous caller fell through to the
+    //    visibility check and got `not_found` for one target and `unauthenticated` for
+    //    another -- which is precisely the oracle this module exists to prevent. A caller with
+    //    no credentials learns the same thing whatever they ask for.
+    //
+    //    The claim row is exempt, because under ADR-007 G2 the claimant is anonymous.
+    if !claiming && matches!(actor, Actor::Anonymous | Actor::Guest { .. }) {
+        return Decision::Deny(ErrorCode::Unauthenticated);
+    }
+
+    // 2. Visibility, before entitlement, so a suspended account learns nothing about
+    //    resources that are not its own. A claim is authorised by the secret rather than by
     //    ownership of anything, so it has no visibility to decide.
     if !claiming {
         if let Some(code) = visibility_failure(actor, target) {
@@ -257,7 +274,7 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
         }
     }
 
-    // 2. Entitlement. A suspended account is authenticated but not allowed, which is exactly
+    // 3. Entitlement. A suspended account is authenticated but not allowed, which is exactly
     //    what `forbidden` means in the error model.
     if let Actor::User { status, .. } = actor {
         if status == UserStatus::Suspended && !suspended_user_may(operation) {
@@ -265,7 +282,7 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
         }
     }
 
-    // 3. Capability.
+    // 4. Capability.
     match actor {
         Actor::Admin => match operation {
             Operation::TerminateTunnel
@@ -319,8 +336,10 @@ pub fn decide(actor: Actor, operation: Operation, target: Target<'_>) -> Decisio
             _ => Decision::Deny(ErrorCode::Forbidden),
         },
 
-        // No credentials, and under ADR-007 G2 a guest has none by design. The one row they
-        // may reach is the claim, whose authority is the secret.
+        // No credentials, and under ADR-007 G2 a guest has none by design. Reached only for
+        // the claim row, because the credential check above returns first for everything
+        // else. The second arm is unreachable in practice; stated rather than
+        // `unreachable!()` because that macro is in the denied `panic` lint group.
         Actor::Anonymous | Actor::Guest { .. } => match operation {
             Operation::ClaimInvitation => Decision::Allow,
             _ => Decision::Deny(ErrorCode::Unauthenticated),

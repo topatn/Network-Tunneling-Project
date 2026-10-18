@@ -118,10 +118,31 @@ fn target_kind(operation: Operation) -> TargetKind {
 
 #[test]
 fn a_strangers_resource_and_a_missing_one_give_the_same_answer() {
+    // `someone_elses` and `someone_elses_relay` are generated fresh and used in **no**
+    // actor, so "belongs to someone else" is true for every actor in the loop. An earlier
+    // version reused the owner's own id for that, which meant for the owner actor the
+    // "stranger's" target was actually its own -- and the two answers legitimately differed,
+    // which looked like a policy bug.
     let owner = Uuid::new_v4();
     let stranger = Uuid::new_v4();
     let relay = Uuid::new_v4();
     let other_relay = Uuid::new_v4();
+    let someone_elses = Uuid::new_v4();
+    let someone_elses_relay = Uuid::new_v4();
+
+    for actor_id in [
+        &owner,
+        &stranger,
+        &relay,
+        &other_relay,
+        &someone_elses,
+        &someone_elses_relay,
+    ] {
+        assert!(
+            !actor_id.eq(&someone_elses) && !actor_id.eq(&someone_elses_relay),
+            "the comparison ids must belong to no actor"
+        );
+    }
 
     for (actor_name, actor) in actors(owner, stranger, relay, other_relay) {
         for (op_name, op) in operations() {
@@ -129,21 +150,19 @@ fn a_strangers_resource_and_a_missing_one_give_the_same_answer() {
                 continue;
             }
             match target_kind(op) {
-                // Someone else's tunnel, and a tunnel that does not exist. The data layer
-                // cannot tell these apart -- scoping the query by owner makes both come back
-                // empty -- so neither may the policy.
                 TargetKind::User => {
                     assert_eq!(
                         decide(
                             actor,
                             op,
                             Target::UserOwned {
-                                owner: Some(&owner)
+                                owner: Some(&someone_elses)
                             }
                         ),
                         decide(actor, op, Target::UserOwned { owner: None }),
-                        "{actor_name} / {op_name}: a stranger's resource and a missing one are \
-                         answered differently, which confirms whether the identifier exists"
+                        "{actor_name} / {op_name}: another user's resource and a missing one \
+                         are answered differently, which confirms whether the identifier \
+                         exists"
                     );
                 }
                 TargetKind::Relay => {
@@ -152,12 +171,12 @@ fn a_strangers_resource_and_a_missing_one_give_the_same_answer() {
                             actor,
                             op,
                             Target::RelayOwned {
-                                owner: Some(&other_relay)
+                                owner: Some(&someone_elses_relay)
                             }
                         ),
                         decide(actor, op, Target::RelayOwned { owner: None }),
-                        "{actor_name} / {op_name}: another relay's state and a missing one are \
-                         answered differently, which confirms existence"
+                        "{actor_name} / {op_name}: another relay's state and a missing one \
+                         are answered differently, which confirms existence"
                     );
                 }
                 TargetKind::None => {
@@ -355,9 +374,18 @@ fn an_owner_may_manage_their_own_tunnels() {
 #[test]
 fn terminate_and_suspend_are_admin_only_even_for_the_owner() {
     // The matrix says "no" in the owner column too: terminate is an operator action,
-    // distinct from the owner choosing to stop. Answered `forbidden` rather than
-    // `not_found`, because a User actor gets that answer whether or not the tunnel exists --
-    // which is what makes it safe to use.
+    // distinct from the owner choosing to stop.
+    //
+    // The answers differ on purpose, and the reason is the point. Their own tunnel is
+    // `forbidden`, because the owner is asking for a capability they do not have, and that
+    // refusal is the same whatever they were targeting. Someone else's tunnel and a
+    // nonexistent one are both `not_found`, because the data layer resolves both to the same
+    // value.
+    //
+    // An earlier version of `research.md` 6a claimed the answer was `forbidden` for every
+    // target, and this test proved that wrong. Both corrected: the property requires the
+    // *second* pair to match, not the first, and demanding the first match too was asserting
+    // something stronger than the contract asks.
     let owner = Uuid::new_v4();
     let me = Actor::User {
         id: owner,
@@ -367,20 +395,32 @@ fn terminate_and_suspend_are_admin_only_even_for_the_owner() {
         owner: Some(&owner),
     };
     let missing = Target::UserOwned { owner: None };
+    let someone_elses = Target::UserOwned {
+        owner: Some(&Uuid::new_v4()),
+    };
 
-    for target in [mine, missing] {
-        assert_eq!(
-            decide(me, Operation::TerminateTunnel, target),
-            Decision::Deny(ErrorCode::Forbidden),
-            "an owner must not be able to terminate, and the answer must not depend on \
-             whether the tunnel exists"
-        );
-    }
+    assert_eq!(
+        decide(me, Operation::TerminateTunnel, mine),
+        Decision::Deny(ErrorCode::Forbidden),
+        "an owner must not be able to terminate their own tunnel"
+    );
+    assert_eq!(
+        decide(me, Operation::TerminateTunnel, missing),
+        Decision::Deny(ErrorCode::NotFound),
+        "a tunnel that is missing must be not_found"
+    );
+
+    // The pair that must NOT differ.
+    assert_eq!(
+        decide(me, Operation::TerminateTunnel, someone_elses),
+        decide(me, Operation::TerminateTunnel, missing),
+        "terminate must not distinguish another owner's tunnel from a nonexistent one"
+    );
+
     assert_eq!(
         decide(me, Operation::SuspendUser, mine),
         Decision::Deny(ErrorCode::Forbidden)
     );
-
     assert!(decide(Actor::Admin, Operation::TerminateTunnel, Target::None).is_allowed());
     assert!(decide(Actor::Admin, Operation::SuspendUser, Target::None).is_allowed());
 }
