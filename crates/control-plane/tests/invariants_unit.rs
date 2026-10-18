@@ -466,3 +466,32 @@ fn source_ip_validation_accepts_hosts_and_rejects_everything_else() {
         );
     }
 }
+
+#[test]
+fn statement_timeout_literal_matches_the_constant() {
+    // The statement timeout is written twice -- once as a millisecond constant and once
+    // inside a SQL literal -- because PostgreSQL's `SET` takes no bind parameter and sqlx
+    // refuses a non-literal query string. Nothing but this test stops the two copies from
+    // drifting, and a drifted timeout would be a silently unbounded wait.
+    const MS: i64 = gtt_control_plane::db::STATEMENT_TIMEOUT_MS;
+    const SQL: &str = gtt_control_plane::db::STATEMENT_TIMEOUT_SQL;
+
+    assert_eq!(
+        SQL,
+        concat!("SET statement_timeout = ", "15000"),
+        "the SQL literal must stay exactly this"
+    );
+    assert!(
+        SQL.ends_with(&MS.to_string()),
+        "the SQL literal {SQL:?} does not end with the constant {MS}; they have drifted"
+    );
+    assert!(
+        SQL.trim_start_matches("SET statement_timeout = ") == MS.to_string(),
+        "the SQL literal {SQL:?} is not the constant {MS} and nothing"
+    );
+    // Deliberately no `assert!(MS > 0)`: that is a constant expression, so it always
+    // passes or always fails at compile time and tests nothing. `assertions_on_constants`
+    // (in the denied `style` group) rejects it, and the lint is right. A zero or negative
+    // timeout would have to be written into the literal deliberately, and the shape
+    // assertion above catches that.
+}

@@ -37,8 +37,18 @@ const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(5);
 /// than the relay or engine.
 const MAX_CONNECTIONS: u32 = 10;
 
-/// Longest a statement may run before it is cancelled.
-const STATEMENT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Longest a statement may run before it is cancelled, in milliseconds.
+pub const STATEMENT_TIMEOUT_MS: i64 = 15_000;
+
+/// The same value as [`STATEMENT_TIMEOUT_MS`], as SQL.
+///
+/// A literal because `SET` does not accept a bind parameter (PostgreSQL rejects
+/// `SET statement_timeout = $1` as a syntax error) **and** because sqlx rejects any
+/// non-literal query string as a possible injection. The two facts together mean this has
+/// to be a literal, which leaves a drift risk against the constant; the unit test
+/// `statement_timeout_literal_matches_the_constant` closes it. Both are `pub` because
+/// that test reads them, and an alias would have been dead code the library cannot see.
+pub const STATEMENT_TIMEOUT_SQL: &str = "SET statement_timeout = 15000";
 
 /// A handle to the control-plane database.
 #[derive(Debug, Clone)]
@@ -65,10 +75,15 @@ impl Database {
         // Bounded so a pathological query cannot hold a connection until the pool gives
         // up on it. Applied per-connection rather than per-statement so it covers
         // statements this crate does not write, such as a migration.
-        sqlx::query("SET statement_timeout = $1")
-            .bind(STATEMENT_TIMEOUT.as_millis() as i64)
-            .execute(&pool)
-            .await?;
+        //
+        // `SET` does NOT accept a bind parameter. Verified against PostgreSQL 16.10:
+        // `SET statement_timeout = $1` is a syntax error, because SET is not extensible
+        // the way SELECT-family statements are. An earlier version here bound the value
+        // and **every** `Database::connect` failed as a result; the tests swallowed it as
+        // a skip, so a green CI job was asserting nothing at all. The literal is safe: the
+        // number comes from a `Duration` constant in this module, with no untrusted input
+        // anywhere near it.
+        sqlx::query(STATEMENT_TIMEOUT_SQL).execute(&pool).await?;
         Ok(Self { pool })
     }
 

@@ -205,21 +205,44 @@ jobs:
           }
 
       - name: Invariant and isolation tests
-        run: cargo test -p gtt-control-plane --test invariants_db -- --nocapture
-
-      - name: Prove the database tests actually ran
-        # A skipped test is not a passing test. This fails the job if the run reported no
-        # database test at all, which is what would happen if DATABASE_URL were lost, the
-        # test names changed, or the suite silently stopped matching anything.
+        # Output is teed to a file so the next step can inspect what actually happened.
+        # `pipefail` is essential: without it a `cargo test` failure inside the pipe would be
+        # masked by tee's exit status, which is precisely how a broken job could look green.
         run: |
           set -euo pipefail
-          cargo test -p gtt-control-plane --test invariants_db -- --list > listed.txt
-          n=$(grep -c ': test$' listed.txt || true)
-          echo "database tests discovered: $n"
-          if [ "$n" -lt 8 ]; then
-            echo "expected at least 8 database tests; the suite may have been emptied"
+          cargo test -p gtt-control-plane --test invariants_db -- --nocapture 2>&1 | tee dbtest.log
+
+      - name: Prove the database tests actually ran
+        # **A skipped test is not a passing test**, and this job has already been green once
+        # with all eleven database tests skipped: `Database::connect` failed because
+        # `SET statement_timeout = $1` is a syntax error in PostgreSQL, `pool()` turned the
+        # failure into a skip, and the skip guard only checked that DATABASE_URL was *set*
+        # rather than that the connection *worked*.
+        #
+        # Two independent defences now exist. Structurally, a test that cannot reach a
+        # promised database fails rather than skipping. This step is the second: it reads the
+        # output and fails if anything skipped, or if the counts do not add up.
+        run: |
+          set -euo pipefail
+
+          if grep -q "SKIPPED" dbtest.log; then
+            echo "FAIL: a database test skipped, so it did not test anything:"
+            grep -n "SKIPPED" dbtest.log
             exit 1
           fi
+
+          passed=$(sed -n 's/.*test result: ok\. \([0-9]*\) passed.*/\1/p' dbtest.log | tail -1)
+          failed=$(sed -n 's/.*; \([0-9]*\) failed.*/\1/p' dbtest.log | tail -1)
+          echo "reported: ${passed:-?} passed, ${failed:-?} failed"
+          if [ "${passed:-0}" -lt 8 ]; then
+            echo "expected at least 8 database tests to pass; got ${passed:-0}"
+            exit 1
+          fi
+          if [ "${failed:-0}" != "0" ]; then
+            echo "FAIL: $failed test(s) failed"
+            exit 1
+          fi
+          echo "every database test ran; none skipped"
 
   migrate:
     name: Migrations apply to an empty database (T-033)

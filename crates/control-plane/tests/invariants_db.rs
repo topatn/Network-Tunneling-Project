@@ -39,30 +39,61 @@ use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-/// The pool, or `None` when this environment cannot provide a database.
+/// Whether this job promised a database. Set only by the `db-tests` CI job.
+fn database_required() -> bool {
+    std::env::var("REQUIRE_DB_TESTS").is_ok_and(|v| v == "true")
+}
+
+/// The pool, or `None` only when no database was promised.
+///
+/// **A connection failure is never a skip.** An earlier version returned `None` here when
+/// `Database::connect` failed, printing a note to stderr and carrying on. Combined with the
+/// `SET` bind-parameter bug -- which made *every* connect fail -- that produced a **green CI
+/// job in which all eleven database tests skipped and reported "11 passed"**. A test that
+/// cannot reach its database has failed; it has not skipped.
 async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
+    let url = std::env::var("DATABASE_URL").unwrap_or_default();
     if url.is_empty() {
+        assert!(
+            !database_required(),
+            "REQUIRE_DB_TESTS=true but DATABASE_URL is unset"
+        );
         return None;
     }
     match Database::connect(&url).await {
         Ok(db) => Some(db.pool().clone()),
         Err(e) => {
-            // A URL that is set but unusable is a failure, not a skip: something is
-            // misconfigured and a skip would hide it.
-            eprintln!("DATABASE_URL is set but could not connect: {e}");
+            // Loud, and fatal when a database was promised. Either way it must not look like
+            // a passing test.
+            eprintln!("FATAL: DATABASE_URL is set but the connection failed: {e}");
+            assert!(
+                !database_required(),
+                "REQUIRE_DB_TESTS=true but the database could not be reached: {e}"
+            );
             None
         }
     }
 }
 
-/// Skip the body of a test, loudly, when there is no database.
+/// Require a pool, failing the test when one was promised.
+///
+/// The skip branch exists only for environments that never claimed a database, and it says
+/// so out loud. This is the structural guard: with it, a test **cannot report success while
+/// having done nothing** when the job said a database was available, so the CI step does not
+/// have to scrape output to notice.
 macro_rules! require_db {
     ($pool:expr) => {
         match $pool {
             Some(p) => p,
             None => {
-                eprintln!("SKIPPED: no database (DATABASE_URL unset). This test did not run.");
+                assert!(
+                    !database_required(),
+                    "REQUIRE_DB_TESTS=true, so this test must run rather than skip"
+                );
+                eprintln!(
+                    "SKIPPED: no database was promised (REQUIRE_DB_TESTS unset). \
+                     This test did not run."
+                );
                 return Ok(());
             }
         }
