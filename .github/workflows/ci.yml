@@ -138,8 +138,7 @@ jobs:
       - name: Apply all migrations to an empty database
         run: echo "Not implemented. Replaced by T-033."
 
-# ---------------------------------------------------------------------------
-# HISTORY — verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
+# HISTORY -- verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
 # cargo-deny 0.20.2 (official prebuilt Windows binary, checksum verified):
 #   PASS  cargo fmt --all -- --check
 #   PASS  cargo clippy --workspace --all-targets -- -D warnings
@@ -147,20 +146,25 @@ jobs:
 #   PASS  the lint gate provably denies unwrap()
 #   PASS  cargo deny check advisories bans licenses
 #   PASS  the dependency gate provably FAILS on a seeded known-vulnerable crate
-#   PASS  python scripts/audit_traceability.py --self-test  (16/16 detected)
+#   PASS  python scripts/audit_traceability.py --self-test  (18/18 detected)
 #   PASS  python scripts/audit_traceability.py             (0 errors)
 #   PASS  python scripts/check_contrast.py                 (22/22 pairs)
 #
-# A Git remote was configured on 2026-10-17, and the sibling `clean-vm.yml` workflow has
-# run green on a hosted Windows runner — the first workflow here to execute on hosted
-# infrastructure.
+# AND ON A HOSTED RUNNER, 2026-10-18. A Git remote was configured and this workflow ran
+# green for the first time on hosted infrastructure. Six jobs passed: Format, Lint, Test
+# (on windows-latest -- the first time Rust was compiled in this project with a complete
+# toolchain rather than the local GNU bundle's ld.exe), Documentation traceability audit,
+# Design token contrast, and Dependency scan (which installed cargo-deny from source on the
+# runner rather than using the prebuilt binary used locally).
+#
+# Merges are now actually gated. Before this, nothing ran on a remote, so no merge could be
+# blocked by any of these checks.
 #
 # STILL not verified:
-#   1. The outcome of THIS workflow's jobs on a hosted runner. The local results above
-#      came from a machine that cannot compile Rust tooling from source (no Windows SDK,
-#      no assembler in the GNU bundle), so a hosted run is not redundant with them — it is
-#      the first real execution, and it is what actually gates a merge.
-#   2. The `migrate` job is disabled (if: false) until T-033 creates migrations.
+#   1. The `migrate` job is disabled (if: false) until T-033 creates migrations. It shows
+#      as skipped, not passed, and that is the one condition still holding T-001's box
+#      unchecked.
 #
 # Recorded in tasks.md under T-001.
+# ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
