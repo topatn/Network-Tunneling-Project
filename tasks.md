@@ -531,7 +531,40 @@ Counts: 86 tasks across 10 milestones.
     licenses` exits **0** with `advisories ok, bans ok, licenses ok`, and all five simulations
     still pass (config **26**, paths **19**, profiles **72**, policy **244**, and no denied
     lint construct in real code).
-  - **Not yet verified: the corrected run.** Before
+  - **VERIFIED FOR WHAT IT COVERS. Run `9046efc`: all 10 jobs green**, including the SEC-017
+    dependency scan that the previous run failed. `Test` **98 passed, 0 failed**; the database
+    suite **17 passed, 0 failed on each of PostgreSQL 16 and 17**. **264 tests across all jobs,
+    0 failed**, and all **six** suite/job combinations are an exact name-for-name match with the
+    source — `server_manager.rs` **31/31**, `profiles.rs` 19/19, `policy_unit.rs` 13/13,
+    `invariants_unit.rs` 18/18, `invariants_db.rs` 17/17 on both PostgreSQL majors.
+  - **The box stays unchecked anyway, and that is the honest reading of the rule.** T-035's
+    Done-when opens "A tampered artifact is rejected before execution". The verification
+    machinery is proven — a tampered artifact, an extended one and a truncated one are all
+    refused, and a missing file and a directory are refused rather than treated as nothing-to-do.
+    What is **not** proven is that any real game's digest can be trusted, because E-15 has not
+    verified it end to end. Ticking because "the code I wrote is tested" would substitute my own
+    condition for the task's, which AGENTS.md §11 forbids.
+  - **What remains for T-035, in order:**
+    1. **E-15 end to end** on a clean standard-user VM — fetch the manifest, verify a real
+       `server.jar` against a digest obtained from an official source, and record the source URL
+       and verification method per game, which is `SRV-002`'s own stated verification. Blocked on
+       `SRV-001`, which needs a retail standard-user Windows image.
+    2. **Acquisition**, once there is a recorded channel to call. `ArtifactSource` is the seam.
+    3. **A symlink test.** The canonicalising ancestor walk is what makes `SRV-010`'s containment
+       hold against a link pointing out of the root, and creating a symlink on Windows needs
+       elevation — which `SRV-010` forbids and which this environment cannot do. **That
+       specific defence is implemented and untested**, and it is the one thing here that would
+       most repay a real machine.
+    4. **Process supervision** (`SRV-002`'s "before execution" half, `SRV-008` world survival,
+       `SRV-007`), which belongs to T-025/T-026.
+  - **A correction to my own record-keeping, in case it is read later.** An earlier draft of this
+    note claimed E-15/E-16 had produced **no recorded findings at all**, on the strength of a
+    grep for `**E-15**` that returned nothing. That was wrong, twice over: the tags are written
+    as `[E-15]` and `SRV-018`, and the findings are extensive — real Mojang piston URLs,
+    the Adoptium API, the SHA-256-verified JRE, 12/12 checks. **A grep that finds nothing is
+    evidence about the grep**, and this is now the third time one has misled me in this project.
+  - **Not yet verified: nothing further is claimed here.** The corrected run above is the whole of
+    it.
     transcriptions were run: the configuration generator (**26 assertions**, including every
     `SRV-004` refusal and the secret-length boundary in both directions), and path confinement
     against a real directory tree (**19 assertions**, including traversal, absolute components and
