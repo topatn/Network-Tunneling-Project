@@ -675,6 +675,61 @@ Trade-offs [A]: G2 matches "share a connection address with friends" and works f
 
 Tailscale-style relays forward *already encrypted end-to-end* traffic, so the relay cannot read payloads [R]. In this product the game protocol is generally **not** end-to-end encrypted, and the relay terminates the tunnel transport. [A] Documentation must say plainly: transport encryption protects client-to-relay segments, and the relay operator can in principle see game traffic unless a separate end-to-end layer is added. This is an open design decision (ADR-004 below).
 
+## 6a. Authorization error codes for the 19 unspecified matrix cells (ADR-020, candidate)
+
+**Raised 2026-10-18 by T-041. Status: candidate. The owner decides; this records what the
+implementation assumed so that the assumption is visible rather than buried in a `match`.**
+
+`contracts.md` §2's authorization matrix names an error code for **2** of its cells — the two
+`no (not_found)` entries. The other **19** carry a bare "no". The one sentence below the table
+resolves some of them:
+
+> Cross-owner access returns `not_found`, never `forbidden`, so identifiers are not confirmable.
+
+Read as a property rather than a per-cell instruction, that says something checkable:
+
+> **The response must not vary with the existence of a resource the caller cannot see.**
+
+Which is what T-041 implemented, and it divides the cells into two kinds:
+
+| Kind | Cells | Answer | Why it leaks nothing |
+|---|---|---|---|
+| **Capability** — an actor class can never do this | relay creating tunnels, user reporting health, non-admin suspending, non-admin terminating (including the owner) | `forbidden`, for **every** target | the answer is the same whether the target exists or not, so existence is not confirmed |
+| **Visibility** — the caller is reaching for someone else's resource | cross-owner tunnel, invitation and admission access; another relay's state | `not_found`, for **every** resource not theirs | likewise uniform |
+
+The two rules are only safe because each is *uniform*. Answering `forbidden` for a resource
+that exists and `not_found` for one that does not would be the oracle; so would the reverse.
+
+### The one cell that is a reading rather than a deduction
+
+**Terminate tunnel, called by the owner.** The matrix says "no" in the owner column, so an
+owner cannot terminate their own tunnel — terminate is the operator action, distinct from the
+owner choosing to stop. Implemented as a **capability** failure (`forbidden`), uniformly for
+every target.
+
+The alternative reading is that it is a visibility question and should answer `not_found` for
+a tunnel the caller does not own. Both are safe under the property above, so the property does
+not settle it. Chosen because the matrix grants the row to nobody but the admin, and granting
+it to nobody is a statement about the *caller*, not about the target.
+
+**If the owner prefers the other reading, the change is one match arm** in
+`crates/control-plane/src/policy.rs`, and `tests/policy_unit.rs::terminate_and_suspend_are_admin_only_even_for_the_owner`
+is the test that would change.
+
+### Also assumed, and worth confirming
+
+1. **A suspended owner may still view, stop, revoke and list.** `data-model.md` forbids a
+   suspended user creating or *starting* tunnels; it is silent on reading. Refusing reads too
+   would leave a suspended owner unable to see or stop what they still have, so they are
+   permitted. `suspended_user_may` is a single named list if that changes.
+2. **A guest is answered `unauthenticated`, not `forbidden`.** Under ADR-007 G2 the guest never
+   calls the control plane — the relay enforces the admission set — so `forbidden` would imply
+   this layer is on the guest's path. `Actor::Guest` exists only so the matrix column is
+   answered explicitly.
+3. **Admins see all users' resources.** The matrix says admins act "via admin API"; an admin
+   asking about a resource that does not exist is told `not_found`, not `allowed`. An earlier
+   draft exempted admins from visibility entirely and had that bug.
+
 ## 7. Architecture Decision Records (drafts)
 
 | ID | Decision | Status | Date | Confidence |
@@ -698,6 +753,7 @@ Tailscale-style relays forward *already encrypted end-to-end* traffic, so the re
 | ADR-017 | `sqlx migrate` owns `migrations/`; no separate migration library | **Accepted 2026-10-17** | 2026-10-17 | Medium-high; tool not yet executed, T-033 must verify |
 | ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Accepted 2026-10-17** by the product owner | 2026-10-17 | High for the S256 half (RFC 9700 is normative and read directly); the deferral half is a recorded sequencing judgement |
 | ADR-019 | The project owner is the sole administrator; admin is a **separate identity** (not a role on `users`); WebAuthn required, no TOTP fallback; short sessions plus step-up before destructive actions; recovery codes. **Separation of duties is absent and recorded as an accepted risk** | **Decided 2026-10-17** by the product owner | 2026-10-17 | [V] that this is the decision; [A] on all design reasoning, none of it tested |
+| ADR-020 | Error codes for the 19 authorization-matrix cells `contracts.md` §2 leaves unspecified: capability failures answer `forbidden` uniformly, visibility failures answer `not_found` uniformly | **Candidate — owner decision required** | raised 2026-10-18 | Medium. The governing rule ("identifiers are not confirmable") is stated by `contracts.md`; the per-cell split is a reading, and one cell is not settled by it. See `research.md` §6a |
 
 **ADR-016 was missing from this table on 2026-10-17** even though its full record existed 30 lines below it, and ADR-017 was present. Found while adding ADR-018. That is the same defect class ADR-016 was written about: a claim that exists in the document but is not represented where a reader would look. The summary table is now checked by `scripts/audit_traceability.py`, which was extended to require that every `### ADR-nnn` heading in §7 has a matching row above it — the same check that would have caught this.
 

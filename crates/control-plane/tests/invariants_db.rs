@@ -41,7 +41,9 @@ use gtt_control_plane::db::entities::{self, ActorType, Protocol, RelayStatus, Us
 use gtt_control_plane::db::ops::{self, NewAuditEvent, UsageDelta};
 use gtt_control_plane::db::profile::{ProfileMapping, ProfileSpec};
 use gtt_control_plane::db::relay;
+use gtt_control_plane::db::sharing;
 use gtt_control_plane::db::tunnels::{self, NewMapping, NewTunnel};
+use gtt_control_plane::policy;
 use gtt_control_plane::Database;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -878,5 +880,200 @@ async fn expired_tunnels_are_swept_in_bounded_batches() -> TestResult {
     // Idempotent: a second sweep finds nothing more to do.
     let again = tunnels::expire_due_tunnels(&p, 100).await?;
     assert_eq!(again, 0, "a second sweep must find nothing left to expire");
+    Ok(())
+}
+
+#[tokio::test]
+async fn sec009_policy_and_data_layer_cannot_disagree() -> TestResult {
+    // The two halves of SEC-009, checked against each other.
+    //
+    // The data layer scopes every query by owner and reports "not visible" as `None`. The
+    // policy turns that into `not_found`. If those two ever disagreed -- the data layer
+    // returning a row the policy would refuse, or refusing one it would allow -- there would
+    // be a path where a caller sees a resource it should not. So for each operation, the
+    // policy's decision and what the data layer actually returns are compared.
+    let p = require_db!(pool().await);
+
+    let alice_tunnel = make_tunnel(&p, "sec009-pair-alice", "pair-tunnel").await?;
+    let alice = user_id(&p, "sec009-pair-alice").await?;
+    let bob = user_id(&p, "sec009-pair-bob").await?;
+    assert_ne!(alice, bob, "the two fixtures must be different users");
+
+    let bob_actor = policy::Actor::User {
+        id: bob,
+        status: UserStatus::Active,
+    };
+
+    // (owner, operation, query the data layer) triples where the policy allows bob but the
+    // data layer must still return nothing.
+    let cases: Vec<(&str, policy::Operation, bool)> = vec![
+        ("view", policy::Operation::ViewTunnel, {
+            tunnels::get_tunnel(&p, bob, alice_tunnel).await?.is_none()
+        }),
+        ("list mappings", policy::Operation::ListAdmissions, {
+            tunnels::list_mappings(&p, bob, alice_tunnel)
+                .await?
+                .is_empty()
+        }),
+        ("start", policy::Operation::StartTunnel, {
+            !tunnels::start_tunnel(&p, bob, alice_tunnel).await?
+        }),
+        ("stop", policy::Operation::StopTunnel, {
+            !tunnels::stop_tunnel(&p, bob, alice_tunnel).await?
+        }),
+    ];
+
+    for (name, op, data_layer_refused) in cases {
+        // The policy is asked about a target bob cannot see.
+        let decision = policy::decide(bob_actor, op, policy::Target::UserOwned { owner: None });
+        assert_eq!(
+            decision,
+            policy::Decision::Deny(policy::ErrorCode::NotFound),
+            "bob must be refused {name} with not_found"
+        );
+        assert!(
+            data_layer_refused,
+            "the data layer returned something to bob for {name}, while the policy refused"
+        );
+    }
+
+    // And the tunnel is untouched.
+    let after = tunnels::get_tunnel(&p, alice, alice_tunnel)
+        .await?
+        .ok_or("alice's tunnel disappeared")?;
+    assert_eq!(
+        after.state, "created",
+        "bob's attempts changed alice's tunnel state"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn sec009_an_invitation_cannot_be_revoked_by_another_user() -> TestResult {
+    let p = require_db!(pool().await);
+    let owner = user_id(&p, "sec009-inv-owner").await?;
+    let tunnel_id = make_tunnel(&p, "sec009-inv-owner", "inv-tunnel").await?;
+    let stranger = user_id(&p, "sec009-inv-stranger").await?;
+
+    let invitation = sharing::create_invitation(
+        &p,
+        tunnel_id,
+        owner,
+        b"a-hash-not-a-secret",
+        1,
+        Utc::now() + chrono::Duration::hours(1),
+    )
+    .await?;
+
+    // Failing-input case: a stranger cannot revoke it.
+    assert!(
+        !sharing::revoke_invitation(&p, stranger, invitation.id).await?,
+        "SEC-009: a stranger revoked another user's invitation"
+    );
+
+    // Still live for its owner.
+    let live = sharing::list_invitations(&p, owner, tunnel_id).await?;
+    assert_eq!(live.len(), 1, "the invitation should still exist");
+    assert!(
+        live.first()
+            .map(|i| i.revoked_at)
+            .is_none_or(|r| r.is_none()),
+        "the stranger's revoke marked it revoked"
+    );
+
+    // And the owner can.
+    assert!(sharing::revoke_invitation(&p, owner, invitation.id).await?);
+    // And not twice.
+    assert!(
+        !sharing::revoke_invitation(&p, owner, invitation.id).await?,
+        "revoking an already-revoked invitation reported success"
+    );
+
+    // A stranger cannot even list it.
+    let theirs = sharing::list_invitations(&p, stranger, tunnel_id).await?;
+    assert!(
+        theirs.is_empty(),
+        "SEC-009: a stranger listed another user's invitations"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn sec009_guest_admissions_are_scoped_to_their_tunnel() -> TestResult {
+    let p = require_db!(pool().await);
+    let owner = user_id(&p, "sec009-adm-owner").await?;
+    let tunnel_a = make_tunnel(&p, "sec009-adm-owner", "adm-a").await?;
+    let tunnel_b = make_tunnel(&p, "sec009-adm-owner", "adm-b").await?;
+
+    let invitation_a = sharing::create_invitation(
+        &p,
+        tunnel_a,
+        owner,
+        b"hash-a-not-a-secret",
+        5,
+        Utc::now() + chrono::Duration::hours(1),
+    )
+    .await?;
+
+    sharing::admit_guest(
+        &p,
+        invitation_a.id,
+        tunnel_a,
+        "198.51.100.7",
+        Utc::now() + chrono::Duration::hours(1),
+    )
+    .await?;
+
+    // Each tunnel sees only its own admissions.
+    let for_a = sharing::list_live_admissions(&p, tunnel_a, Utc::now()).await?;
+    let for_b = sharing::list_live_admissions(&p, tunnel_b, Utc::now()).await?;
+    assert_eq!(for_a.len(), 1, "tunnel A should have one admission");
+    assert!(
+        for_b.is_empty(),
+        "tunnel B saw an admission belonging to tunnel A"
+    );
+
+    // Re-claiming from the same address refreshes rather than duplicating, which is what the
+    // partial unique index on (tunnel_id, source_ip) enforces.
+    sharing::admit_guest(
+        &p,
+        invitation_a.id,
+        tunnel_a,
+        "198.51.100.7",
+        Utc::now() + chrono::Duration::minutes(30),
+    )
+    .await?;
+    let again = sharing::list_live_admissions(&p, tunnel_a, Utc::now()).await?;
+    assert_eq!(
+        again.len(),
+        1,
+        "re-claiming from the same address duplicated the admission"
+    );
+
+    // Revoking is scoped to the tunnel that holds it.
+    let admission_id = again
+        .first()
+        .map(|a| a.id)
+        .ok_or("no admission to revoke")?;
+    assert!(!sharing::revoke_admission(&p, tunnel_b, admission_id).await?);
+    assert!(sharing::revoke_admission(&p, tunnel_a, admission_id).await?);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_invalid_source_ip_is_refused_without_echoing_it_back() -> TestResult {
+    // PRIV-002: `source_ip` is guest personal data, and error text ends up in logs. The
+    // rejection must name the rule, not the value.
+    assert!(sharing::assert_valid_source_ip("203.0.113.5").is_ok());
+    let outcome = sharing::assert_valid_source_ip("not-an-ip");
+    assert!(outcome.is_err(), "an invalid address must be refused");
+    let message = match outcome {
+        Ok(()) => String::from("accepted, which should not happen"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        !message.contains("not-an-ip"),
+        "the rejection message echoed the offending value: {message}"
+    );
     Ok(())
 }

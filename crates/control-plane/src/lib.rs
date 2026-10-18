@@ -14,6 +14,8 @@
 
 pub mod db;
 pub mod error;
+pub mod policy;
 
 pub use db::Database;
 pub use error::{PersistenceError, Rejection, Result};
+pub use policy::{Actor, Decision, ErrorCode, Operation, Target};
