@@ -8,8 +8,23 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Intentionally empty. Dependencies are added by the task that needs them; each
-# requires a dependency-register row in the same change (AGENTS.md section 5).
+# Added by T-032. Both are already in the register as direct dependencies of
+# `gtt-control-plane`; this crate adds no *new* dependency to the workspace, which
+# matters because T-030's Done-when is that every lockfile dependency has a
+# register row and this is a gate task.
+#
+# JSON rather than TOML: `contracts.md`'s payloads are JSON, `serde_json` is
+# already registered, and a TOML parser would be a new dependency for a format
+# choice no document requires.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# For unique scratch directory names. Already a direct workspace dependency
+# (register row exists), and the tests would otherwise need a hand-rolled unique
+# name from the process id and a counter, which is a collision waiting to happen
+# when CI runs suites concurrently on the same runner.
+uuid = { workspace = true }
 
 [lints]
 workspace = true

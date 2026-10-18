@@ -1,0 +1,35 @@
+{
+  "id": "l4d2",
+  "version": 1,
+  "display_name": "Left 4 Dead 2",
+  "mappings": [
+    {
+      "key": "game",
+      "protocol": "udp",
+      "default_port": 27015,
+      "optional": false,
+      "evidence": "verified"
+    },
+    {
+      "key": "rcon",
+      "protocol": "tcp",
+      "default_port": 27015,
+      "optional": true,
+      "evidence": "verified"
+    },
+    {
+      "key": "sourcetv",
+      "protocol": "udp",
+      "default_port": 27020,
+      "optional": true,
+      "evidence": "verified"
+    },
+    {
+      "key": "client",
+      "protocol": "udp",
+      "default_port": 27005,
+      "optional": true,
+      "evidence": "verified"
+    }
+  ]
+}

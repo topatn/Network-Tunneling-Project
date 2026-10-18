@@ -1,0 +1,14 @@
+{
+  "id": "l4d1",
+  "version": 1,
+  "display_name": "Left 4 Dead",
+  "mappings": [
+    {
+      "key": "game",
+      "protocol": "udp",
+      "default_port": 27015,
+      "optional": false,
+      "evidence": "reported"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "minecraft-bedrock",
+  "version": 1,
+  "display_name": "Minecraft Bedrock Edition",
+  "mappings": [
+    {
+      "key": "game",
+      "protocol": "udp",
+      "default_port": 19132,
+      "optional": false,
+      "evidence": "verified"
+    },
+    {
+      "key": "game-ipv6",
+      "protocol": "udp",
+      "default_port": 19133,
+      "optional": true,
+      "evidence": "verified"
+    }
+  ]
+}

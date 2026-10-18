@@ -1,0 +1,21 @@
+{
+  "id": "terraria",
+  "version": 1,
+  "display_name": "Terraria",
+  "mappings": [
+    {
+      "key": "game",
+      "protocol": "tcp",
+      "default_port": 7777,
+      "optional": false,
+      "evidence": "verified"
+    },
+    {
+      "key": "game-udp",
+      "protocol": "udp",
+      "default_port": 7777,
+      "optional": true,
+      "evidence": "reported"
+    }
+  ]
+}

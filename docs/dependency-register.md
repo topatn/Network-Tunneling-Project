@@ -28,8 +28,31 @@ transitive rows here would be a list nobody maintains and would not be a control
 | `tokio` | 1.53.3 | Async runtime. A **dev-dependency of `gtt-control-plane` only** for now | MIT | Repo pushed 2026-10-16, not archived. Will move to `[dependencies]` when the HTTP server exists (T-040); until then it would be a dependency the library does not use | T-034 |
 | `uuid` | 1.28.0 | Tunnel, user, session and allocation identifiers | MIT OR Apache-2.0 | Active; a dependency of `sqlx`, so it would be in the tree regardless | T-034 |
 | `chrono` | 0.4.45 | `timestamptz` columns | MIT OR Apache-2.0 | Active; a dependency of `sqlx`, so it would be in the tree regardless | T-034 |
-| `serde` | 1.0.229 | Derives, and `jsonb` binding via `sqlx`'s `json` feature | MIT OR Apache-2.0 | Active | T-034 |
-| `serde_json` | 1.0.154 | `jsonb` values: `audit_events.metadata`, `idempotency_keys.response_body` | MIT OR Apache-2.0 | Active | T-034 |
+| `serde` | 1.0.229 | Derives for the database entities and `jsonb` binding via `sqlx`'s `json` feature; `gtt-profiles` derives `Profile`, `Mapping`, `Protocol` and `Evidence` from it (T-032) | MIT OR Apache-2.0 | Active | T-034, T-032 |
+| `serde_json` | 1.0.154 | `jsonb` values: `audit_events.metadata`, `idempotency_keys.response_body`; and **the game profile file format** (T-032) | MIT OR Apache-2.0 | Active | T-034, T-032 |
+
+### Why the profile format is JSON rather than TOML
+
+`tasks.md` T-032 allows `profiles/*.toml|json`. JSON was chosen because:
+
+- `contracts.md`'s example payloads are already JSON, and a profile is the same kind of
+  declarative document, so one mental model covers both.
+- `serde_json` is already a direct dependency with a register row. TOML would have been the
+  workspace's first new dependency, and T-030 -- the gate task whose Done-when is that every
+  dependency has a row -- has not been completed.
+- `AGENTS.md` section 5.2 says not to add a dependency for a few lines of code. Parsing TOML
+  is not a few lines.
+
+If TOML is wanted later it is a contained change: `crates/profiles/src/registry.rs` is the
+only place a file is parsed, and `model.rs` holds no format knowledge.
+
+### `gtt-profiles` adds no new dependency to the workspace
+
+T-032 gives `gtt-profiles` `serde` and `serde_json` (both already direct, both already
+recorded) and `uuid` as a dev-dependency. `Cargo.lock` therefore gains **five lines** -- the
+three names added to the `gtt-profiles` entry -- and **no new crate**: the count stays at the
+**167** measured for T-034. Both numbers were measured after the change rather than assumed,
+because a register whose counts are stale is worse than one with no counts.
 
 ### Why `sqlx`'s `macros` and `derive` features are off
 

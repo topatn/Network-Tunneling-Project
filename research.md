@@ -750,6 +750,85 @@ test that would change.
    `contracts.md`, because the API surface belongs to T-040 and re-wording a contract is not
    this task's to do.
 
+## 6b. ADR-021 (CANDIDATE, not accepted) — unverified game facts gate default exposure
+
+**Raised 2026-10-18 by T-032. Status: candidate. The owner decides; this records what the
+implementation assumed so the assumption is visible rather than buried in a struct.**
+
+### The problem
+
+`research.md` RQ-1 holds two facts about the five initial games that are **not** verified:
+
+| Game | Fact | Label | Source of the doubt |
+|---|---|---|---|
+| Terraria | UDP on 7777 | unresolved | the same page says "TCP port 7777" and "port 7777 on **TCP and UDP**" in different sentences |
+| Left 4 Dead (1) | 27015 | `[R]` | "Weakest evidence of the five. Needs a primary source or experiment" |
+
+A profile file listing those ports would turn an `[R]` into something that looks authoritative
+the moment a tunnel is created from it. That is the failure mode `GAME-006` ("no unverified
+claims") and `SRV-003` ("no unverified claims, mirrors GAME-006 discipline") exist to prevent,
+and it would happen silently: nothing would say the number came from a forum post.
+
+### What was implemented
+
+`Evidence` is a field on every mapping, and it feeds default-enablement:
+
+```text
+enabled_by_default = !optional && evidence == Verified
+```
+
+**Derived, not stored.** Storing a third `enabled` flag would create three fields that must
+agree and a check that exists only because they might not. Deriving it means neither
+`GAME-006` nor `GAME-008` can be violated by editing one field — there is no field to edit.
+
+### The visible consequence
+
+| Profile | Default-enabled | Why |
+|---|---|---|
+| `minecraft-java` | `game` | verified, non-optional |
+| `minecraft-bedrock` | `game` | verified, non-optional |
+| `terraria` | `game` | TCP verified; the UDP mapping is `[R]` **and** optional |
+| `l4d2` | `game` | verified; RCON/SourceTV/client optional |
+| **`l4d1`** | **nothing** | its only mapping is `[R]` |
+
+**Left 4 Dead ships as a profile that exposes no port by default.** That is the honest reading
+of "weakest evidence of the five", and it is a product decision rather than a technical one,
+which is why it is raised rather than assumed away.
+
+### Why opt-in rather than excluded
+
+The distinction is deliberate and the requirement supports it. `GAME-006` forbids unverified
+*claims*; it does not make an unverified game unplayable, and `user-flows.md` journey 4
+already contemplates listing games by support level. So the L4D1 profile **loads, validates,
+and lists**; a host who asks for the mapping gets port 27015. What it does not do is expose
+that port to the public internet because a fact we could not source says so.
+
+Excluding it entirely would also be defensible, and would be simpler. It was rejected because
+it lets a tool make a research decision on the researcher's behalf, which is the opposite of
+what the requirement asks.
+
+### If the owner prefers otherwise
+
+- **Expose L4D1 by default** (treat `[R]` as good enough for exposure): delete `&& evidence ==
+  Verified` from `Mapping::enabled_by_default`, change `l4d1.json`'s evidence label to
+  `verified`, and update `EXPECTED_DEFAULTS` in `crates/profiles/tests/profiles.rs`. Note that
+  this makes Terraria's UDP mapping exposure-able too, which is a different unverified fact.
+- **Exclude unverified profiles entirely**: reject a profile whose only mappings are `[R]` at
+  load, and add the rule to `validate.rs`.
+- **Keep as implemented**: nothing changes.
+
+The named test that would change is
+`crates/profiles/tests/profiles.rs::shipped_profiles_expose_only_their_default_enabled_mappings`,
+along with `default_enablement_is_exactly_not_optional_and_verified`, which states the
+derivation over its whole cross-product.
+
+### Related, and *not* settled by this
+
+`user-flows.md` journey 4 says a game that has not passed its L2 test shows "Experimental".
+**Nothing has passed L2** (T-091 is not done), so on that rule all five profiles are
+experimental today. Whether that label is driven by the evidence field, by L2 results, or by
+both is a UI decision belonging to T-080, and is not decided here.
+
 ## 7. Architecture Decision Records (drafts)
 
 | ID | Decision | Status | Date | Confidence |
@@ -774,6 +853,7 @@ test that would change.
 | ADR-018 | Admin access tokens will **not** be sender-constrained at launch; PKCE challenge method is fixed to `S256` with no `plain` fallback | **Accepted 2026-10-17** by the product owner | 2026-10-17 | High for the S256 half (RFC 9700 is normative and read directly); the deferral half is a recorded sequencing judgement |
 | ADR-019 | The project owner is the sole administrator; admin is a **separate identity** (not a role on `users`); WebAuthn required, no TOTP fallback; short sessions plus step-up before destructive actions; recovery codes. **Separation of duties is absent and recorded as an accepted risk** | **Decided 2026-10-17** by the product owner | 2026-10-17 | [V] that this is the decision; [A] on all design reasoning, none of it tested |
 | ADR-020 | Error codes for the 19 authorization-matrix cells `contracts.md` §2 leaves unspecified: capability failures answer `forbidden` uniformly, visibility failures answer `not_found` uniformly | **Candidate — owner decision required** | raised 2026-10-18 | Medium. The governing rule ("identifiers are not confirmable") is stated by `contracts.md`; the per-cell split is a reading, and one cell is not settled by it. See `research.md` §6a |
+| ADR-021 | Unverified game facts (`evidence: reported`) gate default exposure: `enabled_by_default = !optional && evidence == Verified`, so Left 4 Dead ships exposing nothing by default | **Candidate — owner decision required** | raised 2026-10-18 | Medium. The rule is a direct reading of `GAME-006`, but *opt-in rather than excluded* is a product judgement. See `research.md` §6b |
 
 **ADR-016 was missing from this table on 2026-10-17** even though its full record existed 30 lines below it, and ADR-017 was present. Found while adding ADR-018. That is the same defect class ADR-016 was written about: a claim that exists in the document but is not represented where a reader would look. The summary table is now checked by `scripts/audit_traceability.py`, which was extended to require that every `### ADR-nnn` heading in §7 has a matching row above it — the same check that would have caught this.
 

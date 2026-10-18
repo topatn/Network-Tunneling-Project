@@ -262,6 +262,62 @@ Counts: 86 tasks across 10 milestones.
 ### T-032 — Implement profile loader and five profile files
 
 - [ ] **Prerequisites:** T-030
+- **Progress 2026-10-18 — BUILT, LINT-CLEAN, NOT YET RUN. THE BOX STAYS UNCHECKED.**
+  `crates/profiles` is a working loader; `profiles/` holds the five games. `serde`,
+  `serde_json` and `uuid` are added to that crate, but **all three were already direct
+  workspace dependencies**, so `Cargo.lock` gains five lines and **no new crate** — the
+  count stays at the **167** measured for T-034. Both numbers were re-measured, not assumed.
+  - **JSON over TOML**, which `tasks.md` allowed either way: `contracts.md`'s payloads are
+    already JSON, and TOML would have been the workspace's first new dependency while T-030 —
+    the gate task whose Done-when is that every dependency has a row — is still open.
+    `registry.rs` is the only place a file is parsed, so changing it later is contained.
+  - **The evidence label is load-bearing, and that is the whole design.** Each mapping declares
+    `evidence: verified | reported`, and `enabled_by_default = !optional && evidence ==
+    Verified` is **derived rather than stored**. `GAME-008` (optional mappings off by default)
+    and `GAME-006` (no unverified claims) therefore have **no field to violate**, so neither
+    needs a check to keep working. This is the T-034 lesson applied a second time: a structure
+    that cannot express the violation beats an invariant that catches it.
+  - **The consequence is product-visible and is the owner's call.** Terraria's UDP port is
+    genuinely unresolved — its own source contradicts itself — and L4D1 is `[R]`
+    throughout. So **`l4d1` ships exposing nothing by default.** It is not excluded: the
+    profile loads, validates and lists, and a host who asks gets port 27015. Raised as
+    **ADR-021**, a candidate, in `research.md` §6b with the alternatives and the named tests
+    that would change.
+  - **INV-1 is structural here.** Every profile type sets `deny_unknown_fields`, so there is no
+    field in which a profile could name a local destination, and a `local_host` or `target`
+    key is a **load error** rather than a silently ignored line. Two separate cases in the
+    tests plant exactly those keys, because the first being rejected proves nothing about the
+    second.
+  - **Structural faults are enforced by types; only cross-field facts by the validator.**
+    `Protocol` is an enum, so `"sctp"` is rejected by the deserializer; `default_port` is a
+    `u16`, so `70000` never becomes a mapping. `validate.rs` checks only what no single field
+    can express — duplicate keys, an empty mapping list, a non-positive version, identifier
+    rules. Nothing there re-checks what the types already guarantee, because a check that
+    cannot fail is a check that will eventually stop being maintained.
+  - **Every file read is bounded, checked before the allocation it governs** (AGENTS.md §4):
+    file size from metadata before the bytes are read, file count, mapping count, display-name
+    length, identifier length. A directory that cannot be read is an **error, not an empty
+    registry**, so a caller that ignores the result cannot mistake a build mistake for a bug in
+    its own code.
+  - **Errors report every broken rule, not just the first**, so a profile author fixes one file
+    in one pass, and each message names its field path. Quoted text is truncated so a malformed
+    file cannot produce an unbounded error message.
+  - **Three mistakes of my own, caught by the compiler rather than by a reviewer.** A scratch
+    helper returned `Result<(), _>` where a value was meant, so every call site inferred `()`
+    and could not find `write` on it. Three tests wrote `match load_dir(..)? { RegistryError::X
+    => .. }` — the `?` unwraps to a `Registry` **before** the match, so those arms could
+    never match, and the fallback arm would have reported a **successful load** as "expected
+    Invalid". That last one is the dangerous shape: it fails as a pass-shaped error rather than
+    as a compile error.
+  - **A seventh scripted edit failed to land**, caught by a guard rather than by reading the
+    file: the note anchor `- [ ] **Prerequisites:** T-030` also matches T-031, which has the
+    same prerequisite. The guard refused and the note was not written to the wrong section.
+  - **Not yet verified: anything.** `cargo test` cannot run in this environment. Before
+    pushing, a script transcribed the loader's rules and ran them against the real files in
+    `profiles/`: **72 assertions, all passing** — five files parse and validate, the
+    default-enabled set per profile is `game` for four and empty for `l4d1`, every profile has
+    a non-optional mapping, and no file contains an address or a host:port pair. **That is a
+    transcription, not the Rust deserializer, and nothing here is claimed as a passing test.**
 - **Scope:** Declarative, versioned profile format; validation at load; default-off optional mappings; custom port support.
 - **Deliverables:** `crates/profiles`, `profiles/*.toml|json` for five games.
 - **Requirements:** GAME-007, GAME-008

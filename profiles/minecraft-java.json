@@ -1,0 +1,28 @@
+{
+  "id": "minecraft-java",
+  "version": 1,
+  "display_name": "Minecraft Java Edition",
+  "mappings": [
+    {
+      "key": "game",
+      "protocol": "tcp",
+      "default_port": 25565,
+      "optional": false,
+      "evidence": "verified"
+    },
+    {
+      "key": "query",
+      "protocol": "udp",
+      "default_port": 25565,
+      "optional": true,
+      "evidence": "verified"
+    },
+    {
+      "key": "rcon",
+      "protocol": "tcp",
+      "default_port": 25575,
+      "optional": true,
+      "evidence": "verified"
+    }
+  ]
+}

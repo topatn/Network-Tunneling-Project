@@ -427,6 +427,11 @@ version = "0.0.0"
 [[package]]
 name = "gtt-profiles"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
 
 [[package]]
 name = "gtt-protocol"
