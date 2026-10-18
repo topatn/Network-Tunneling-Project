@@ -91,12 +91,35 @@ pub struct DataPaths {
 }
 
 impl DataPaths {
-    /// Establish the data directory for `app_name`.
+    /// Establish the data directory for `app_name`, creating it if it does not exist.
     ///
-    /// `app_name` is validated as a single relative name: it is a constant in this codebase,
-    /// not user input, and refusing anything else keeps the root unambiguous.
+    /// `app_name` is validated as a single relative name: it is a constant in this codebase, not
+    /// user input, and refusing anything else keeps the root unambiguous.
+    ///
+    /// **The directory is created here.** An earlier version required the caller to have created
+    /// it already and returned `NotCanonicalisable` otherwise, which pushed the responsibility
+    /// onto every call site and made six tests fail for forgetting it. A test failing for "you
+    /// forgot to do the obvious thing first" is a sign the API is wrong, not that the tests are.
+    /// The application owns `%LOCALAPPDATA%\<app>`, so creating it is this type's job.
     pub fn new(base: &Path, app_name: &str) -> Result<Self, PathError> {
+        if !is_valid_app_name(app_name) {
+            return Err(PathError::NotCanonicalisable {
+                supplied: app_name.to_string(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "the data directory name must be a single relative name",
+                ),
+            });
+        }
+
         let candidate = base.join(app_name);
+        std::fs::create_dir_all(&candidate).map_err(|source| PathError::NotCanonicalisable {
+            supplied: app_name.to_string(),
+            source,
+        })?;
+
+        // Canonicalised *after* creation, so the stored root is the real path rather than
+        // whatever the string happened to be. Every later containment check compares against it.
         let root = candidate
             .canonicalize()
             .map_err(|source| PathError::NotCanonicalisable {
@@ -214,6 +237,19 @@ impl DataPaths {
             }
         }
     }
+}
+
+/// Whether `name` is usable as the single directory name beneath the per-user base.
+///
+/// This is a constant in this codebase rather than user input, so the rule exists to catch a
+/// future caller passing something derived rather than to handle attacker input. An empty name,
+/// an absolute path, a Windows prefix, or anything containing a separator is refused.
+fn is_valid_app_name(name: &str) -> bool {
+    if name.is_empty() || name.contains('/') || name.contains('\\') {
+        return false;
+    }
+    let path = Path::new(name);
+    !path.is_absolute() && !path.has_root() && path.components().count() == 1
 }
 
 /// Resolve `.` and `..` without touching the filesystem.

@@ -111,7 +111,10 @@ fn malformed_digests_are_refused_without_echoing_the_value() -> TestResult {
         String::new(),
         "abc".to_string(),
         "z".repeat(64),
-        format!("{}0", "a".repeat(63)),
+        // 65 hex characters: one over the bound. An earlier version of this case used
+        // `"a".repeat(63)` plus one more character, which is exactly 64 and therefore a
+        // **valid** digest -- the test asserted it was rejected and the runner was right.
+        "a".repeat(65),
         secret_looking.clone(),
     ] {
         match Digest::parse_hex(&bad) {

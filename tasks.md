@@ -507,7 +507,31 @@ Counts: 86 tasks across 10 milestones.
     Replaced with a boundary test: a secret of exactly `MIN_SECRET_LEN` characters is accepted
     and one character shorter is refused, so **lowering** the floor fails one case and **raising**
     it fails the other.
-  - **Not yet verified: anything.** `cargo test` cannot run here. Before pushing, three
+  - **First run (`edfb4da`): 24 of 31 tests passed and the SEC-017 dependency scan FAILED.**
+    Both failures were real, and one of them was a security gate, so neither was dismissed.
+  - **The dependency scan failed on `wildcards = "deny"`, and not where I assumed.** I read the
+    word "wildcard", saw `sha2 = "0.11"` in my own manifest, and assumed that was it. It was
+    not: a path dependency with **no `version` field** is a wildcard requirement to cargo-deny,
+    so `gtt-profiles = { path = "../profiles" }` was the offender. Fixed by adding
+    `version = "0.0.0"` to match the workspace version. **A security gate I nearly dismissed by
+    pattern-matching rather than reading is the worst version of this mistake**, and the log
+    said exactly which manifest line and which column it was.
+  - **All six path tests failed with `NotCanonicalisable { supplied: "app" }`, and the tests
+    were right to fail.** `DataPaths::new` required the caller to have created
+    `%LOCALAPPDATA%\<app>` already. Six tests failing for "you forgot to do the obvious thing
+    first" is a sign **the API is wrong, not the tests**, so the constructor now creates the
+    directory. A caller that must remember `create_dir_all` before `new` can get the containment
+    check wrong by omission, which is the one failure this module exists to prevent.
+  - **A malformed-digest case was not malformed.** The test asserted that
+    `"a".repeat(63)` plus one more character should be refused. That is exactly **64** hex
+    characters, which is a valid SHA-256 digest, so `parse_hex` accepted it correctly. The case
+    now uses 65. **The runner was right and the test was wrong** — the same shape as the
+    T-032 oversize fixture, and the third time a self-written fixture has been the defect.
+  - **Verified locally after the fixes**, before pushing: `cargo deny check advisories bans
+    licenses` exits **0** with `advisories ok, bans ok, licenses ok`, and all five simulations
+    still pass (config **26**, paths **19**, profiles **72**, policy **244**, and no denied
+    lint construct in real code).
+  - **Not yet verified: the corrected run.** Before
     transcriptions were run: the configuration generator (**26 assertions**, including every
     `SRV-004` refusal and the secret-length boundary in both directions), and path confinement
     against a real directory tree (**19 assertions**, including traversal, absolute components and

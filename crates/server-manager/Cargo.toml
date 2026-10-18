@@ -21,7 +21,11 @@ sha2 = "0.11"
 # is keyed by profile id. This is the `server-manager -> gtt-profiles` edge architecture.md
 # describes ("Profile (provisionable only)") and is the first cross-crate edge in the project
 # other than the protocol crate's intended sharing.
-gtt-profiles = { path = "../profiles" }
+# The `version` field is required, not decorative. A path dependency without one is a wildcard
+# requirement as far as `cargo deny`'s `wildcards = "deny"` rule is concerned, and it failed the
+# SEC-017 scan on the first run. The value matches the workspace version every crate inherits
+# from `[workspace.package]`.
+gtt-profiles = { path = "../profiles", version = "0.0.0" }
 
 [lints]
 workspace = true
