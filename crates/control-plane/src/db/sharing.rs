@@ -217,11 +217,22 @@ pub async fn purge_expired_admissions(pool: &PgPool, batch: i64) -> Result<u64> 
     Ok(res.rows_affected())
 }
 
-/// Reject a source address that PostgreSQL's `inet` will not accept.
+/// Require a single host address, not a network.
 ///
-/// Checked here so the caller gets [`Rejection::Field`] rather than a driver error, and
-/// so the offending value is not echoed back in an error message — it is guest personal
-/// data, and error text ends up in logs.
+/// **Deliberately stricter than the column it guards.** `guest_admissions.source_ip` is a
+/// PostgreSQL `inet`, which accepts CIDR notation — `203.0.113.0/24` is a perfectly valid
+/// inet value. This function refuses it, and that is the point rather than a gap: an
+/// admission grants the relay access to one guest address, so admitting a network would
+/// widen one guest's grant into a whole subnet. A caller must not be able to do that by
+/// formatting an address differently.
+///
+/// The consequence to be aware of: a relay that legitimately reports a prefix will be
+/// refused here. That is the intended answer for the first cut; if a future relay protocol
+/// needs prefixes, the decision belongs in an ADR rather than in this function.
+///
+/// Two further reasons to check here rather than let the driver report it: the caller gets
+/// [`Rejection::Field`] instead of a driver error, and **the offending value is not echoed
+/// back**. It is guest personal data and error text ends up in logs (PRIV-002).
 pub fn assert_valid_source_ip(source_ip: &str) -> Result<()> {
     if source_ip.trim().parse::<std::net::IpAddr>().is_ok() {
         Ok(())

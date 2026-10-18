@@ -12,8 +12,6 @@
 //! No `unwrap`, `expect` or `panic!`: the workspace denies the `panic` lint group on all
 //! targets, so these return `Result` and use `?`.
 
-use std::net::IpAddr;
-
 use gtt_control_plane::db::audit;
 use gtt_control_plane::db::entities::Protocol;
 use gtt_control_plane::db::invariants::{
@@ -21,6 +19,7 @@ use gtt_control_plane::db::invariants::{
     validate_mapping_against_profile, validate_port_mapping_tunnel,
 };
 use gtt_control_plane::db::profile::{ProfileMapping, ProfileSpec};
+use gtt_control_plane::db::sharing;
 use gtt_control_plane::error::Rejection;
 use uuid::Uuid;
 
@@ -413,30 +412,48 @@ fn inv5_key_shape_matches_the_project_identifier_rule() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn source_ip_validation_accepts_both_families_and_rejects_junk() {
-    let ok = [
-        "203.0.113.5",
+fn source_ip_validation_accepts_hosts_and_rejects_everything_else() {
+    // This tests `assert_valid_source_ip` itself rather than re-testing `IpAddr`, because
+    // the interesting property is the *divergence* from the column it guards.
+    //
+    // `guest_admissions.source_ip` is a PostgreSQL `inet`, which accepts CIDR notation:
+    // `203.0.113.0/24` is a perfectly valid inet value. This layer refuses it, on
+    // purpose. An admission grants relay access to one guest address; admitting a network
+    // would widen a single guest's grant into a whole subnet, which is a security-relevant
+    // broadening and not something a caller should be able to do by formatting an address
+    // differently.
+    //
+    // The previous version of this test asserted that `203.0.113.5/32` parsed as an
+    // `IpAddr`, which is false -- Rust rejects the prefix -- and that assertion took the
+    // `test` job red. It was testing the wrong thing: re-asserting a stdlib's parser
+    // instead of this module's contract.
+    for accepted in [
+        "203.0.113.5", // IPv4, the documentation range
         "10.0.0.1",
-        "2001:db8::1",
+        "127.0.0.1",
+        "2001:db8::1", // IPv6
         "::1",
-        "203.0.113.5/32",
-    ];
-    for ip in ok {
-        assert!(
-            ip.parse::<IpAddr>().is_ok(),
-            "{ip:?} should be a valid address and is used to prove the check discriminates"
-        );
-    }
-    for bad in [
-        "",
-        "not-an-ip",
-        "203.0.113.999",
-        "999.999.999.999",
-        "203.0.113.5/99",
     ] {
         assert!(
-            bad.parse::<IpAddr>().is_err(),
-            "{bad:?} should not parse as an address"
+            sharing::assert_valid_source_ip(accepted).is_ok(),
+            "{accepted:?} is a host address and must be accepted"
+        );
+    }
+
+    for rejected in [
+        "", // empty
+        "not-an-ip",
+        "203.0.113.999", // out of range
+        "999.999.999.999",
+        "203.0.113.0/24", // a network, not a host
+        "203.0.113.5/32",
+        "203.0.113.5/99",    // invalid prefix length
+        " 203.0.113.5 ",     // surrounding whitespace
+        "203.0.113.5:25565", // a socket address, which is not a peer address
+    ] {
+        assert!(
+            sharing::assert_valid_source_ip(rejected).is_err(),
+            "{rejected:?} must be refused as a guest source address"
         );
     }
 }
