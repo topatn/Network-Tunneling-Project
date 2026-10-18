@@ -130,17 +130,16 @@ fn a_strangers_resource_and_a_missing_one_give_the_same_answer() {
     let someone_elses = Uuid::new_v4();
     let someone_elses_relay = Uuid::new_v4();
 
-    for actor_id in [
-        &owner,
-        &stranger,
-        &relay,
-        &other_relay,
-        &someone_elses,
-        &someone_elses_relay,
-    ] {
+    // The loop below compares "belongs to someone else" against "does not exist", which only
+    // means anything if the comparison id belongs to **no** actor in the loop. An earlier
+    // version reused the owner's own id here, so for the owner actor the "stranger's" target
+    // was its own and the two answers legitimately differed -- which read as a policy bug.
+    // The first draft of this check looped over the comparison ids as well and so asserted
+    // they differed from themselves.
+    for actor_id in [&owner, &stranger, &relay, &other_relay] {
         assert!(
-            !actor_id.eq(&someone_elses) && !actor_id.eq(&someone_elses_relay),
-            "the comparison ids must belong to no actor"
+            *actor_id != someone_elses && *actor_id != someone_elses_relay,
+            "the comparison ids must belong to no actor, but one matches {actor_id}"
         );
     }
 
@@ -270,6 +269,14 @@ fn unauthenticated_is_answered_before_anything_else() {
     let other_relay = Uuid::new_v4();
 
     for (op_name, op) in operations() {
+        // The claim row is the one operation answerable without credentials: under ADR-007 G2
+        // the guest has no account, so the entity presenting an invitation secret IS the
+        // anonymous claimant, and the secret is the authority. Asserted in
+        // `claiming_an_invitation_is_authorised_by_the_secret_not_the_account`, including
+        // that it is refused a target so it cannot be used to probe.
+        if matches!(op, Operation::ClaimInvitation) {
+            continue;
+        }
         let decisions = [
             decide(Actor::Anonymous, op, Target::None),
             decide(Actor::Anonymous, op, Target::UserOwned { owner: None }),
