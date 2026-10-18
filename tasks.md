@@ -382,7 +382,7 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-041 — Implement authorization policy and tenant isolation [CP]
 
-- [ ] **Prerequisites:** T-034
+- [x] **Prerequisites:** T-034
 - **Scope:** Central policy for the matrix in `contracts.md` §2; `not_found` for cross-owner access.
 - **Deliverables:** Policy module and tests.
 - **Requirements:** SEC-009
@@ -410,7 +410,71 @@ Counts: 86 tasks across 10 milestones.
   - **The matrix has no column for the anonymous claimant, which is a gap in the document and not in the implementation.** It has Owner / Other user / Guest / Relay / Admin and marks the claim row "n/a" for both Owner and Guest, so no column covers a guest with no account. Recorded in `research.md` §6a with a recommendation that `contracts.md` either gain an anonymous column or re-word the row — not changed here, because the API surface belongs to T-040 and re-wording a contract is not this task's to do.
   - **A test proved a claim in my own documentation wrong.** `research.md` §6a said terminate-by-owner answers `forbidden` for *every* target. It does not: `forbidden` for your own tunnel, `not_found` for someone else's and for a missing one — and that difference is safe, because the owner can already tell "mine" from "not mine", and the pair that must match (*someone else's* against *missing*) is `not_found` on both. Both the test and the ADR text were corrected. **The property test had been asserting something stronger than the contract requires, and the code was right.**
   - **A third failure was a test bug that would have been easy to misread as a policy bug.** The indistinguishability test fed `CreateTunnel` a `UserOwned` target, which never occurs — nothing resolves a tunnel id when creating one — and reported a mismatch. The property is only meaningful over a pairing that can happen, so each operation now declares the target kind it actually uses.
-  - **Not yet verified: the corrected run.** Nothing in the policy module has executed successfully yet; `cargo test` cannot run in this environment (see the dependency register).
+  - **Second run (709877f): the same three tests failed, for two different reasons — one
+    of them a regression I had just introduced.**
+  - **A leak I created while fixing a leak.** Removing the early
+    `Anonymous => Unauthenticated` return, in order to fold everything into a single dispatch,
+    let anonymous callers fall through to the **visibility** check. They then got `not_found`
+    for one target and `unauthenticated` for another — **precisely the oracle this module
+    exists to prevent**, now aimed at anonymous callers instead of cross-owner ones. The
+    credential check went back ahead of visibility, with the claim row exempted so the route
+    stays reachable. The compiler enforced the restructuring as a side benefit: it rejected the
+    unreachable arms an early return leaves behind, which is what forced the single exhaustive
+    dispatch in the first place.
+  - **A test bug that would have read as a policy bug.** The indistinguishability test used the
+    *owner's* own id as "someone else's", so for the owner actor the comparison target was its
+    own and the two answers legitimately differed. The property needs an id belonging to **no**
+    actor.
+  - **Third run (e669401): 11 of 13 passed. Both remaining failures were test bugs, and the
+    code was right in both.**
+  - **A sanity assertion that asserted nothing and then failed.** The check that the
+    comparison ids belong to no actor looped over a list that *included* those ids and asserted
+    they differed from themselves, so it failed on its own first element. Rewritten to compare
+    the four **actor** ids against the two comparison ids, which is what the loop relies on.
+  - **A carve-out that never reached the test it belonged to.** The script carrying it raised
+    on an earlier unmatched anchor before writing. Found by grepping for the carve-out after the
+    run and finding one occurrence where there should have been two. Both of this run's bugs
+    are the same shape as three earlier ones: a scripted edit reports nothing, and the next step
+    trusts it.
+  - **Built a stand-in for the runner, because three rounds running the only thing that found
+    these was the runner.** A transcription of `decide()` into Python walks the same actor list,
+    operation list, target pairing and assertions as `policy_unit.rs`, so a self-defeating
+    assertion or a mispaired target is caught locally instead of costing a CI cycle.
+    **244 assertions, all passing**, plus a closing check that `policy.rs` still contains each
+    rule the transcription depends on, so the transcription cannot silently drift.
+  - **What that simulation does and does not establish.** It verifies the **tests** are
+    self-consistent and that the reasoning about the policy holds across every actor and
+    operation. It does **not** verify the Rust behaves as transcribed, and the transcription
+    was wrong three times in ways that made it disagree with *correct* code: it treated an
+    admin as a user with id `None`, omitted the two operator-only rows from the admin's allowed
+    set, and referenced an undefined `aid` that silently picked up a leaked loop variable. It
+    is a cheaper gate, not a substitute for the runner, and **nothing here is claimed as a
+    passing test.**
+  - **A lesson worth more than the fix.** A `git commit -m` whose message contained an
+    apostrophe caused a PowerShell parse error, and PowerShell parses a block before running
+    any of it — so a note script sitting earlier in that same block never ran at all. The
+    later commit succeeded from a message file, so the gap was invisible in git history: the
+    commit existed, the note did not, and the next script anchored on text that was never
+    written. **Commit messages go in a file, and no script's success is trusted without a grep
+    that shows its text inside the section it was meant for.**
+  - **VERIFIED. Run `fd581ab`: all 10 jobs green, and read out of the logs rather than the
+    badge.** `Test` **48 passed, 0 failed**; `Invariant tests against a real database` **18
+    passed, 0 failed on each of PostgreSQL 16 and 17**. **168 tests total, 0 failed.**
+  - **Counts are not enough, so the test *names* were cross-checked against the log.** The
+    database suite is an exact **18-for-18 name match** with the source, and the policy suite
+    an exact **13-for-13**. All four `sec009_*` security tests are individually confirmed
+    present in the log. This is written down because a green job that runs nothing has already
+    happened once in this project, and a count alone would not have caught it.
+  - **What the verification does and does not cover.** It covers `decide()` as a pure
+    function, and the data layer's owner-scoping against two real users in a real database.
+    It does **not** cover the HTTP surface, token handling, or admin authentication — no
+    API layer exists yet, so nothing here says anything about `contracts.md`'s routes being
+    correct. **SEC-009's "Done when" — cross-user reads and writes all return `not_found`
+    — is demonstrated at the policy and persistence layers, which is all this task builds.**
+    The API layer that must actually emit that code is T-040's, and until it exists the
+    guarantee is a property of two components rather than of the service.
+  - **The tick is on the Prerequisites line**, which is this file's convention; confirmed
+    against the already-ticked T-034 rather than assumed.
 ### T-042 — Implement tunnel create/list/get with idempotency [CP]
 
 - [ ] **Prerequisites:** T-041, T-032
