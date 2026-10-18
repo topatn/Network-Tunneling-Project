@@ -294,7 +294,7 @@ Counts: 86 tasks across 10 milestones.
   - **CI run 10ac6f4 is GREEN: all 8 jobs, including both migration matrix legs.** This is the first time the structural assertions and the six negative tests have executed, and they passed. **The Done-when condition — "Migrations apply to an empty database in CI; `schema-draft.sql` removed in the same change" — is therefore demonstrated by its stated verification, so the box is ticked.** What is verified: `sqlx-cli 0.9.0` installs; the migration applies to an empty PostgreSQL 16 and 17 service container over a normal client connection; re-running is a no-op; `sqlx migrate revert` executes the `.down.sql` and leaves 0 tables; all seven structural counts match the measured baseline; and the four must-reject inserts are rejected by their intended constraints while the two must-accept inserts succeed. **What is still not verified, and is not claimed:** concurrency, transaction isolation under load, and live performance — those need a workload, not a schema, and no run has tested them.
 ### T-034 — Implement persistence layer and invariant tests [CP]
 
-- [ ] **Prerequisites:** T-033
+- [x] **Prerequisites:** T-033
 - **Scope:** Data access for all entities; tests for INV-1 to INV-7 including INV-2, INV-4, INV-5 application checks.
 - **Deliverables:** Persistence module and tests.
 - **Requirements:** SEC-009, TEST-001
@@ -335,7 +335,27 @@ Counts: 86 tasks across 10 milestones.
   - **A case where the database was right and the test was wrong.** INV-6 gained an assertion that the same numeric port on a different protocol does not collide — and it failed, because `allocation_ports` has a composite foreign key `(mapping_id, protocol)` to `tunnel_mappings`. The fixture's mapping was UDP, so publishing it as TCP violated the FK. The schema was doing precisely its job; the test had to ask for something real, so the fixture now carries both a UDP and a TCP mapping and mappings are selected **by protocol rather than by position**.
   - **The schema refused to let the sweep test be arranged the obvious way.** `tunnels_expiry_chk` is `expires_at > created_at`, and `created_at` defaults to the *transaction* start time — later than the `Utc::now()` Rust computed a moment earlier — so the one-second margin the test used was a race, and it lost. Making a tunnel "due" by pushing `expires_at` into the past violates the same CHECK. The fixture is now an explicit INSERT with both timestamps in the past, and the comment says why rather than leaving a future reader to rediscover it.
   - **INV-6 also gained a release-and-reuse case**, so the index is shown to be on unreleased rows rather than being a permanent reservation.
-  - **Still unverified: the corrected run.** T-034 stays unchecked until a run is green **with the logs confirming the database tests actually ran.**
+  - **Run 431d159 is green on all 10 jobs, with 14/14 database tests passing on PostgreSQL
+  16 AND 17 and zero skips — confirmed from the logs, not from the badge.** The box is
+  ticked. Coverage mapped per invariant, because "the suite is green" is not the same claim
+  as "each invariant has both cases":
+
+  | Invariant | Passing | Failing-input |
+  |---|---|---|
+  | INV-1 no local target | schema scan, entity-field scan | `rejects_a_local_target_field`, and the scanner tested against a planted target |
+  | INV-2 profile match | `accepts_a_mapping_the_profile_declares` | wrong protocol, undeclared key, wrong profile version, and a DB-level rollback case |
+  | INV-3 one live allocation | first reservation succeeds | second refused, and re-allowed after release |
+  | INV-4 mapping in allocation's tunnel | `accepts_a_mapping_from_the_allocation_tunnel` | `rejects_a_mapping_from_another_tunnel`, and the DB case asserting no port row is left behind |
+  | INV-5 audit metadata | `accepts_allowed_metadata` | raw IP, non-allow-listed keys, nested objects, arrays, oversized values |
+  | INV-6 one live mapping per port | first publish, and TCP/UDP sharing a number | second UDP publish on the same port refused; released port reusable |
+  | INV-7 terminal has `stopped_at` | `stop_tunnel` writes both | the raw UPDATE setting `stopped_at = null` is rejected, and the sweep is shown to satisfy INV-7 too |
+
+  **What this task found that no amount of reading would have.** Six CI rounds. Three
+  defects in my own guards, **one of which made a green job assert nothing at all**, and
+  three genuine bugs in code that looked correct: a library function (`usage_since`) that
+  could never have worked, and two places where the database was right and the test was
+  wrong. The pattern is the same one this project has kept hitting — writing is cheap,
+  running is where the truth is.
 ### T-035 — Implement server-manager crate [CP]
 
 - [ ] **Prerequisites:** T-030
