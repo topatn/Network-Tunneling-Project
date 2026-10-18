@@ -414,25 +414,31 @@ fn inv5_key_shape_matches_the_project_identifier_rule() {
 #[test]
 fn source_ip_validation_accepts_hosts_and_rejects_everything_else() {
     // This tests `assert_valid_source_ip` itself rather than re-testing `IpAddr`, because
-    // the interesting property is the *divergence* from the column it guards.
+    // the interesting property is the set of *divergences* from the column it guards.
     //
-    // `guest_admissions.source_ip` is a PostgreSQL `inet`, which accepts CIDR notation:
-    // `203.0.113.0/24` is a perfectly valid inet value. This layer refuses it, on
-    // purpose. An admission grants relay access to one guest address; admitting a network
-    // would widen a single guest's grant into a whole subnet, which is a security-relevant
-    // broadening and not something a caller should be able to do by formatting an address
-    // differently.
+    // `guest_admissions.source_ip` is a PostgreSQL `inet`, which accepts considerably more
+    // than a single host address. This layer refuses two of those forms on purpose, and
+    // accepts whitespace it could reject. Each is listed below with its reason, because
+    // "stricter than the column" is only a virtue when you can say where the line is.
     //
-    // The previous version of this test asserted that `203.0.113.5/32` parsed as an
-    // `IpAddr`, which is false -- Rust rejects the prefix -- and that assertion took the
-    // `test` job red. It was testing the wrong thing: re-asserting a stdlib's parser
-    // instead of this module's contract.
+    // Refused: a CIDR, because an admission grants relay access to one guest address, so
+    // admitting a prefix would widen one guest's grant into a subnet.
+    //
+    // Refused: an IPv6 zone id (`fe80::1%eth0`), because the live-admission unique index is
+    // on `(tunnel_id, source_ip)` and `fe80::1%eth0` and `fe80::1%eth1` would be two rows
+    // for one host, fragmenting the admission set.
+    //
+    // Accepted: surrounding whitespace, because this value arrives over the wire from a
+    // relay and trimming it carries no security meaning. The column stores the normalised
+    // form regardless of what arrives.
     for accepted in [
         "203.0.113.5", // IPv4, the documentation range
         "10.0.0.1",
         "127.0.0.1",
         "2001:db8::1", // IPv6
         "::1",
+        " 203.0.113.5 ", // trimmed before parsing
+        "\t203.0.113.5\n",
     ] {
         assert!(
             sharing::assert_valid_source_ip(accepted).is_ok(),
@@ -441,15 +447,18 @@ fn source_ip_validation_accepts_hosts_and_rejects_everything_else() {
     }
 
     for rejected in [
-        "", // empty
+        "",    // empty
+        "   ", // whitespace only
         "not-an-ip",
         "203.0.113.999", // out of range
         "999.999.999.999",
         "203.0.113.0/24", // a network, not a host
         "203.0.113.5/32",
         "203.0.113.5/99",    // invalid prefix length
-        " 203.0.113.5 ",     // surrounding whitespace
+        "0.0.0.0/0",         // the entire IPv4 space
         "203.0.113.5:25565", // a socket address, which is not a peer address
+        "203.0.113.5 1.2.3.4",
+        "2001:db8::1%eth0", // IPv6 zone id: would fragment the admission set
     ] {
         assert!(
             sharing::assert_valid_source_ip(rejected).is_err(),

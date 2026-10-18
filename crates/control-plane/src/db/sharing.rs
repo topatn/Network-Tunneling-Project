@@ -226,9 +226,17 @@ pub async fn purge_expired_admissions(pool: &PgPool, batch: i64) -> Result<u64> 
 /// widen one guest's grant into a whole subnet. A caller must not be able to do that by
 /// formatting an address differently.
 ///
-/// The consequence to be aware of: a relay that legitimately reports a prefix will be
-/// refused here. That is the intended answer for the first cut; if a future relay protocol
-/// needs prefixes, the decision belongs in an ADR rather than in this function.
+/// Two forms of `inet` are refused, and one is forgiven:
+///
+/// 1. **A CIDR prefix.** A relay that legitimately reports a prefix will be refused here.
+///    That is the intended answer for the first cut; if a future relay protocol needs
+///    prefixes, the decision belongs in an ADR rather than in this function.
+/// 2. **An IPv6 zone id** (`fe80::1%eth0`). Refused because the live-admission unique index
+///    is on `(tunnel_id, source_ip)`, so `fe80::1%eth0` and `fe80::1%eth1` would be two rows
+///    for one host and would fragment the admission set.
+/// 3. **Surrounding whitespace is accepted**, because this value arrives over the wire from
+///    a relay and trimming it carries no security meaning. The column stores the normalised
+///    form whatever arrives.
 ///
 /// Two further reasons to check here rather than let the driver report it: the caller gets
 /// [`Rejection::Field`] instead of a driver error, and **the offending value is not echoed
