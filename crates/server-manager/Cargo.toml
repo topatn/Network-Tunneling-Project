@@ -8,8 +8,20 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Intentionally empty. Dependencies are added by the task that needs them; each
-# requires a dependency-register row in the same change (AGENTS.md section 5).
+# Added by T-035. Each needs a register row in the same change (AGENTS.md section 5.1);
+# `docs/dependency-register.md` has them.
+#
+# `sha2` for SHA-256, the digest Adoptium publishes for the JRE and the digest E-15 must
+# verify for `server.jar` before `SRV-002` can be claimed. Pinned to 0.11: the lockfile
+# already carries both 0.10.9 and 0.11.1 transitively, so this adds an edge rather than a
+# crate. Implementing SHA-256 here instead was rejected under AGENTS.md section 5.2.
+sha2 = "0.11"
+
+# The profile supplies the ports a generated configuration writes, and the provisionable set
+# is keyed by profile id. This is the `server-manager -> gtt-profiles` edge architecture.md
+# describes ("Profile (provisionable only)") and is the first cross-crate edge in the project
+# other than the protocol crate's intended sharing.
+gtt-profiles = { path = "../profiles" }
 
 [lints]
 workspace = true

@@ -455,6 +455,64 @@ Counts: 86 tasks across 10 milestones.
 ### T-035 — Implement server-manager crate [CP]
 
 - [ ] **Prerequisites:** T-030
+- **Progress 2026-10-18 — THE VERIFIABLE CORE IS BUILT AND LINT-CLEAN. THE BOX STAYS
+    UNCHECKED, because the headline requirement cannot honestly be claimed yet.**
+  - **Why it is not ticked.** T-035's Done-when opens "A tampered artifact is rejected before
+    execution". There is currently **no trustworthy digest for the Minecraft Java `server.jar`**,
+    and `research.md` RQ-13 says so in `[X]` terms: *"Not confirmed: that the manifest was
+    actually fetched and that a manifest-sourced SHA-1 verifies for the `server.jar` object
+    specifically (the manifest hashes the version JSON, not necessarily the server jar). **E-15
+    must verify the real check end to end before `SRV-002` can be claimed.**"* A rejection
+    control built on a digest whose source is unresolved is a control that reads as authoritative
+    and is not, which is the exact failure `GAME-006` and `SRV-003` discipline exists to prevent.
+  - **What is built**, being the parts that need no unresolved fact:
+    - `verify.rs` — SHA-256 comparison, streamed in a 64 KiB buffer with a **512 MiB cap**
+      checked from metadata before the bytes are read (`AGENTS.md` §4). The error names the
+      file so the host knows which download failed and **never echoes its contents**
+      (`PRIV-002`/`SEC-013`). Digest comparison is constant-time; the derived `PartialEq` is not,
+      and `Digest::matches` exists because of that.
+    - `config.rs` — `server.properties` generation where `SRV-004` is **structural**: a
+      request cannot represent RCON or query as on without a secret, and the flags are written
+      **unconditionally** so regenerating over a hand-edited file turns them back off. Ports come
+      from the profile's default-enabled mapping, never from the caller.
+    - `paths.rs` — per-user data directory. There is **one** way to turn a name into a path
+      and it cannot leave the root: `..` is normalised away, absolute components are refused
+      rather than joined (`Path::join` would discard the root), and the **nearest existing
+      ancestor** is canonicalised so a symlink inside the root pointing out is caught.
+    - `provision.rs` — the `SRV-003` gate. It returns **nothing**, and that is the feature
+      working: no acquisition experiment has passed. The refusal message names E-15 and E-16 so a
+      host can act on it.
+  - **Acquisition is deliberately not implemented.** No HTTP client, and no recorded source URL
+    for the jar. `ArtifactSource` is the seam a future caller fills in, which is the same shape as
+    T-041's `ProfileSpec` seam. The Adoptium JRE path **is** `[V]` with SHA-256 verified and 12/12
+    checks, so the verifier has a real caller today.
+  - **A real bug, found by simulation and not by the Rust tests.** `resolve` originally
+    canonicalised only the *immediate* parent, so `servers/minecraft-java/world` was refused
+    whenever neither `minecraft-java` nor `world` existed — **precisely the case provisioning
+    creates.** Every Rust test in the file used a path one level deep, so none would have caught
+    it. A transcription of the normalisation logic run against a real directory tree found it in
+    one go. Fixed by walking up to the nearest existing ancestor, and there is now a named test
+    for the multi-level case.
+  - **Symlink confinement is implemented but UNTESTED in CI.** Creating a symlink on Windows
+    needs elevation (`WinError 1314`), which `SRV-010` forbids and this environment cannot do. The
+    simulation skipped that case too. **The canonicalising ancestor walk is what makes the check
+    work, and that specific defence has no test.**
+  - **One new crate, measured not assumed.** `sha2 0.11` for SHA-256; `const-oid 0.10.2` follows
+    it in, so the graph goes **167 → 168**. `sha2 0.11.1` was already present via
+    `sqlx-postgres`, but taking it as a *direct* dependency activates a feature path that pulls in
+    `const-oid`. The natural assumption — "sha2 was already there, so nothing is added" — is
+    wrong, and the register says 168.
+  - **The vacuous constant test was deleted, not worked around.** A test asserting
+    `MIN_SECRET_LEN == 16` cannot fail unless someone edits the test and the constant together.
+    Replaced with a boundary test: a secret of exactly `MIN_SECRET_LEN` characters is accepted
+    and one character shorter is refused, so **lowering** the floor fails one case and **raising**
+    it fails the other.
+  - **Not yet verified: anything.** `cargo test` cannot run here. Before pushing, three
+    transcriptions were run: the configuration generator (**26 assertions**, including every
+    `SRV-004` refusal and the secret-length boundary in both directions), and path confinement
+    against a real directory tree (**19 assertions**, including traversal, absolute components and
+    the inner-`..`-is-allowed complement). **Those are transcriptions, not the Rust, and nothing
+    here is claimed as a passing test.**
 - **Scope:** Artifact acquisition from the official channel recorded by T-023/T-024, verification before execution (SRV-002), generated configuration with RCON and query off **where the game has them, Java edition only** (SRV-004; Bedrock has neither, `research.md` RQ-13.3), Bedrock `enable-lan-visibility` off so a non-default port is not shadowed, `online-mode` left on, per-user data directory layout (SRV-010), process supervision (start, graceful stop, bounded crash restart, log capture), world backup and restore (SRV-008), and a provisionable-games list driven by the profiles crate so an unverified game cannot be provisioned (SRV-003). Bedrock has no `/reload`, so every configuration write must be sequenced stop → write → start. **Per ADR-015: do not enable RCON, generate no RCON credential, and treat the Server Management Protocol as opt-in and off by default; if enabled, bind it to localhost with a static port, generate its TLS keystore, and pass the keystore password by environment variable rather than writing it to disk (`research.md` RQ-13.4).** **Do not** accept a local target from any network message; the local port is passed in-process from the engine's own configuration (SRV-005, `contracts.md` §13).
 - **Deliverables:** `crates/server-manager` with unit tests; dependency register entries for anything it adds.
 - **Requirements:** SRV-002, SRV-003, SRV-004, SRV-008, SRV-010

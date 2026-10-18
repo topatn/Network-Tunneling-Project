@@ -75,11 +75,39 @@ the default is to turn them on.
   `crates/control-plane/src/db/entities.rs` generates the impls with a `macro_rules!` macro
   instead. CI can build proc macros either way; this was a local-verification decision.
 
+### `gtt-server-manager` dependencies (T-035)
+
+| Crate | For | Version in the lock | Licence | Maintenance | Added |
+|---|---|---|---|---|---|
+| `sha2` | SHA-256, for comparing a downloaded artifact against its published digest (`SRV-002`) | `0.11.1` | MIT OR Apache-2.0 | Active; already in the graph via `sqlx-postgres`, so no new supply chain | T-035 |
+
+**One new crate enters the graph: `const-oid 0.10.2`.** `sha2 0.11.1` was already present
+(`sqlx-postgres` and `sqlx-mysql` both depend on it), but taking it as a *direct* dependency
+activates a feature path that pulls in `const-oid`, which was not in the graph before. The
+measured count therefore moves from **167 to 168**.
+
+**Why not hand-roll SHA-256.** `AGENTS.md` section 5.2 says not to add a dependency for a few
+lines of code, and a SHA-256 implementation is a few hundred. A homegrown digest would be
+exactly the wrong place to be clever: `SRV-002` is the control that decides whether an artifact
+runs, and a subtle implementation error there either rejects valid artifacts or accepts
+tampered ones. `const-oid` is a small, focused, MIT/Apache-licensed crate.
+
+**Why `sha2 0.11` and not `0.10`.** Both are in the graph. `0.11` is the newer major and is what
+`sqlx-postgres` already uses for the same purpose, so choosing it does not add a *second* copy of
+the digest stack. The lockfile's duplicate-version warning covers `sha2` and `digest` and is
+advisory-only under `multiple-versions = "warn"`.
+
+**`gtt-profiles` is not a crates.io dependency.** `gtt-server-manager` takes a `&Profile` so a
+generated configuration's ports come from the profile rather than from the caller, and keys the
+provisionable set by profile id. That is the `server-manager -> gtt-profiles` edge
+`architecture.md` describes, and it is a workspace path dependency, so it adds nothing to the
+lockfile.
+
 ### What the real graph costs, measured
 
 | Measurement | Result |
 |---|---|
-| `[[package]]` entries in `Cargo.lock` after adding these six | **167** (the register previously measured 145 for `sqlx` with its default features) |
+| `[[package]]` entries in `Cargo.lock` (was 167 through T-032; **168** after T-035 added `sha2`, which pulls in `const-oid`) | **168** (the register previously measured 145 for `sqlx` with its default features) |
 | `cargo deny check advisories bans licenses` on that graph | **Pass, exit 0** — advisories ok, bans ok, licences ok |
 | Duplicate versions | 7 pairs warned (`block-buffer`, `cpufeatures`, `crypto-common`, `digest`, `hashbrown`, `sha2`, `syn`), advisory-only under `multiple-versions = "warn"` |
 | Workspace MSRV | Raised 1.77 → **1.94** by `sqlx`. `clippy.toml` said 1.77 until 2026-10-18, so clippy had been linting against the wrong MSRV since ADR-008; corrected |
