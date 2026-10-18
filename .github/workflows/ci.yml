@@ -148,6 +148,11 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      # Declares that THIS job is supposed to have a database. The test suite fails if it
+      # is set and DATABASE_URL is not, so the tests cannot quietly become no-ops. It is
+      # deliberately not `CI`: the plain `test` job runs in CI too and has no database
+      # service by design, and keying on CI took that job red on its first run.
+      REQUIRE_DB_TESTS: "true"
       # PGPORT/PGUSER/PGPASSWORD/PGDATABASE as well as DATABASE_URL: psql does not read
       # DATABASE_URL (that was the migrate job's first failure), and sqlx reads DATABASE_URL
       # only. Both sets are needed so the tests and the migration step use one connection.

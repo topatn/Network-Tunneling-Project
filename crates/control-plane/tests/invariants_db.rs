@@ -14,9 +14,13 @@
 //! and a hard failure would mean the local `cargo test` gate is permanently red.
 //!
 //! That would be an easy way to make the gate decorative, so the skip is guarded:
-//! [`db_tests_must_not_silently_skip_in_ci`] **fails** when `CI` is set and
-//! `DATABASE_URL` is not. A misconfigured runner cannot quietly turn seven invariant tests
-//! into seven no-ops.
+//! [`db_tests_must_not_silently_skip_when_a_database_is_required`] **fails** when
+//! `REQUIRE_DB_TESTS=true` and `DATABASE_URL` is not. A misconfigured runner cannot quietly
+//! turn seven invariant tests into seven no-ops.
+//!
+//! The flag is per job, not `CI`, because `CI` says where the code is running and not
+//! whether this job is supposed to have a database. Keying on `CI` took the database-less
+//! `test` job red on its first run.
 //!
 //! `#[tokio::test]` needs tokio's `macros` and `rt-multi-thread` features, which are
 //! dev-dependencies: nothing in the library itself starts a runtime.
@@ -133,21 +137,32 @@ async fn tunnel_owner(p: &PgPool, owner: &str) -> Result<Uuid, Box<dyn std::erro
 // ---------------------------------------------------------------------------
 
 #[test]
-fn db_tests_must_not_silently_skip_in_ci() -> TestResult {
-    // The guard that makes skipping acceptable locally. In CI a missing DATABASE_URL is a
-    // misconfiguration, and seven invariant tests quietly becoming seven no-ops is worse
-    // than a red build.
-    let ci = std::env::var("CI").is_ok_and(|v| v == "true");
+fn db_tests_must_not_silently_skip_when_a_database_is_required() -> TestResult {
+    // The guard that makes skipping acceptable. When the job has declared that a database
+    // is required, a missing DATABASE_URL is a misconfiguration, and seven invariant tests
+    // quietly becoming seven no-ops is worse than a red build.
+    //
+    // Keyed on REQUIRE_DB_TESTS, **not** on CI. The first version used CI and fired in the
+    // plain `test` job, which has no database service by design, taking that job red on
+    // its first run. `CI` says where the code is running; it does not say whether this job
+    // is supposed to have a database. Only the job knows that, so only the job says it.
+    let required = std::env::var("REQUIRE_DB_TESTS").is_ok_and(|v| v == "true");
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
-    if ci && url.is_empty() {
+
+    if required && url.is_empty() {
         return Err(
-            "DATABASE_URL is unset in CI, so every database test would silently \
-                    skip. The db-tests job must provide it."
+            "REQUIRE_DB_TESTS=true but DATABASE_URL is unset, so every database test \
+             would silently skip. The db-tests job must provide both."
                 .into(),
         );
     }
-    if !ci && url.is_empty() {
-        eprintln!("note: no DATABASE_URL, so database tests will skip (expected locally)");
+    if required {
+        eprintln!("REQUIRE_DB_TESTS=true: the database tests will run");
+    } else {
+        eprintln!(
+            "REQUIRE_DB_TESTS is not set: database tests skip unless DATABASE_URL is \
+             present. Expected in the plain test job and on a developer machine."
+        );
     }
     Ok(())
 }
