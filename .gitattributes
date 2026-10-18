@@ -7,6 +7,12 @@
 
 * text=auto
 
+# These two carry no extension, so `* text=auto` alone left them at the mercy of
+# core.autocrlf and every commit printed "LF will be replaced by CRLF" for them.
+# Their contents are glob syntax, so pin them like the rest.
+.gitattributes text eol=lf
+.gitignore    text eol=lf
+
 # Windows scripts and batch files must have CRLF, or they misbehave under cmd.exe.
 *.bat text eol=crlf
 *.cmd text eol=crlf
