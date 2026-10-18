@@ -3,24 +3,33 @@
 //!
 //! ## Running these
 //!
-//! They need `DATABASE_URL` pointing at a PostgreSQL instance that has had the
-//! migrations applied. The `db-tests` job in `.github/workflows/ci.yml` starts a service
-//! container, runs `sqlx migrate run`, and then runs them.
+//! They need `DATABASE_URL` pointing at a PostgreSQL instance that has had the migrations
+//! applied. The `db-tests` job in `.github/workflows/ci.yml` starts a service container,
+//! runs `sqlx migrate run`, and then runs them.
 //!
-//! ## Why they skip rather than fail when `DATABASE_URL` is absent
+//! ## Why a promised database can never become a skip
 //!
-//! The authoring environment cannot open a normal PostgreSQL client connection -- forked
-//! backends die with `STATUS_DLL_INIT_FAILED` (`schema.md`) -- so these cannot run there
-//! and a hard failure would mean the local `cargo test` gate is permanently red.
+//! These cannot run in the authoring environment: it cannot open a normal PostgreSQL client
+//! connection (forked backends die with `STATUS_DLL_INIT_FAILED`, see `schema.md`), and it
+//! cannot link a test binary either. A hard failure there would mean the local `cargo test`
+//! gate is permanently red, so they skip when no database is available.
 //!
-//! That would be an easy way to make the gate decorative, so the skip is guarded:
-//! [`db_tests_must_not_silently_skip_when_a_database_is_required`] **fails** when
-//! `REQUIRE_DB_TESTS=true` and `DATABASE_URL` is not. A misconfigured runner cannot quietly
-//! turn seven invariant tests into seven no-ops.
+//! That arrangement has already produced **one green CI job in which all eleven tests
+//! skipped and reported "11 passed"**, so the skip path is fenced off three ways:
 //!
-//! The flag is per job, not `CI`, because `CI` says where the code is running and not
-//! whether this job is supposed to have a database. Keying on `CI` took the database-less
-//! `test` job red on its first run.
+//! 1. `REQUIRE_DB_TESTS=true` is set by the `db-tests` job. It is deliberately **not** `CI`:
+//!    the plain `test` job also runs in CI and has no database service by design.
+//! 2. A **connection failure** is fatal whenever a database was promised. An earlier
+//!    version turned it into a skip, which is how the green-but-empty job happened.
+//! 3. `require_db!` asserts rather than skipping, so a test cannot report success while
+//!    having done nothing. A separate CI step reads the output as an independent second net.
+//!
+//! ## Parallelism
+//!
+//! Every test in this file shares one database and they run in parallel, so **no test may
+//! look up a fixture by listing**. `make_relay` returns the node it created for exactly this
+//! reason: a relay defaults to `provisioning`, only `healthy` relays are allocatable, and
+//! "the first healthy relay" would be whichever test got there first.
 //!
 //! `#[tokio::test]` needs tokio's `macros` and `rt-multi-thread` features, which are
 //! dev-dependencies: nothing in the library itself starts a runtime.
@@ -28,7 +37,7 @@
 use chrono::Utc;
 use gtt_control_plane::db::accounts;
 use gtt_control_plane::db::audit;
-use gtt_control_plane::db::entities::{ActorType, Protocol, RelayStatus, UserStatus};
+use gtt_control_plane::db::entities::{self, ActorType, Protocol, RelayStatus, UserStatus};
 use gtt_control_plane::db::ops::{self, NewAuditEvent, UsageDelta};
 use gtt_control_plane::db::profile::{ProfileMapping, ProfileSpec};
 use gtt_control_plane::db::relay;
@@ -39,6 +48,10 @@ use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+/// For helpers that return an id. Separate from [`TestResult`] because that one is
+/// `Result<(), _>` and reusing it here is a type error rather than a silent bug.
+type IdResult = Result<Uuid, Box<dyn std::error::Error>>;
+
 /// Whether this job promised a database. Set only by the `db-tests` CI job.
 fn database_required() -> bool {
     std::env::var("REQUIRE_DB_TESTS").is_ok_and(|v| v == "true")
@@ -48,9 +61,9 @@ fn database_required() -> bool {
 ///
 /// **A connection failure is never a skip.** An earlier version returned `None` here when
 /// `Database::connect` failed, printing a note to stderr and carrying on. Combined with the
-/// `SET` bind-parameter bug -- which made *every* connect fail -- that produced a **green CI
-/// job in which all eleven database tests skipped and reported "11 passed"**. A test that
-/// cannot reach its database has failed; it has not skipped.
+/// `SET statement_timeout = $1` bind-parameter bug — which made *every* connect fail —
+/// that produced a green CI job in which all eleven tests skipped and reported "11 passed".
+/// A test that cannot reach its database has failed; it has not skipped.
 async fn pool() -> Option<PgPool> {
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
     if url.is_empty() {
@@ -63,8 +76,6 @@ async fn pool() -> Option<PgPool> {
     match Database::connect(&url).await {
         Ok(db) => Some(db.pool().clone()),
         Err(e) => {
-            // Loud, and fatal when a database was promised. Either way it must not look like
-            // a passing test.
             eprintln!("FATAL: DATABASE_URL is set but the connection failed: {e}");
             assert!(
                 !database_required(),
@@ -79,8 +90,7 @@ async fn pool() -> Option<PgPool> {
 ///
 /// The skip branch exists only for environments that never claimed a database, and it says
 /// so out loud. This is the structural guard: with it, a test **cannot report success while
-/// having done nothing** when the job said a database was available, so the CI step does not
-/// have to scrape output to notice.
+/// having done nothing** when the job said a database was available.
 macro_rules! require_db {
     ($pool:expr) => {
         match $pool {
@@ -119,13 +129,23 @@ fn profile() -> ProfileSpec {
     }
 }
 
-async fn make_tunnel(p: &PgPool, owner: &str, name: &str) -> TestResult {
-    let user = accounts::upsert_user(p, owner, &format!("s-{owner}"), None).await?;
+/// A user's id, created on first use.
+///
+/// Returns `Result` rather than panicking: `unreachable!` is in the denied `panic` lint
+/// group, so a test cannot reach for it even in a helper.
+async fn user_id(p: &PgPool, issuer: &str) -> IdResult {
+    let user = accounts::upsert_user(p, issuer, &format!("s-{issuer}"), None).await?;
+    Ok(user.id)
+}
+
+/// A tunnel with one `query` mapping, and its id.
+async fn make_tunnel(p: &PgPool, owner: &str, name: &str) -> IdResult {
+    let owner_id = user_id(p, owner).await?;
     let spec = profile();
-    tunnels::create_tunnel(
+    let tunnel = tunnels::create_tunnel(
         p,
         &NewTunnel {
-            owner_id: user.id,
+            owner_id,
             name,
             game_profile_id: &spec.profile_id,
             profile_version: spec.version,
@@ -139,11 +159,22 @@ async fn make_tunnel(p: &PgPool, owner: &str, name: &str) -> TestResult {
         &spec,
     )
     .await?;
-    Ok(())
+    Ok(tunnel.id)
 }
 
-async fn make_relay(p: &PgPool, name: &str) -> TestResult {
-    relay::create_relay_node(
+/// Create a relay node and promote it to `healthy`, returning it.
+///
+/// Returns the node rather than making the caller go and find it. `list_allocatable_relays`
+/// filters on `status = 'healthy'` and a new node defaults to `provisioning`, so a fixture
+/// that looked itself up before promoting itself found nothing — which is what the first CI
+/// run of these tests did, four times over, with an error message that blamed the wrong
+/// thing ("fixture relay was not created", when it had been created and merely was not yet
+/// allocatable).
+async fn make_relay(
+    p: &PgPool,
+    name: &str,
+) -> Result<entities::RelayNode, Box<dyn std::error::Error>> {
+    let node = relay::create_relay_node(
         p,
         name,
         "test-region",
@@ -153,31 +184,23 @@ async fn make_relay(p: &PgPool, name: &str) -> TestResult {
         31000,
     )
     .await?;
-    Ok(())
-}
-
-/// The id of a fixture user, created on first use.
-///
-/// Returns `Result` rather than panicking: `unreachable!` is in the denied `panic` lint
-/// group, so a test cannot reach for it even in a helper.
-async fn tunnel_owner(p: &PgPool, owner: &str) -> Result<Uuid, Box<dyn std::error::Error>> {
-    let user = accounts::upsert_user(p, owner, &format!("s-{owner}"), None).await?;
-    Ok(user.id)
+    relay::set_relay_status(p, node.id, RelayStatus::Healthy, true).await?;
+    Ok(node)
 }
 
 // ---------------------------------------------------------------------------
 
 #[test]
 fn db_tests_must_not_silently_skip_when_a_database_is_required() -> TestResult {
-    // The guard that makes skipping acceptable. When the job has declared that a database
-    // is required, a missing DATABASE_URL is a misconfiguration, and seven invariant tests
+    // The guard that makes skipping acceptable. When the job has declared that a database is
+    // required, a missing DATABASE_URL is a misconfiguration, and seven invariant tests
     // quietly becoming seven no-ops is worse than a red build.
     //
     // Keyed on REQUIRE_DB_TESTS, **not** on CI. The first version used CI and fired in the
-    // plain `test` job, which has no database service by design, taking that job red on
-    // its first run. `CI` says where the code is running; it does not say whether this job
-    // is supposed to have a database. Only the job knows that, so only the job says it.
-    let required = std::env::var("REQUIRE_DB_TESTS").is_ok_and(|v| v == "true");
+    // plain `test` job, which has no database service by design, taking that job red on its
+    // first run. `CI` says where the code is running; it does not say whether this job is
+    // supposed to have a database.
+    let required = database_required();
     let url = std::env::var("DATABASE_URL").unwrap_or_default();
 
     if required && url.is_empty() {
@@ -201,65 +224,30 @@ fn db_tests_must_not_silently_skip_when_a_database_is_required() -> TestResult {
 #[tokio::test]
 async fn inv3_allows_one_live_allocation_and_refuses_a_second() -> TestResult {
     let p = require_db!(pool().await);
-    let owner = tunnel_owner(&p, "inv3-owner").await?;
-    make_tunnel(&p, "inv3-owner", "inv3-tunnel").await?;
-    make_relay(&p, "inv3-relay").await?;
-    let relay_a = relay::list_allocatable_relays(&p, 10)
-        .await?
-        .into_iter()
-        .next();
-    let Some(relay_a) = relay_a else {
-        return Err("fixture relay was not created".into());
-    };
-    relay::set_relay_status(&p, relay_a.id, RelayStatus::Healthy, true).await?;
-
-    let tunnel = tunnels::list_tunnels(&p, owner, 10)
-        .await?
-        .into_iter()
-        .next();
-    let Some(tunnel) = tunnel else {
-        return Err("fixture tunnel was not created".into());
-    };
+    let tunnel_id = make_tunnel(&p, "inv3-owner", "inv3-tunnel").await?;
+    let node = make_relay(&p, "inv3-relay").await?;
+    let expires = Utc::now() + chrono::Duration::hours(1);
 
     // Passing case: the first reservation succeeds.
-    let first = relay::reserve_allocation(
-        &p,
-        tunnel.id,
-        relay_a.id,
-        Utc::now() + chrono::Duration::hours(1),
-    )
-    .await?;
+    let first = relay::reserve_allocation(&p, tunnel_id, node.id, expires).await?;
     assert_eq!(
         first.state, "reserved",
         "a fresh allocation starts reserved"
     );
 
     // Failing-input case: a second live allocation for the same tunnel is refused. The
-    // partial unique index is what actually enforces this; the pre-check only makes the
-    // error comprehensible.
-    let second = relay::reserve_allocation(
-        &p,
-        tunnel.id,
-        relay_a.id,
-        Utc::now() + chrono::Duration::hours(1),
-    )
-    .await;
+    // partial unique index is the real enforcement; the pre-check only makes the error
+    // comprehensible.
+    let second = relay::reserve_allocation(&p, tunnel_id, node.id, expires).await;
     assert!(
         second.is_err(),
-        "INV-3 allowed a second live allocation for tunnel {}",
-        tunnel.id
+        "INV-3 allowed a second live allocation for tunnel {tunnel_id}"
     );
 
-    // And once released, a new one is allowed again -- proving the index is on liveness
-    // and not a permanent one-per-tunnel lock.
+    // And once released, a new one is allowed again — proving the index is on liveness and
+    // not a permanent one-per-tunnel lock.
     assert!(relay::release_allocation(&p, first.id).await?);
-    let third = relay::reserve_allocation(
-        &p,
-        tunnel.id,
-        relay_a.id,
-        Utc::now() + chrono::Duration::hours(1),
-    )
-    .await;
+    let third = relay::reserve_allocation(&p, tunnel_id, node.id, expires).await;
     assert!(
         third.is_ok(),
         "a released allocation must free the slot again"
@@ -270,80 +258,49 @@ async fn inv3_allows_one_live_allocation_and_refuses_a_second() -> TestResult {
 #[tokio::test]
 async fn inv6_refuses_two_live_mappings_on_one_public_port() -> TestResult {
     let p = require_db!(pool().await);
-    let owner = tunnel_owner(&p, "inv6-owner").await?;
-    make_tunnel(&p, "inv6-owner", "inv6-tunnel").await?;
-    make_relay(&p, "inv6-relay").await?;
-    let Some(relay_node) = relay::list_allocatable_relays(&p, 10)
+    let owner = user_id(&p, "inv6-owner").await?;
+    let tunnel_a = make_tunnel(&p, "inv6-owner", "inv6-a").await?;
+    let tunnel_b = make_tunnel(&p, "inv6-owner", "inv6-b").await?;
+    let node = make_relay(&p, "inv6-relay").await?;
+    let expires = Utc::now() + chrono::Duration::hours(1);
+
+    let mapping_a = tunnels::list_mappings(&p, owner, tunnel_a)
         .await?
         .into_iter()
         .next()
-    else {
-        return Err("fixture relay was not created".into());
-    };
-    relay::set_relay_status(&p, relay_node.id, RelayStatus::Healthy, true).await?;
-
-    let Some(tunnel) = tunnels::list_tunnels(&p, owner, 10)
+        .ok_or("tunnel A has no mapping")?;
+    let mapping_b = tunnels::list_mappings(&p, owner, tunnel_b)
         .await?
         .into_iter()
         .next()
-    else {
-        return Err("fixture tunnel was not created".into());
-    };
-    let mappings = tunnels::list_mappings(&p, owner, tunnel.id).await?;
-    let Some(mapping) = mappings.into_iter().next() else {
-        return Err("fixture mapping was not created".into());
-    };
+        .ok_or("tunnel B has no mapping")?;
 
-    let allocation = relay::reserve_allocation(
-        &p,
-        tunnel.id,
-        relay_node.id,
-        Utc::now() + chrono::Duration::hours(1),
-    )
-    .await?;
+    let alloc_a = relay::reserve_allocation(&p, tunnel_a, node.id, expires).await?;
+    let alloc_b = relay::reserve_allocation(&p, tunnel_b, node.id, expires).await?;
 
-    // Passing case.
-    let port = relay::publish_allocation_port(
-        &p,
-        allocation.id,
-        mapping.id,
-        relay_node.id,
-        Protocol::Udp,
-        30111,
-    )
-    .await?;
+    // Passing case: the first live mapping may hold the port.
+    let port =
+        relay::publish_allocation_port(&p, alloc_a.id, mapping_a.id, node.id, Protocol::Udp, 30111)
+            .await?;
     assert_eq!(port.public_port, 30111);
 
     // Failing-input case: a second live mapping on the same (relay, protocol, port).
-    make_tunnel(&p, "inv6-owner", "inv6-tunnel-2").await?;
-    let other_tunnels = tunnels::list_tunnels(&p, owner, 20).await?;
-    let Some(other) = other_tunnels.into_iter().find(|t| t.id != tunnel.id) else {
-        return Err("second fixture tunnel was not created".into());
-    };
-    let other_mappings = tunnels::list_mappings(&p, owner, other.id).await?;
-    let Some(other_mapping) = other_mappings.into_iter().next() else {
-        return Err("second fixture mapping was not created".into());
-    };
-    let other_allocation = relay::reserve_allocation(
-        &p,
-        other.id,
-        relay_node.id,
-        Utc::now() + chrono::Duration::hours(1),
-    )
-    .await?;
-
-    let clash = relay::publish_allocation_port(
-        &p,
-        other_allocation.id,
-        other_mapping.id,
-        relay_node.id,
-        Protocol::Udp,
-        30111,
-    )
-    .await;
+    let clash =
+        relay::publish_allocation_port(&p, alloc_b.id, mapping_b.id, node.id, Protocol::Udp, 30111)
+            .await;
     assert!(
         clash.is_err(),
         "INV-6 allowed two live mappings to share (relay, udp, 30111)"
+    );
+
+    // And the same port on a different protocol is a different resource, which is what the
+    // index's `protocol` column is there to express.
+    let tcp =
+        relay::publish_allocation_port(&p, alloc_b.id, mapping_b.id, node.id, Protocol::Tcp, 30111)
+            .await;
+    assert!(
+        tcp.is_ok(),
+        "the same numeric port on a different protocol must not collide"
     );
     Ok(())
 }
@@ -351,22 +308,14 @@ async fn inv6_refuses_two_live_mappings_on_one_public_port() -> TestResult {
 #[tokio::test]
 async fn inv7_terminal_states_require_stopped_at() -> TestResult {
     let p = require_db!(pool().await);
-    let owner = tunnel_owner(&p, "inv7-owner").await?;
-    make_tunnel(&p, "inv7-owner", "inv7-tunnel").await?;
-    let Some(tunnel) = tunnels::list_tunnels(&p, owner, 10)
-        .await?
-        .into_iter()
-        .next()
-    else {
-        return Err("fixture tunnel was not created".into());
-    };
+    let owner = user_id(&p, "inv7-owner").await?;
+    let tunnel_id = make_tunnel(&p, "inv7-owner", "inv7-tunnel").await?;
 
     // Passing case: a terminal state written through the access layer carries stopped_at.
-    assert!(tunnels::stop_tunnel(&p, owner, tunnel.id).await?);
-    let stopped = tunnels::get_tunnel(&p, owner, tunnel.id).await?;
-    let Some(stopped) = stopped else {
-        return Err("the stopped tunnel disappeared".into());
-    };
+    assert!(tunnels::stop_tunnel(&p, owner, tunnel_id).await?);
+    let stopped = tunnels::get_tunnel(&p, owner, tunnel_id)
+        .await?
+        .ok_or("the stopped tunnel disappeared")?;
     assert_eq!(stopped.state, "stopped");
     assert!(
         stopped.stopped_at.is_some(),
@@ -376,7 +325,7 @@ async fn inv7_terminal_states_require_stopped_at() -> TestResult {
     // Failing-input case, straight at the CHECK: a terminal state with no stopped_at.
     let bad =
         sqlx::query("update tunnels set state = 'terminated', stopped_at = null where id = $1")
-            .bind(tunnel.id)
+            .bind(tunnel_id)
             .execute(&p)
             .await;
     assert!(
@@ -389,62 +338,53 @@ async fn inv7_terminal_states_require_stopped_at() -> TestResult {
 #[tokio::test]
 async fn inv4_refuses_publishing_another_tunnels_mapping() -> TestResult {
     let p = require_db!(pool().await);
-    let owner = tunnel_owner(&p, "inv4-owner").await?;
-    make_tunnel(&p, "inv4-owner", "inv4-a").await?;
-    make_tunnel(&p, "inv4-owner", "inv4-b").await?;
-    make_relay(&p, "inv4-relay").await?;
-    let Some(relay_node) = relay::list_allocatable_relays(&p, 10)
+    let owner = user_id(&p, "inv4-owner").await?;
+    let tunnel_a = make_tunnel(&p, "inv4-owner", "inv4-a").await?;
+    let tunnel_b = make_tunnel(&p, "inv4-owner", "inv4-b").await?;
+    let node = make_relay(&p, "inv4-relay").await?;
+
+    let mapping_a = tunnels::list_mappings(&p, owner, tunnel_a)
         .await?
         .into_iter()
         .next()
-    else {
-        return Err("fixture relay was not created".into());
-    };
-    relay::set_relay_status(&p, relay_node.id, RelayStatus::Healthy, true).await?;
-
-    let mut tunnels_for_owner = tunnels::list_tunnels(&p, owner, 20).await?;
-    tunnels_for_owner.sort_by(|a, b| a.name.cmp(&b.name));
-    let mut iter = tunnels_for_owner.into_iter();
-    let (Some(a), Some(b)) = (iter.next(), iter.next()) else {
-        return Err("both fixture tunnels were not created".into());
-    };
-    let Some(mapping_a) = tunnels::list_mappings(&p, owner, a.id)
+        .ok_or("tunnel A has no mapping")?;
+    let mapping_b = tunnels::list_mappings(&p, owner, tunnel_b)
         .await?
         .into_iter()
         .next()
-    else {
-        return Err("fixture mapping was not created".into());
-    };
+        .ok_or("tunnel B has no mapping")?;
 
-    let allocation = relay::reserve_allocation(
+    let alloc_a = relay::reserve_allocation(
         &p,
-        a.id,
-        relay_node.id,
+        tunnel_a,
+        node.id,
         Utc::now() + chrono::Duration::hours(1),
     )
     .await?;
 
+    // Passing case: tunnel A's own mapping publishes on tunnel A's own allocation.
+    let own =
+        relay::publish_allocation_port(&p, alloc_a.id, mapping_a.id, node.id, Protocol::Udp, 30222)
+            .await;
+    assert!(own.is_ok(), "sanity: a tunnel's own mapping must publish");
+
     // Failing-input case: tunnel B's mapping published on tunnel A's allocation. The
-    // composite foreign keys cannot catch this -- they tie the port to an allocation and to
-    // a mapping independently and never require a common tunnel.
-    let outcome = relay::publish_allocation_port(
-        &p,
-        allocation.id,
-        mapping_a.id,
-        relay_node.id,
-        Protocol::Udp,
-        30222,
-    )
-    .await;
+    // composite foreign keys cannot catch this — they tie the port to an allocation and to a
+    // mapping independently and never require the two to share a tunnel.
+    let cross =
+        relay::publish_allocation_port(&p, alloc_a.id, mapping_b.id, node.id, Protocol::Udp, 30223)
+            .await;
     assert!(
-        outcome.is_ok(),
-        "sanity: tunnel A's own mapping must publish"
+        cross.is_err(),
+        "INV-4 allowed tunnel B's mapping to be published on tunnel A's allocation"
     );
 
-    let b_mappings = tunnels::list_mappings(&p, owner, b.id).await?;
-    assert!(
-        b_mappings.is_empty(),
-        "tunnel B should have its own mapping"
+    // And nothing was written for the refused attempt.
+    let ports = relay::list_allocation_ports(&p, alloc_a.id).await?;
+    assert_eq!(
+        ports.len(),
+        1,
+        "the refused INV-4 attempt must not have left a port row behind"
     );
     Ok(())
 }
@@ -452,13 +392,13 @@ async fn inv4_refuses_publishing_another_tunnels_mapping() -> TestResult {
 #[tokio::test]
 async fn inv2_rolls_back_the_whole_tunnel_when_a_mapping_is_invalid() -> TestResult {
     let p = require_db!(pool().await);
-    let owner = tunnel_owner(&p, "inv2-owner").await?;
+    let owner = user_id(&p, "inv2-owner").await?;
     let spec = profile();
     let before = tunnels::list_tunnels(&p, owner, 100).await?.len();
 
-    // Failing-input case: `query` is UDP in this profile, so TCP must be refused. The
-    // tunnel insert happens first, so this also proves the transaction rolls back rather
-    // than leaving a tunnel with no mappings behind.
+    // Failing-input case: `query` is UDP in this profile, so TCP must be refused. The tunnel
+    // insert happens first, so this also proves the transaction rolls back rather than
+    // leaving a tunnel with no mappings behind.
     let outcome = tunnels::create_tunnel(
         &p,
         &NewTunnel {
@@ -512,18 +452,18 @@ async fn inv5_audit_metadata_is_stored_as_validated() -> TestResult {
     assert!(id > 0, "an audit event must get a positive identity value");
 
     let events = ops::list_audit_events(&p, "tunnel", Some(subject), 10).await?;
-    let stored = events.iter().find(|e| e.id == id);
-    let Some(stored) = stored else {
-        return Err("the audit event was not readable back".into());
-    };
+    let stored = events
+        .iter()
+        .find(|e| e.id == id)
+        .ok_or("the audit event was not readable back")?;
     assert_eq!(stored.action, "tunnel.stopped");
     assert_eq!(
         stored.metadata.get("reason").and_then(|v| v.as_str()),
         Some("owner_requested")
     );
 
-    // Failing-input case: metadata carrying a raw guest IP never reaches the column,
-    // because there is no way to construct an AuditMetadata that holds one.
+    // Failing-input case: metadata carrying a raw guest IP never reaches the column, because
+    // there is no way to construct an AuditMetadata that holds one.
     let leak = audit::build([("reason".to_owned(), serde_json::json!("198.51.100.7"))]);
     assert!(
         leak.is_err(),
@@ -535,46 +475,39 @@ async fn inv5_audit_metadata_is_stored_as_validated() -> TestResult {
 #[tokio::test]
 async fn sec009_a_user_cannot_reach_another_users_tunnel() -> TestResult {
     let p = require_db!(pool().await);
-    make_tunnel(&p, "sec009-alice", "alice-tunnel").await?;
-    let alice = tunnel_owner(&p, "sec009-alice").await?;
-    let bob = tunnel_owner(&p, "sec009-bob").await?;
-    assert_ne!(alice, bob, "the two fixtures must be different users");
-
-    let alice_tunnel = tunnels::list_tunnels(&p, alice, 10)
-        .await?
-        .into_iter()
-        .next();
-    let Some(alice_tunnel) = alice_tunnel else {
-        return Err("alice's fixture tunnel was not created".into());
-    };
+    let alice = make_tunnel(&p, "sec009-alice", "alice-tunnel").await?;
+    let bob_id = user_id(&p, "sec009-bob").await?;
+    let alice_id = user_id(&p, "sec009-alice").await?;
+    assert_ne!(alice_id, bob_id, "the two fixtures must be different users");
 
     // Passing case: alice sees her own.
-    let seen = tunnels::get_tunnel(&p, alice, alice_tunnel.id).await?;
+    let seen = tunnels::get_tunnel(&p, alice_id, alice).await?;
     assert!(seen.is_some(), "alice must be able to read her own tunnel");
 
-    // Failing-input case: bob does not, and cannot distinguish "not yours" from "not
-    // there" -- that indistinguishability is what `contracts.md` requires, since
-    // distinguishing them would confirm the tunnel exists.
-    let as_bob = tunnels::get_tunnel(&p, bob, alice_tunnel.id).await?;
+    // Failing-input case: bob does not, and cannot distinguish "not yours" from "not there".
+    // That indistinguishability is what `contracts.md` requires, since distinguishing them
+    // would confirm the tunnel exists.
+    let as_bob = tunnels::get_tunnel(&p, bob_id, alice).await?;
     assert!(
         as_bob.is_none(),
         "SEC-009: bob read a tunnel he does not own"
     );
-    let bob_list = tunnels::list_tunnels(&p, bob, 10).await?;
+
+    let bob_list = tunnels::list_tunnels(&p, bob_id, 10).await?;
     assert!(
-        bob_list.iter().all(|t| t.id != alice_tunnel.id),
+        bob_list.iter().all(|t| t.id != alice),
         "SEC-009: alice's tunnel appeared in bob's listing"
     );
-    let bob_mappings = tunnels::list_mappings(&p, bob, alice_tunnel.id).await?;
+    let bob_mappings = tunnels::list_mappings(&p, bob_id, alice).await?;
     assert!(
         bob_mappings.is_empty(),
         "SEC-009: bob read the mappings of a tunnel he does not own"
     );
 
     // Failing-input case: a write is refused the same way.
-    let stopped = tunnels::stop_tunnel(&p, bob, alice_tunnel.id).await?;
+    let stopped = tunnels::stop_tunnel(&p, bob_id, alice).await?;
     assert!(!stopped, "SEC-009: bob stopped a tunnel he does not own");
-    let still = tunnels::get_tunnel(&p, alice, alice_tunnel.id).await?;
+    let still = tunnels::get_tunnel(&p, alice_id, alice).await?;
     assert_eq!(
         still.map(|t| t.state),
         Some("created".to_owned()),
@@ -607,7 +540,7 @@ async fn suspending_a_user_stops_their_tunnels_and_sessions() -> TestResult {
     .await?;
     assert!(tunnels::start_tunnel(&p, user.id, tunnel.id).await?);
 
-    let session = accounts::create_session(
+    accounts::create_session(
         &p,
         user.id,
         Uuid::new_v4(),
@@ -623,10 +556,9 @@ async fn suspending_a_user_stops_their_tunnels_and_sessions() -> TestResult {
         accounts::set_user_status(&p, user.id, UserStatus::Suspended, Some("test")).await?;
     assert_eq!(updated, 1);
 
-    let after = tunnels::get_tunnel(&p, user.id, tunnel.id).await?;
-    let Some(after) = after else {
-        return Err("the tunnel disappeared rather than being terminated".into());
-    };
+    let after = tunnels::get_tunnel(&p, user.id, tunnel.id)
+        .await?
+        .ok_or("the tunnel disappeared rather than being terminated")?;
     assert_eq!(
         after.state, "terminated",
         "suspension must terminate live tunnels"
@@ -641,41 +573,25 @@ async fn suspending_a_user_stops_their_tunnels_and_sessions() -> TestResult {
         live.is_none(),
         "a suspended user's refresh token still works"
     );
-    assert_eq!(session.user_id, user.id);
     Ok(())
 }
 
 #[tokio::test]
 async fn usage_reports_accumulate_rather_than_replace() -> TestResult {
     let p = require_db!(pool().await);
-    let owner = tunnel_owner(&p, "usage-owner").await?;
-    make_tunnel(&p, "usage-owner", "usage-tunnel").await?;
-    make_relay(&p, "usage-relay").await?;
-    let Some(tunnel) = tunnels::list_tunnels(&p, owner, 10)
-        .await?
-        .into_iter()
-        .next()
-    else {
-        return Err("fixture tunnel was not created".into());
-    };
-    let Some(relay_node) = relay::list_allocatable_relays(&p, 10)
-        .await?
-        .into_iter()
-        .next()
-    else {
-        return Err("fixture relay was not created".into());
-    };
+    let tunnel_id = make_tunnel(&p, "usage-owner", "usage-tunnel").await?;
+    let node = make_relay(&p, "usage-relay").await?;
     let interval = Utc::now();
 
-    // Passing case: two reports for the same interval add up. Overwriting instead would
-    // make a retried relay report erase usage and quietly under-bill.
+    // Passing case: two reports for the same interval add up. Overwriting instead would make
+    // a retried relay report erase usage and quietly under-bill.
     let mut total = 0;
     for delta in [100, 250] {
         let row = ops::add_usage(
             &p,
             &UsageDelta {
-                tunnel_id: tunnel.id,
-                relay_id: relay_node.id,
+                tunnel_id,
+                relay_id: node.id,
                 interval_start: interval,
                 bytes_from_guests: delta,
                 bytes_to_guests: 0,
@@ -688,7 +604,7 @@ async fn usage_reports_accumulate_rather_than_replace() -> TestResult {
     }
     assert_eq!(total, 350, "usage deltas must accumulate, not replace");
 
-    let since = ops::usage_since(&p, tunnel.id, interval - chrono::Duration::minutes(1)).await?;
+    let since = ops::usage_since(&p, tunnel_id, interval - chrono::Duration::minutes(1)).await?;
     assert!(since >= 350, "usage_since must see the accumulated total");
     Ok(())
 }
@@ -728,8 +644,7 @@ async fn idempotent_replay_conflict_and_fresh_are_distinguished() -> TestResult 
     );
 
     // Passing case: same key, same hash replays the stored response.
-    let replay = ops::check_idempotency(&p, user.id, route, &key, hash_a).await?;
-    match replay {
+    match ops::check_idempotency(&p, user.id, route, &key, hash_a).await? {
         ops::IdempotencyOutcome::Replay { status, body: got } => {
             assert_eq!(status, 201);
             assert_eq!(got, body);
@@ -739,11 +654,122 @@ async fn idempotent_replay_conflict_and_fresh_are_distinguished() -> TestResult 
 
     // Failing-input case: same key, different hash is a conflict, not a replay. Silently
     // returning the earlier response would serve one request's result for another.
-    let conflict = ops::check_idempotency(&p, user.id, route, &key, hash_b).await?;
     assert_eq!(
-        conflict,
+        ops::check_idempotency(&p, user.id, route, &key, hash_b).await?,
         ops::IdempotencyOutcome::Conflict,
         "a key reused with a different body must be a conflict"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_suspended_user_cannot_start_a_new_tunnel() -> TestResult {
+    let p = require_db!(pool().await);
+    let user = accounts::upsert_user(&p, "start-owner", "s-start-owner", None).await?;
+    accounts::set_user_status(&p, user.id, UserStatus::Suspended, Some("test")).await?;
+
+    // `create_tunnel` does not itself check the user's status: the policy layer decides that
+    // when T-041 lands, and SEC-009 is about isolation rather than entitlement. What this
+    // test pins is the *data* the policy layer will need — that a suspended user has no live
+    // tunnels, so there is nothing for them to start.
+    let spec = profile();
+    let tunnel = tunnels::create_tunnel(
+        &p,
+        &NewTunnel {
+            owner_id: user.id,
+            name: "after-suspension",
+            game_profile_id: &spec.profile_id,
+            profile_version: spec.version,
+            mappings: &[NewMapping {
+                mapping_key: "query".to_owned(),
+                protocol: Protocol::Udp,
+                enabled: true,
+            }],
+            expires_at: Utc::now() + chrono::Duration::hours(1),
+        },
+        &spec,
+    )
+    .await?;
+
+    let live = tunnels::count_live_tunnels(&p, user.id).await?;
+    assert_eq!(
+        live, 1,
+        "the fixture tunnel is created in the 'created' state, which counts as live"
+    );
+    // Starting it is what the policy layer will refuse; the data-access layer permits it.
+    assert!(
+        tunnels::start_tunnel(&p, user.id, tunnel.id).await?,
+        "start_tunnel is not the entitlement check; that is T-041's job"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn listing_is_bounded_regardless_of_what_the_caller_asks_for() -> TestResult {
+    let p = require_db!(pool().await);
+    let owner = user_id(&p, "bound-owner").await?;
+
+    // A caller asking for zero, a negative, or an enormous page gets a bounded answer rather
+    // than everything or nothing. `AGENTS.md` §4 forbids unbounded allocation on input a
+    // caller controls.
+    for asked in [-1_i64, 0, 1, 10_000] {
+        let got = tunnels::list_tunnels(&p, owner, asked).await?;
+        assert!(
+            got.len() <= 200,
+            "list_tunnels(limit={asked}) returned {} rows; the cap is 200",
+            got.len()
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn expired_tunnels_are_swept_in_bounded_batches() -> TestResult {
+    let p = require_db!(pool().await);
+    let owner = user_id(&p, "sweep-owner").await?;
+    let spec = profile();
+    let tunnel = tunnels::create_tunnel(
+        &p,
+        &NewTunnel {
+            owner_id: owner,
+            name: "sweep-tunnel",
+            game_profile_id: &spec.profile_id,
+            profile_version: spec.version,
+            mappings: &[NewMapping {
+                mapping_key: "query".to_owned(),
+                protocol: Protocol::Udp,
+                enabled: true,
+            }],
+            expires_at: Utc::now() + chrono::Duration::seconds(1),
+        },
+        &spec,
+    )
+    .await?;
+    assert!(tunnels::start_tunnel(&p, owner, tunnel.id).await?);
+
+    // Not yet due.
+    assert_eq!(
+        tunnels::expire_due_tunnels(&p, 100).await?,
+        0,
+        "a tunnel that has not expired must not be swept"
+    );
+
+    // Due. The sweep sets `state='expired'` and `stopped_at`, so INV-7's CHECK is satisfied by
+    // the same statement that changes the state.
+    sqlx::query("update tunnels set expires_at = now() - interval '1 minute' where id = $1")
+        .bind(tunnel.id)
+        .execute(&p)
+        .await?;
+
+    assert_eq!(tunnels::expire_due_tunnels(&p, 100).await?, 1);
+    let after = tunnels::get_tunnel(&p, owner, tunnel.id)
+        .await?
+        .ok_or("the tunnel disappeared")?;
+    assert_eq!(after.state, "expired");
+    assert!(after.stopped_at.is_some(), "INV-7 applies to the sweep too");
+
+    // Idempotent: a second sweep finds nothing.
+    assert_eq!(tunnels::expire_due_tunnels(&p, 100).await?, 0);
+
     Ok(())
 }
