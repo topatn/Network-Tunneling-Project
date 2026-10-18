@@ -739,6 +739,48 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
                         f"scripts/verify_clean_vm.py defines EXIT_OPERATOR={expected}"
                     )
 
+            # `psql` does NOT read DATABASE_URL. sqlx does; libpq does not. It uses
+            # PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE, so a job that sets only
+            # DATABASE_URL has every psql call silently fail to connect.
+            #
+            # The failure is disguised, which is why this check exists. GitHub's default
+            # shell is `bash --noprofile --norc -e -o pipefail`; a failing command
+            # substitution inside `test "$(psql ...)" = "0"` does not trip -e, it just
+            # evaluates false, so the step reports a failed assertion about the schema
+            # rather than a connection error. Observed on the first real run of this
+            # job: "revert left tables behind", on a migration that was fine.
+            #
+            # Reproduced locally without a runner: with DATABASE_URL pointing at
+            # nonexistent.invalid:6543, psql dialled localhost:5432.
+            # Key on the ASSIGNMENT, not on the name appearing. The first version matched
+            # anywhere in the file and this job's own failure diagnostic
+            # (`echo "PGHOST=$PGHOST ..."`) satisfied it, so a workflow with no PGHOST set
+            # passed. A YAML env key or an `export` is what actually configures libpq.
+            def _pgvar_assigned(name: str) -> bool:
+                return bool(
+                    re.search(rf"^\s*{name}:", text, re.M)
+                    or re.search(rf"\bexport\s+{name}=", text)
+                )
+
+            if re.search(r"\bpsql\b", text):
+                if not _pgvar_assigned("PGHOST"):
+                    errors.append(
+                        f"{wf.name}: invokes psql but never sets PGHOST. psql does not "
+                        f"read DATABASE_URL (sqlx does, libpq does not), so without the "
+                        f"PG* variables every psql call fails to connect -- and the "
+                        f"failure is reported as a failed schema assertion"
+                    )
+                missing_pg = [
+                    v for v in ("PGUSER", "PGPASSWORD", "PGDATABASE")
+                    if not _pgvar_assigned(v)
+                ]
+                if missing_pg:
+                    errors.append(
+                        f"{wf.name}: invokes psql but does not set {', '.join(missing_pg)}. "
+                        f"psql authenticates from libpq's PG* variables only; DATABASE_URL "
+                        f"is not consulted"
+                    )
+
             # $GITHUB_ENV is parsed by GitHub, not by a shell, and it does not tolerate a
             # byte-order mark. Every PowerShell cmdlet here emits one by default, and a
             # BOM is invisible in an editor, so the mistake survives every local read and
@@ -1077,6 +1119,14 @@ def self_test(root: Path) -> int:
             "EXIT_OPERATOR=10",
         ),
         (
+            # The defect that broke the migrate job's first real run: DATABASE_URL alone
+            # is not enough for psql.
+            "workflow invoking psql without libpq PG* connection variables",
+            ".github/workflows/ci.yml",
+            lambda t: _strip_pg_env(t),
+            "psql does not read DATABASE_URL",
+        ),
+        (
             "workflow writing a BOM into $GITHUB_ENV",
             ".github/workflows/clean-vm.yml",
             lambda t: t.replace(
@@ -1150,6 +1200,26 @@ def self_test(root: Path) -> int:
         return 1
     print("\nSELF-TEST PASSED: every planted defect was detected")
     return 0
+
+def _strip_pg_env(text: str) -> str:
+    """Remove the libpq PG* variables from ci.yml, reproducing the real defect.
+
+    Kept as a function rather than a lambda because the block is long, and a lambda that
+    silently fails to match would make this planted defect pass for the wrong reason --
+    the failure mode this self-test exists to catch.
+    """
+    out, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        if skipping:
+            if line.startswith("      PG"):
+                continue
+            skipping = False
+        elif line.startswith("      PGHOST:"):
+            skipping = True
+            continue
+        out.append(line)
+    return "".join(out)
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()

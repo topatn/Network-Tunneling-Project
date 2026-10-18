@@ -150,6 +150,17 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgres://postgres:ci-only-not-a-secret@localhost:5432/gtt_test
+      # psql does NOT read DATABASE_URL. It uses libpq's PG* variables, so without these
+      # every psql call in this job fails to connect. Found by running it: the first CI run
+      # failed with "revert left tables behind", which blames the migration rather than the
+      # missing credentials, and because the step failed, both later verification steps
+      # were skipped and every other psql call failed silently too. sqlx keeps using
+      # DATABASE_URL; these exist only for psql.
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: ci-only-not-a-secret
+      PGDATABASE: gtt_test
     steps:
       - uses: actions/checkout@v7
 
@@ -165,6 +176,23 @@ jobs:
 
       - name: Show the migration set
         run: ls -1 migrations/
+
+      - name: psql can actually connect
+        # The checks below are only meaningful if psql is talking to the service container.
+        # Without the PG* variables it silently returns nothing, and under `bash -e` that
+        # surfaces as a failed assertion about the schema. Fail here, loudly and first, so
+        # a credential problem can never be mistaken for a schema problem.
+        run: |
+          set -euo pipefail
+          if ! psql -v ON_ERROR_STOP=1 -tAc "select 1" >/dev/null 2>&1; then
+            echo "psql cannot connect to the service container."
+            echo "  PGHOST=$PGHOST PGPORT=$PGPORT PGUSER=$PGUSER PGDATABASE=$PGDATABASE"
+            echo "  (PGPASSWORD is set but not printed; AGENTS.md 7 forbids logging secrets,"
+            echo "   and this value is disposable CI-only regardless)"
+            psql -v ON_ERROR_STOP=1 -tAc "select 1" || true
+            exit 1
+          fi
+          echo "psql connected: $(psql -v ON_ERROR_STOP=1 -tAc 'select version()' | cut -d, -f1)"
 
       - name: Apply all migrations to an empty database
         run: |
@@ -189,8 +217,11 @@ jobs:
           # `_sqlx%` is sqlx's own bookkeeping table. It survives a revert (the ROW is
           # removed, the table is not), so a bare count would be 1, not 0. Excluding it is
           # what makes this assert about the schema rather than about the tool.
-          test "$(psql -v ON_ERROR_STOP=1 -tAc "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname not like '\_sqlx%'")" = "0" \
-            || { echo "revert left tables behind"; exit 1; }
+          remaining="$(psql -v ON_ERROR_STOP=1 -tAc "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname not like '\_sqlx%'")"
+          if [ "$remaining" != "0" ]; then
+            echo "revert left $remaining table(s) behind; expected 0"
+            exit 1
+          fi
           echo "revert left 0 tables, as expected"
           sqlx migrate run
 

@@ -111,3 +111,19 @@ This is an environment limitation, not a property of PostgreSQL or of the schema
 The migration tool is **`sqlx migrate`** (ADR-017, accepted 2026-10-17). The driver is already `sqlx` (ADR-008), so this adds no further dependency. Step 5 is implemented: the `migrate` job in `ci.yml` installs `sqlx-cli`, applies every migration, applies them twice more to prove idempotency, then asserts the structure against the measured values in the table above and runs the negative tests.
 
 **`sqlx-cli` cannot be executed on the authoring machine** — `dlltool.exe` is missing from the GNU toolchain, the MSVC toolchain has no Windows SDK, and no prebuilt Windows binary is published. It is installed and run **on the CI runner**, which is why this task became possible at all: the local environment could not verify statement-boundary parsing, and a hosted Linux runner has neither limitation. Do not claim the local path verifies this; only CI does.
+
+### `psql` does not read `DATABASE_URL` — verified 2026-10-18 by a CI failure
+
+The first real run of the `migrate` job failed on both PostgreSQL 16 and 17, at the revert step, with **"revert left tables behind"**. That message blames the migration. The actual cause was credentials.
+
+`sqlx` connects using `DATABASE_URL`. **`psql` does not.** It uses libpq's `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, and `PGDATABASE`. The job set only `DATABASE_URL`, so every `psql` call in it failed to connect.
+
+**Reproduced locally, without a runner.** With `DATABASE_URL` pointing at `nonexistent.invalid:6543`, `psql` dialled `localhost:5432` — the libpq default. It never consulted `DATABASE_URL`.
+
+**Why it was disguised, which is the part worth remembering.** GitHub's default shell is `bash --noprofile --norc -e -o pipefail`. A failing command substitution inside `test "$(psql ...)" = "0"` does not trip `-e`; it just evaluates false. So the job reported a failed assertion about the schema rather than a connection error, and because the step aborted, the two verification steps after it were skipped — masking every other `psql` call at the same time.
+
+Consequences, both now permanent:
+
+1. **The job sets the `PG*` variables** alongside `DATABASE_URL`, which `sqlx` still uses.
+2. **A dedicated preflight step** runs first and fails loudly if `psql` cannot connect, so a credential problem can never again be reported as a schema problem. The revert check no longer buries a connection failure inside a `test`.
+3. **`audit_traceability.py` now rejects any workflow that invokes `psql` without the libpq variables.** It was fooled once while being written — it matched the variable name anywhere in the file, and the preflight step's own `echo "PGHOST=$PGHOST ..."` satisfied it, so a workflow with nothing set passed. It now requires an assignment (a YAML env key or an `export`). Both branches are exercised.
