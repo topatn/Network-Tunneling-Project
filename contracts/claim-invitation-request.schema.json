@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtt.invalid/contracts/claim-invitation-request.schema.json",
+  "title": "ClaimInvitationRequest",
+  "description": "Request body for POST /v1/invitations/claim (contracts.md sections 6 and 15). Never accepts a client-supplied source IP.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["secret"],
+  "properties": {
+    "secret": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,64}$"
+    }
+  }
+}

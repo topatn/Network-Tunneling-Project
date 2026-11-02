@@ -8,7 +8,7 @@
 //! tenant-scoped getter is the only one anyone should reach for.
 
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{Executor, PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::db::entities::{Protocol, Tunnel, TunnelMapping};
@@ -62,6 +62,18 @@ pub async fn create_tunnel(
     new: &NewTunnel<'_>,
     profile: &ProfileSpec,
 ) -> Result<Tunnel> {
+    let mut tx = pool.begin().await?;
+    let tunnel = create_tunnel_in_transaction(&mut tx, new, profile).await?;
+    tx.commit().await?;
+    Ok(tunnel)
+}
+
+/// Insert a tunnel and mappings within the caller's atomic route transaction.
+pub(crate) async fn create_tunnel_in_transaction(
+    tx: &mut Transaction<'_, Postgres>,
+    new: &NewTunnel<'_>,
+    profile: &ProfileSpec,
+) -> Result<Tunnel> {
     let NewTunnel {
         owner_id,
         name,
@@ -70,7 +82,6 @@ pub async fn create_tunnel(
         mappings,
         expires_at,
     } = *new;
-    let mut tx = pool.begin().await?;
 
     let tunnel = sqlx::query_as::<_, Tunnel>(
         "insert into tunnels (owner_id, name, game_profile_id, profile_version, expires_at)
@@ -83,7 +94,7 @@ pub async fn create_tunnel(
     .bind(game_profile_id)
     .bind(profile_version)
     .bind(expires_at)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
 
     // Position is the caller's order in the slice, because it is the index used in UDP
@@ -114,11 +125,10 @@ pub async fn create_tunnel(
         .bind(mapping.protocol.as_str())
         .bind(position)
         .bind(mapping.enabled)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
 
-    tx.commit().await?;
     Ok(tunnel)
 }
 
@@ -173,8 +183,8 @@ fn clamp_limit(limit: i64) -> i64 {
 }
 
 /// List a tunnel's mappings in wire order.
-pub async fn list_mappings(
-    pool: &PgPool,
+pub async fn list_mappings<'e>(
+    pool: impl Executor<'e, Database = Postgres>,
     owner_id: Uuid,
     tunnel_id: Uuid,
 ) -> Result<Vec<TunnelMapping>> {
@@ -276,7 +286,10 @@ pub async fn expire_due_tunnels(pool: &PgPool, batch: i64) -> Result<u64> {
 /// `data-model.md` §4 records this as application-enforced because the limit is not yet
 /// fixed. The function takes the limit as a parameter rather than a constant precisely so
 /// that fixing it later is a configuration change and not a hunt through this module.
-pub async fn count_live_tunnels(pool: &PgPool, owner_id: Uuid) -> Result<i64> {
+pub async fn count_live_tunnels<'e>(
+    pool: impl Executor<'e, Database = Postgres>,
+    owner_id: Uuid,
+) -> Result<i64> {
     let n = sqlx::query_scalar::<_, i64>(
         "select count(*) from tunnels where owner_id = $1 and state in ('created', 'active')",
     )

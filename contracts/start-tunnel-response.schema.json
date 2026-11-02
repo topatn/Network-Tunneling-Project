@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtt.invalid/contracts/start-tunnel-response.schema.json",
+  "title": "StartTunnelResponse",
+  "description": "Response body for POST /v1/tunnels/{id}/start (contracts.md section 5.8). Contains relay allocation and public ports, never a host-local target (INV-1).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tunnel_id", "allocation_token", "allocation"],
+  "properties": {
+    "tunnel_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "allocation_token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "expires_at", "relay", "ports"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "relay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["region", "host", "tunnel_port"],
+          "properties": {
+            "region": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "host": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "tunnel_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "ports": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mapping_key", "protocol", "public_port"],
+            "properties": {
+              "mapping_key": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,31}$"
+              },
+              "protocol": {
+                "type": "string",
+                "enum": ["tcp", "udp"]
+              },
+              "public_port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

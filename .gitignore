@@ -39,3 +39,6 @@ __pycache__/
 # Experiment scratch area (M1 prototype code must not enter the production tree —
 # tasks.md rule 4). Nothing from here is committed.
 scratch/
+
+# Local knowledge-graph analysis output (/graphify skill)
+graphify-out/

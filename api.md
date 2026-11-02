@@ -45,7 +45,17 @@ Rows 15, 16, and 18 depend on guest source-IP admission (experiment E-13).
 
 ## Admin routes (`/admin/v1`)
 
-**Not defined — route shapes remain open (T-049).** Authentication is decided: `contracts.md` §9.1 and ADR-019. Two rules already bind every future admin route: a **user** access token returns `forbidden`, and destructive operations require **step-up re-authentication** (terminate a tunnel, drain a relay, suspend a user, rotate signing keys).
+| # | Method | Path | Auth | Permission check | Idem | Request schema | Success | Contract |
+|---|---|---|---|---|---|---|---|---|
+| 21 | POST | `/admin/v1/auth/challenge` | none | valid admin identity | no | `admin-challenge-request` | 200 | §9.3 |
+| 22 | POST | `/admin/v1/auth/login` | none | active challenge, valid passkey assertion | no | `admin-login-request` | 200 | §9.4 |
+| 23 | POST | `/admin/v1/auth/step-up` | admin | active admin session, valid passkey assertion | no | `admin-step-up-request` | 200 | §9.5 |
+| 24 | POST | `/admin/v1/auth/recovery` | none | valid unexhausted recovery code | no | `admin-recovery-request` | 200 | §9.6 |
+| 25 | POST | `/admin/v1/users/{id}/suspend` | admin | active step-up re-authentication | natural | `admin-suspend-user-request` | 200 | §9.7 |
+| 26 | POST | `/admin/v1/users/{id}/unsuspend` | admin | active step-up re-authentication | natural | none | 200 | §9.8 |
+| 27 | POST | `/admin/v1/tunnels/{id}/terminate` | admin | active step-up re-authentication | natural | `admin-terminate-tunnel-request` | 200 | §9.9 |
+| 28 | POST | `/admin/v1/relays/{id}/drain` | admin | active step-up re-authentication | natural | none | 200 | §9.10 |
+| 29 | GET | `/admin/v1/audit-events` | admin | active admin session | no | none | 200 | §9.11 |
 
 ## Non-HTTP contracts
 

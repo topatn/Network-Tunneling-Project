@@ -107,6 +107,39 @@ pub async fn revoke_invitation(pool: &PgPool, owner_id: Uuid, invitation_id: Uui
     Ok(res.rows_affected() > 0)
 }
 
+/// Revoke all unrevoked invitations and guest admissions for a tunnel (`contracts.md` §5.10).
+///
+/// Runs in one transaction scoped to `owner_id` so stopping a tunnel atomically revokes
+/// every invitation and admission associated with it.
+pub async fn revoke_all_for_tunnel(pool: &PgPool, owner_id: Uuid, tunnel_id: Uuid) -> Result<u64> {
+    let mut tx = pool.begin().await?;
+
+    let inv_res = sqlx::query(
+        "update invitations set revoked_at = now()
+         where tunnel_id = $1 and revoked_at is null
+           and exists (select 1 from tunnels t where t.id = $1 and t.owner_id = $2)",
+    )
+    .bind(tunnel_id)
+    .bind(owner_id)
+    .execute(&mut *tx)
+    .await?;
+
+    let adm_res = sqlx::query(
+        "update guest_admissions set revoked_at = now()
+         where tunnel_id = $1 and revoked_at is null
+           and exists (select 1 from tunnels t where t.id = $1 and t.owner_id = $2)",
+    )
+    .bind(tunnel_id)
+    .bind(owner_id)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(inv_res
+        .rows_affected()
+        .saturating_add(adm_res.rows_affected()))
+}
+
 /// List a user's invitations for one of their tunnels.
 pub async fn list_invitations(
     pool: &PgPool,
@@ -184,6 +217,25 @@ pub async fn list_live_admissions(
     Ok(admissions)
 }
 
+/// List all admissions (live and revoked) for a tunnel so delta relay state polls can
+/// observe newly revoked admissions (`contracts.md` §7, `REL-004`).
+pub async fn list_all_admissions_for_tunnel(
+    pool: &PgPool,
+    tunnel_id: Uuid,
+) -> Result<Vec<GuestAdmission>> {
+    let admissions = sqlx::query_as::<_, GuestAdmission>(
+        "select id, invitation_id, tunnel_id, host(source_ip) as source_ip,
+                created_at, expires_at, revoked_at
+         from guest_admissions
+         where tunnel_id = $1
+         order by created_at desc, id",
+    )
+    .bind(tunnel_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(admissions)
+}
+
 /// Revoke one admission.
 pub async fn revoke_admission(pool: &PgPool, tunnel_id: Uuid, admission_id: Uuid) -> Result<bool> {
     let res = sqlx::query(
@@ -195,6 +247,46 @@ pub async fn revoke_admission(pool: &PgPool, tunnel_id: Uuid, admission_id: Uuid
     .execute(pool)
     .await?;
     Ok(res.rows_affected() > 0)
+}
+
+/// Return the owning `tunnel_id` if `invitation_id` exists and belongs to a tunnel owned by
+/// `owner_id`, or `None` if absent or owned by another user (`SEC-009`).
+pub async fn invitation_tunnel_if_owned(
+    pool: &PgPool,
+    owner_id: Uuid,
+    invitation_id: Uuid,
+) -> Result<Option<Uuid>> {
+    let tunnel_id = sqlx::query_scalar::<_, Uuid>(
+        "select i.tunnel_id
+         from invitations i
+         join tunnels t on t.id = i.tunnel_id
+         where i.id = $1 and t.owner_id = $2",
+    )
+    .bind(invitation_id)
+    .bind(owner_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(tunnel_id)
+}
+
+/// Return the owning `tunnel_id` if `admission_id` exists and belongs to a tunnel owned by
+/// `owner_id`, or `None` if absent or owned by another user (`SEC-009`).
+pub async fn admission_tunnel_if_owned(
+    pool: &PgPool,
+    owner_id: Uuid,
+    admission_id: Uuid,
+) -> Result<Option<Uuid>> {
+    let tunnel_id = sqlx::query_scalar::<_, Uuid>(
+        "select a.tunnel_id
+         from guest_admissions a
+         join tunnels t on t.id = a.tunnel_id
+         where a.id = $1 and t.owner_id = $2",
+    )
+    .bind(admission_id)
+    .bind(owner_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(tunnel_id)
 }
 
 /// Purge admissions past their retention.

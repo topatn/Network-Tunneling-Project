@@ -487,21 +487,9 @@ def audit(root: Path) -> tuple[list[str], list[str]]:
     # task may name the artifact it will produce. These are expected absences,
     # recorded so the gate stays green while the fact stays visible. Removing an
     # entry from this set is a deliberate act that should be reviewed.
-    EXPECTED_ABSENT = {
-        # To be authored by T-031 (protocol crate: schemas and examples).
-        "contracts/examples.json",
-        "contracts/error.schema.json",
-        "contracts/tunnel-hello.schema.json",
-        "contracts/tunnel-hello-ack.schema.json",
-        "contracts/create-tunnel-request.schema.json",
-        "contracts/start-tunnel-response.schema.json",
-        "contracts/create-invitation-request.schema.json",
-        "contracts/create-invitation-response.schema.json",
-        "contracts/claim-invitation-request.schema.json",
-        "contracts/claim-invitation-response.schema.json",
-        "contracts/tunnel.schema.json",
-        "contracts/error-response.schema.json",
-    }
+    # Updated 2026-10-19 (T-031): all 11 schemas in contracts/*.schema.json and
+    # contracts/examples.json now exist and are enforced as hard errors if missing.
+    EXPECTED_ABSENT: set[str] = set()
 
     missing_paths = sorted(p for p in path_refs if not (root / p).exists())
     for p in missing_paths:

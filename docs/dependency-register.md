@@ -28,8 +28,8 @@ transitive rows here would be a list nobody maintains and would not be a control
 | `tokio` | 1.53.3 | Async runtime. A **dev-dependency of `gtt-control-plane` only** for now | MIT | Repo pushed 2026-10-16, not archived. Will move to `[dependencies]` when the HTTP server exists (T-040); until then it would be a dependency the library does not use | T-034 |
 | `uuid` | 1.28.0 | Tunnel, user, session and allocation identifiers | MIT OR Apache-2.0 | Active; a dependency of `sqlx`, so it would be in the tree regardless | T-034 |
 | `chrono` | 0.4.45 | `timestamptz` columns | MIT OR Apache-2.0 | Active; a dependency of `sqlx`, so it would be in the tree regardless | T-034 |
-| `serde` | 1.0.229 | Derives for the database entities and `jsonb` binding via `sqlx`'s `json` feature; `gtt-profiles` derives `Profile`, `Mapping`, `Protocol` and `Evidence` from it (T-032) | MIT OR Apache-2.0 | Active | T-034, T-032 |
-| `serde_json` | 1.0.154 | `jsonb` values: `audit_events.metadata`, `idempotency_keys.response_body`; and **the game profile file format** (T-032) | MIT OR Apache-2.0 | Active | T-034, T-032 |
+| `serde` | 1.0.229 | Derives for the database entities and `jsonb` binding via `sqlx`'s `json` feature; `gtt-profiles` derives `Profile`, `Mapping`, `Protocol` and `Evidence` from it (T-032); `gtt-protocol` derives HTTP/control DTOs, allocation token headers/claims, and example vectors from it (T-031, T-050); `gtt-engine` derives forward-compatible response DTOs in the control-plane API client from it (T-047) | MIT OR Apache-2.0 | Active | T-034, T-032, T-031, T-047, T-050 |
+| `serde_json` | 1.0.154 | `jsonb` values: `audit_events.metadata`, `idempotency_keys.response_body`; **the game profile file format** (T-032); **control-plane / relay JSON framing, allocation token claim serialization, and schema conformance vectors** in `gtt-protocol` (T-031, T-050); and **request serialization and forward-compatible response parsing** in `gtt-engine` (T-047) | MIT OR Apache-2.0 | Active | T-034, T-032, T-031, T-047, T-050 |
 
 ### Why the profile format is JSON rather than TOML
 
@@ -79,7 +79,7 @@ the default is to turn them on.
 
 | Crate | For | Version in the lock | Licence | Maintenance | Added |
 |---|---|---|---|---|---|
-| `sha2` | SHA-256, for comparing a downloaded artifact against its published digest (`SRV-002`) | `0.11.1` | MIT OR Apache-2.0 | Active; already in the graph via `sqlx-postgres`, so no new supply chain | T-035 |
+| `sha2` | SHA-256, for comparing a downloaded artifact against its published digest (`SRV-002`, T-035), computing canonical `idempotency_keys.request_hash` digests in `gtt-control-plane` (`contracts.md` §8, T-042), and computing RFC 2104 HMAC-SHA256 allocation token signatures in `gtt-protocol` (`SEC-004`, `SEC-016`, T-050, T-060) | `0.11.1` | MIT OR Apache-2.0 | Active; already in the graph via `sqlx-postgres`, so no new supply chain | T-035, T-042, T-050 |
 
 **One new crate enters the graph: `const-oid 0.10.2`.** `sha2 0.11.1` was already present
 (`sqlx-postgres` and `sqlx-mysql` both depend on it), but taking it as a *direct* dependency
@@ -102,6 +102,25 @@ generated configuration's ports come from the profile rather than from the calle
 provisionable set by profile id. That is the `server-manager -> gtt-profiles` edge
 `architecture.md` describes, and it is a workspace path dependency, so it adds nothing to the
 lockfile.
+
+### `gtt-protocol` (T-031, T-050), `gtt-engine` (T-047, T-076), and `gtt-relay` (T-060) add no new dependencies and link their test suites locally
+
+T-031 and T-050 give `gtt-protocol` only `serde`, `serde_json`, and `sha2` (all already direct
+workspace dependencies), T-047 and T-076 give `gtt-engine` `gtt-protocol`, `gtt-server-manager`,
+`serde`, and `serde_json`, and T-060 gives `gtt-relay` `gtt-protocol`. `Cargo.lock` gains
+**zero new crates**: the package count remains **168** (measured after T-035 and re-verified
+after T-076).
+
+**Why `gtt-protocol`, `gtt-engine`, and `gtt-relay` deliberately omit `uuid` and `chrono`.**
+Wire-format UUID and RFC 3339 UTC `date-time` validation is implemented with small, bounded,
+panic-free parsers in `crates/protocol/src/validate.rs`, and RFC 2104 HMAC-SHA256 is built
+directly over `sha2::Sha256` in `crates/protocol/src/token.rs`. Because neither `uuid` (with
+`v4`/`getrandom`) nor any `windows-targets` `raw-dylib` consumer is in `gtt-protocol`,
+`gtt-engine`, or `gtt-relay`'s dependency subgraph, `cargo +stable-x86_64-pc-windows-gnu test
+-p gtt-protocol` (**8 passed; 0 failed**), `cargo +stable-x86_64-pc-windows-gnu test -p
+gtt-engine` (**9 passed; 0 failed**), and `cargo +stable-x86_64-pc-windows-gnu test -p
+gtt-relay` (**5 passed; 0 failed**) link directly with the bundled `ld.exe` without invoking
+`dlltool.exe` and execute locally on this machine.
 
 ### What the real graph costs, measured
 

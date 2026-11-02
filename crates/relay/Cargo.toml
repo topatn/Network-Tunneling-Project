@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "gtt-relay"
 description = "Relay service: allocation validation, public listeners, flow tables, limits."
 version.workspace = true
@@ -8,8 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Intentionally empty. Dependencies are added by the task that needs them; each
-# requires a dependency-register row in the same change (AGENTS.md section 5).
+gtt-protocol = { path = "../protocol", version = "0.0.0" }
 
 [lints]
 workspace = true

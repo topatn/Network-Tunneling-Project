@@ -1,0 +1,546 @@
+{
+  "version": 1,
+  "description": "Positive and negative conformance vectors for contracts/*.schema.json and crates/protocol (T-031, TEST-001, NET-007, INV-1).",
+  "cases": [
+    {
+      "id": "error_response_valid_with_details",
+      "schema": "contracts/error.schema.json",
+      "valid": true,
+      "description": "Exact ErrorResponse example from contracts.md section 3.",
+      "payload": {
+        "error": {
+          "code": "validation_failed",
+          "message": "Request body is invalid.",
+          "request_id": "req_example",
+          "details": [
+            {
+              "field": "name",
+              "issue": "must be 1-64 characters"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "error_response_valid_without_details",
+      "schema": "contracts/error-response.schema.json",
+      "valid": true,
+      "description": "Valid ErrorResponse without optional details array.",
+      "payload": {
+        "error": {
+          "code": "not_found",
+          "message": "Resource not found.",
+          "request_id": "req_404"
+        }
+      }
+    },
+    {
+      "id": "error_response_invalid_unknown_code",
+      "schema": "contracts/error.schema.json",
+      "valid": false,
+      "description": "Rejects an error code not in contracts.md section 3.",
+      "payload": {
+        "error": {
+          "code": "teapots_only",
+          "message": "Not a valid code.",
+          "request_id": "req_bad_code"
+        }
+      }
+    },
+    {
+      "id": "error_response_invalid_extra_field",
+      "schema": "contracts/error-response.schema.json",
+      "valid": false,
+      "description": "Rejects unknown fields on ErrorResponse.",
+      "payload": {
+        "error": {
+          "code": "internal",
+          "message": "Unexpected error.",
+          "request_id": "req_500",
+          "stack_trace": "leaked internal detail"
+        }
+      }
+    },
+    {
+      "id": "create_tunnel_request_valid_terraria",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": true,
+      "description": "Exact CreateTunnelRequest example from contracts.md section 5.6.",
+      "payload": {
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_local_port_inv1",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "INV-1: rejects a request carrying a host-local port on a mapping.",
+      "payload": {
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "enabled": true,
+            "local_port": 7777
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_target_host_inv1",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "INV-1: rejects a request carrying a host-local target_host at top level.",
+      "payload": {
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "target_host": "127.0.0.1",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_control_char_name",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "Rejects a tunnel name containing a control character (contracts.md section 15).",
+      "payload": {
+        "name": "Friday\u0007Terraria",
+        "game_profile_id": "terraria",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_whitespace_only_name",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "Rejects a tunnel name that is empty after trimming (contracts.md section 15).",
+      "payload": {
+        "name": "   ",
+        "game_profile_id": "terraria",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_duplicate_mapping_key",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "Rejects duplicate mapping_key entries within the same tunnel (contracts.md section 15).",
+      "payload": {
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "enabled": true
+          },
+          {
+            "mapping_key": "game",
+            "protocol": "udp",
+            "enabled": false
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_bad_mapping_key",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "Rejects a mapping_key that violates ^[a-z][a-z0-9-]{0,31}$.",
+      "payload": {
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "mappings": [
+          {
+            "mapping_key": "Game_Port",
+            "protocol": "tcp",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "create_tunnel_request_invalid_empty_mappings",
+      "schema": "contracts/create-tunnel-request.schema.json",
+      "valid": false,
+      "description": "Rejects a tunnel with zero mappings (contracts.md section 15 requires 1-8).",
+      "payload": {
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "mappings": []
+      }
+    },
+    {
+      "id": "tunnel_response_valid_created",
+      "schema": "contracts/tunnel.schema.json",
+      "valid": true,
+      "description": "Valid Tunnel response in created state.",
+      "payload": {
+        "id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "profile_version": 1,
+        "state": "created",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "position": 0,
+            "enabled": true
+          }
+        ],
+        "created_at": "2026-10-16T10:00:00Z",
+        "started_at": null,
+        "stopped_at": null,
+        "expires_at": "2026-10-16T22:00:00Z",
+        "termination_reason": null
+      }
+    },
+    {
+      "id": "tunnel_response_invalid_terminal_without_stopped_at_inv7",
+      "schema": "contracts/tunnel.schema.json",
+      "valid": false,
+      "description": "INV-7: terminal tunnel state must have stopped_at set.",
+      "payload": {
+        "id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "profile_version": 1,
+        "state": "stopped",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "position": 0,
+            "enabled": true
+          }
+        ],
+        "created_at": "2026-10-16T10:00:00Z",
+        "started_at": "2026-10-16T10:01:00Z",
+        "stopped_at": null,
+        "expires_at": "2026-10-16T22:00:00Z",
+        "termination_reason": null
+      }
+    },
+    {
+      "id": "tunnel_response_invalid_bad_uuid",
+      "schema": "contracts/tunnel.schema.json",
+      "valid": false,
+      "description": "Rejects a Tunnel whose id is not a valid UUID.",
+      "payload": {
+        "id": "not-a-uuid",
+        "name": "Friday Terraria",
+        "game_profile_id": "terraria",
+        "profile_version": 1,
+        "state": "created",
+        "mappings": [
+          {
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "position": 0,
+            "enabled": true
+          }
+        ],
+        "created_at": "2026-10-16T10:00:00Z",
+        "started_at": null,
+        "stopped_at": null,
+        "expires_at": "2026-10-16T22:00:00Z",
+        "termination_reason": null
+      }
+    },
+    {
+      "id": "start_tunnel_response_valid",
+      "schema": "contracts/start-tunnel-response.schema.json",
+      "valid": true,
+      "description": "Exact StartTunnelResponse example from contracts.md section 5.8.",
+      "payload": {
+        "tunnel_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "allocation_token": "<opaque-signed-token>",
+        "allocation": {
+          "id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+          "expires_at": "2026-10-16T12:00:00Z",
+          "relay": {
+            "region": "example-region",
+            "host": "relay.example.invalid",
+            "tunnel_port": 4433
+          },
+          "ports": [
+            {
+              "mapping_key": "game",
+              "protocol": "tcp",
+              "public_port": 20001
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "start_tunnel_response_invalid_port_out_of_range",
+      "schema": "contracts/start-tunnel-response.schema.json",
+      "valid": false,
+      "description": "Rejects a public_port outside 1..=65535.",
+      "payload": {
+        "tunnel_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "allocation_token": "<opaque-signed-token>",
+        "allocation": {
+          "id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+          "expires_at": "2026-10-16T12:00:00Z",
+          "relay": {
+            "region": "example-region",
+            "host": "relay.example.invalid",
+            "tunnel_port": 4433
+          },
+          "ports": [
+            {
+              "mapping_key": "game",
+              "protocol": "tcp",
+              "public_port": 70000
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "create_invitation_request_valid",
+      "schema": "contracts/create-invitation-request.schema.json",
+      "valid": true,
+      "description": "Exact CreateInvitationRequest example from contracts.md section 5.11.",
+      "payload": {
+        "expires_in_seconds": 3600,
+        "max_claims": 4
+      }
+    },
+    {
+      "id": "create_invitation_request_invalid_max_claims_too_high",
+      "schema": "contracts/create-invitation-request.schema.json",
+      "valid": false,
+      "description": "Rejects max_claims > 50 (contracts.md section 15).",
+      "payload": {
+        "expires_in_seconds": 3600,
+        "max_claims": 51
+      }
+    },
+    {
+      "id": "create_invitation_request_invalid_ttl_too_short",
+      "schema": "contracts/create-invitation-request.schema.json",
+      "valid": false,
+      "description": "Rejects expires_in_seconds < 60 (contracts.md section 15).",
+      "payload": {
+        "expires_in_seconds": 10,
+        "max_claims": 4
+      }
+    },
+    {
+      "id": "create_invitation_response_valid",
+      "schema": "contracts/create-invitation-response.schema.json",
+      "valid": true,
+      "description": "Valid CreateInvitationResponse with 22-character base64url secret.",
+      "payload": {
+        "id": "8a1c2d3e-4f50-4a6b-9c7d-8e9f0a1b2c3d",
+        "tunnel_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "secret": "AbCdEfGhIjKlMnOpQrStUv",
+        "max_claims": 4,
+        "claim_count": 0,
+        "created_at": "2026-10-16T10:05:00Z",
+        "expires_at": "2026-10-16T11:05:00Z"
+      }
+    },
+    {
+      "id": "create_invitation_response_invalid_short_secret",
+      "schema": "contracts/create-invitation-response.schema.json",
+      "valid": false,
+      "description": "Rejects an invitation secret shorter than 22 characters (<128 bits entropy).",
+      "payload": {
+        "id": "8a1c2d3e-4f50-4a6b-9c7d-8e9f0a1b2c3d",
+        "tunnel_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "secret": "shortsecret",
+        "max_claims": 4,
+        "claim_count": 0,
+        "created_at": "2026-10-16T10:05:00Z",
+        "expires_at": "2026-10-16T11:05:00Z"
+      }
+    },
+    {
+      "id": "claim_invitation_request_valid",
+      "schema": "contracts/claim-invitation-request.schema.json",
+      "valid": true,
+      "description": "Exact ClaimInvitationRequest example from contracts.md section 6.",
+      "payload": {
+        "secret": "AbCdEfGhIjKlMnOpQrStUv"
+      }
+    },
+    {
+      "id": "claim_invitation_request_invalid_client_supplied_source_ip",
+      "schema": "contracts/claim-invitation-request.schema.json",
+      "valid": false,
+      "description": "Rejects client-supplied source_ip on claim request (contracts.md section 6).",
+      "payload": {
+        "secret": "AbCdEfGhIjKlMnOpQrStUv",
+        "source_ip": "198.51.100.42"
+      }
+    },
+    {
+      "id": "claim_invitation_response_valid",
+      "schema": "contracts/claim-invitation-response.schema.json",
+      "valid": true,
+      "description": "Valid ClaimInvitationResponse returning public relay endpoint and admitted_until.",
+      "payload": {
+        "tunnel_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "game_profile_id": "terraria",
+        "relay": {
+          "region": "example-region",
+          "host": "relay.example.invalid",
+          "ports": [
+            {
+              "mapping_key": "game",
+              "protocol": "tcp",
+              "public_port": 20001
+            }
+          ]
+        },
+        "admitted_until": "2026-10-16T12:00:00Z"
+      }
+    },
+    {
+      "id": "claim_invitation_response_invalid_bad_timestamp",
+      "schema": "contracts/claim-invitation-response.schema.json",
+      "valid": false,
+      "description": "Rejects non-RFC3339 admitted_until timestamp.",
+      "payload": {
+        "tunnel_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "game_profile_id": "terraria",
+        "relay": {
+          "region": "example-region",
+          "host": "relay.example.invalid",
+          "ports": [
+            {
+              "mapping_key": "game",
+              "protocol": "tcp",
+              "public_port": 20001
+            }
+          ]
+        },
+        "admitted_until": "not-a-timestamp"
+      }
+    },
+    {
+      "id": "tunnel_hello_valid",
+      "schema": "contracts/tunnel-hello.schema.json",
+      "valid": true,
+      "description": "Exact tunnel hello example from contracts.md section 10.",
+      "payload": {
+        "type": "hello",
+        "protocol_version": 1,
+        "token": "<opaque-signed-token>",
+        "client_version": "0.0.0-example"
+      }
+    },
+    {
+      "id": "tunnel_hello_invalid_version_zero",
+      "schema": "contracts/tunnel-hello.schema.json",
+      "valid": false,
+      "description": "Rejects protocol_version 0 in tunnel hello.",
+      "payload": {
+        "type": "hello",
+        "protocol_version": 0,
+        "token": "<opaque-signed-token>",
+        "client_version": "0.0.0-example"
+      }
+    },
+    {
+      "id": "tunnel_hello_invalid_local_addr_inv1",
+      "schema": "contracts/tunnel-hello.schema.json",
+      "valid": false,
+      "description": "INV-1: rejects local_addr in tunnel hello message.",
+      "payload": {
+        "type": "hello",
+        "protocol_version": 1,
+        "token": "<opaque-signed-token>",
+        "client_version": "0.0.0-example",
+        "local_addr": "127.0.0.1:7777"
+      }
+    },
+    {
+      "id": "tunnel_hello_ack_valid",
+      "schema": "contracts/tunnel-hello-ack.schema.json",
+      "valid": true,
+      "description": "Exact tunnel hello_ack example from contracts.md section 10.",
+      "payload": {
+        "type": "hello_ack",
+        "session_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "heartbeat_interval_ms": 5000,
+        "idle_timeout_ms": 15000,
+        "limits": {
+          "max_tcp_flows": 64,
+          "max_udp_flows": 64
+        },
+        "mappings": [
+          {
+            "index": 0,
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "public_port": 20001
+          }
+        ]
+      }
+    },
+    {
+      "id": "tunnel_hello_ack_invalid_duplicate_index",
+      "schema": "contracts/tunnel-hello-ack.schema.json",
+      "valid": false,
+      "description": "Rejects hello_ack when two mappings share the same data-path index.",
+      "payload": {
+        "type": "hello_ack",
+        "session_id": "3f2b8c1e-5a47-4d0b-9c1e-0a6f1d2e7b44",
+        "heartbeat_interval_ms": 5000,
+        "idle_timeout_ms": 15000,
+        "limits": {
+          "max_tcp_flows": 64,
+          "max_udp_flows": 64
+        },
+        "mappings": [
+          {
+            "index": 0,
+            "mapping_key": "game",
+            "protocol": "tcp",
+            "public_port": 20001
+          },
+          {
+            "index": 0,
+            "mapping_key": "query",
+            "protocol": "udp",
+            "public_port": 20002
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "gtt-control-plane"
 description = "HTTP API, authorization policy, persistence."
 version.workspace = true
@@ -15,6 +15,12 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# T-042: SHA-256 request hashing for `idempotency_keys.request_hash` (`contracts.md` §8),
+# wire-contract DTOs (`gtt-protocol`), and the declarative profile registry (`gtt-profiles`).
+# Path dependencies declare `version = "0.0.0"` to satisfy `cargo deny` (`wildcards = "deny"`).
+sha2 = "0.11"
+gtt-protocol = { path = "../protocol", version = "0.0.0" }
+gtt-profiles = { path = "../profiles", version = "0.0.0" }
 
 [dev-dependencies]
 # Integration tests need an async runtime and a live database. `tokio` is a

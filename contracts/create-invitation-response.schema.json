@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtt.invalid/contracts/create-invitation-response.schema.json",
+  "title": "CreateInvitationResponse",
+  "description": "Response body for POST /v1/tunnels/{id}/invitations (contracts.md section 5.11). Secret is returned once with Cache-Control: no-store.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "tunnel_id",
+    "secret",
+    "max_claims",
+    "claim_count",
+    "created_at",
+    "expires_at"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "tunnel_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "secret": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{22,64}$"
+    },
+    "max_claims": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "claim_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 50
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

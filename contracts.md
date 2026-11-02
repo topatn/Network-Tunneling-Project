@@ -1,18 +1,17 @@
 # contracts.md — Component and Protocol Contracts
 
 **Status:** DRAFT v0.1. Authoritative for API and component contracts. Route inventory: `api.md`. Entities: `data-model.md`.
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-19
 
-**Verification status — corrected 2026-10-17.** This paragraph previously claimed that "the JSON Schemas in `docs/contracts/` are valid draft 2020-12 schemas" and that the example payloads "were checked against them". **That claim could not be true of this repository:** `docs/contracts/` and `contracts/examples.json` **do not exist here** (confirmed by directory listing, 2026-10-17). Eleven JSON Schemas are described throughout this document, and `api.md`, `data-model.md` §7, and `tasks.md` T-031 all reference them as if they were present.
+**Verification status — updated 2026-10-19 (T-031).** Earlier drafts (corrected 2026-10-17) noted that the 11 JSON Schemas and `contracts/examples.json` cited by this document, `api.md`, `data-model.md` §7, and `tasks.md` T-031 had not yet been written. **T-031 has now authored all 11 draft 2020-12 JSON Schemas in `contracts/*.schema.json` and 29 positive and negative conformance vectors in `contracts/examples.json`, and implemented `crates/protocol` (`gtt-protocol`).**
 
-Consequences, recorded rather than papered over:
+What is verified locally (2026-10-19):
 
-- **This document is the only wire-format source of truth that exists.** Where a schema is cited elsewhere, read the definition here.
-- **No schema validation has been performed on anything in this repository**, so the earlier claim that example payloads were validated — including payloads that must be rejected — is withdrawn as unverifiable. `review-report.md` §2 repeats it and is corrected there.
-- **T-031's "Done when" references `contracts/examples.json`, a file that must still be written.** T-031 must create the schemas and examples before it can validate anything, and that writing is a prerequisite to its verification rather than part of it.
-- **Whether the `uuid` and `date-time` string formats are actually enforced remains unknown**, since no validator has ever run here. This is now an open question for T-031 rather than a caveat on a completed check.
+- **All 11 JSON Schemas in `contracts/*.schema.json`** are present, validated for draft 2020-12 structural well-formedness, and cross-checked against every example vector in `contracts/examples.json` by `crates/protocol/tests/protocol.rs`.
+- **All 29 vectors in `contracts/examples.json`** (covering every schema, unknown-field rejection on requests, `INV-1` local-destination field rejection at top level and nested objects, `INV-7` terminal `stopped_at` consistency, duplicate mapping keys/indexes, control characters, and numeric/string bounds) pass or fail as specified under `cargo +stable-x86_64-pc-windows-gnu test -p gtt-protocol` (**8 test functions, 0 failures**).
+- **`uuid` and RFC 3339 UTC `date-time` string formats are explicitly enforced** by `gtt-protocol::validate` (including leap-year calendar validation for `date-time`), closing the open question from 2026-10-17.
 
-Nothing is implemented. All numeric limits, timeouts, and lifetimes marked *(proposal)* are unvalidated starting points that `requirements.md` must fix after experiments. Items depending on guest source-IP admission carry **[E-13]**.
+All numeric limits, timeouts, and lifetimes marked *(proposal)* remain starting points that `requirements.md` fixes as Milestone M1 experiments complete. Items depending on guest source-IP admission carry **[E-13]**.
 
 ## 1. Scope and conventions
 
@@ -181,6 +180,9 @@ If the control plane is unreachable, the relay keeps serving existing allocation
 - Header `Idempotency-Key` (8–128 characters) on `POST /v1/tunnels`, `…/start`, `…/invitations`.
 - The server stores key, route, and a hash of the request per user. Same key + same hash within the retention window → return the stored response. Same key + different hash → `idempotency_mismatch`. Window *(proposal)*.
 - `stop` and `DELETE` routes are naturally idempotent.
+- Expired keys are treated as fresh even before physical cleanup. Reuse atomically replaces only an expired response; an unexpired response cannot be overwritten. Expiry comparisons use the database statement clock, so waiting in a transaction does not extend retention. Cleanup skips locked keys and must not delete a renewed response. The retention duration remains configuration, not a newly selected policy value.
+
+Implementation note (T-042, 2026-10-29): `POST /v1/tunnels` serializes creates for the same owner and writes the tunnel, mappings, creation audit event, and idempotent response in one PostgreSQL transaction. Concurrent identical requests must produce one tunnel and one creation event; conflicting bodies must not leave an extra tunnel. The quota check is inside the same owner lock, including requests without a key. Any failed write rolls back the create. Wire schemas and response codes are unchanged; concurrent and rollback regression tests still require a PostgreSQL run.
 
 ## 9. Admin API
 
@@ -210,12 +212,72 @@ Recorded because a security section that only lists protections is misleading:
 
 **Separation of duties is absent in this project and cannot be created by adding a second factor.** The single administrator is also the developer with database access. This is an **accepted risk (ADR-019)**, mitigated only by the audit trail (detective, after the fact) and step-up confirmation (accidental damage only) — neither of which stops a determined administrator. A single administrator is also a **single point of failure**: losing the only admin credential makes the service unadministrable, which is why recovery is designed rather than assumed.
 
-### 9.3 Still open
+### 9.3 `POST /admin/v1/auth/challenge`
+- Purpose: Issue an ephemeral WebAuthn challenge for administrator passkey authentication.
+- Auth: none. Request: `{username}`. Success `200`: `{challenge, rp_id, expires_in_seconds}`.
+- Errors: `not_found` (unknown admin username), `validation_failed`, `rate_limited`.
 
-1. **Route shapes.** Request and response bodies, error codes, and idempotency for each admin operation are not written. T-049.
-2. **Whether WebAuthn can actually be enforced** on the admin client is unverified and needs a spike, not a decision (T-049).
-3. **Whether the owner is ever also a user** is a product question nobody has asked. ADR-019 forces "never"; that should be confirmed rather than inherited.
-4. **Automated administration** — if anything administrative is ever performed by a machine rather than the owner (a controller draining relays on deploy, say), that is a **workload identity**, not a second factor, and ADR-019 does not cover it.
+### 9.4 `POST /admin/v1/auth/login`
+- Purpose: Authenticate administrator using WebAuthn passkey assertion and issue short-lived admin session token (15m TTL).
+- Auth: none. Request: `{username, assertion: {credential_id, authenticator_data, client_data_json, signature}}`.
+- Success `200` (`Cache-Control: no-store`): `{access_token, token_type: "Bearer", expires_in}`.
+- Errors: `unauthenticated` (invalid assertion, challenge mismatch/expired), `forbidden` (counter rollback / cloned authenticator, missing UP/UV flags), `not_found`.
+- Checks: counter monotonicity enforced; monotonic counter updated; user presence and verification flags verified; audit event `admin.login` written.
+
+### 9.5 `POST /admin/v1/auth/step-up`
+- Purpose: Perform step-up re-authentication within an active admin session, required before destructive actions.
+- Auth: admin. Request: `{assertion: {credential_id, authenticator_data, client_data_json, signature}}`.
+- Success `200`: `{step_up_until, expires_in}`.
+- Errors: `unauthenticated` (invalid token or assertion), `forbidden` (user token, or counter rollback).
+- Effects: grants active step-up window (300 seconds TTL).
+
+### 9.6 `POST /admin/v1/auth/recovery`
+- Purpose: Redeem single-use offline recovery code to regain admin access.
+- Auth: none. Request: `{username, recovery_code}`.
+- Success `200` (`Cache-Control: no-store`): `{access_token, token_type: "Bearer", expires_in, recovery_warning}`.
+- Errors: `unauthenticated` (invalid code), `validation_failed` (code already consumed), `not_found`, `rate_limited`.
+- Checks: constant-time hash comparison; single-use consumption recorded; audit event `admin.recovery_used` written with zero recovery secrets logged (`INV-5`, `SEC-002`).
+
+### 9.7 `POST /admin/v1/users/{id}/suspend`
+- Purpose: Administrative suspension of a user account, terminating all running tunnels and revoking active sessions (`SEC-015`).
+- Auth: admin. Step-up: required within 5 minutes. Request: `{reason?}`.
+- Success `200`: `{user_id, status: "suspended"}`.
+- Errors: `unauthenticated`, `forbidden` (user token, or step-up expired), `not_found`.
+- Effects: transitions user to `suspended`, terminates all active tunnels (`INV-7`), releases ports (`INV-6`), revokes auth sessions, logs `admin.user_suspended`.
+
+### 9.8 `POST /admin/v1/users/{id}/unsuspend`
+- Purpose: Administrative reinstatement of a previously suspended user account.
+- Auth: admin. Step-up: required within 5 minutes. Request: none.
+- Success `200`: `{user_id, status: "active"}`.
+- Errors: `unauthenticated`, `forbidden` (user token, or step-up expired), `not_found`.
+- Effects: transitions user to `active`, logs `admin.user_unsuspended`.
+
+### 9.9 `POST /admin/v1/tunnels/{id}/terminate`
+- Purpose: Immediate administrative termination of a tunnel (`SEC-015`).
+- Auth: admin. Step-up: required within 5 minutes. Request: `{reason?}`.
+- Success `200`: `{tunnel_id, status: "terminated"}`.
+- Errors: `unauthenticated`, `forbidden` (user token, or step-up expired), `not_found`.
+- Effects: transitions tunnel to `stopped`, releases relay allocation and reserved ports (`INV-6`), revokes admissions, logs `tunnel.terminated`.
+
+### 9.10 `POST /admin/v1/relays/{id}/drain`
+- Purpose: Administrative command to place a relay node into draining state (`REL-002`).
+- Auth: admin. Step-up: required within 5 minutes. Request: none.
+- Success `200`: `{relay_id, status: "draining"}`.
+- Errors: `unauthenticated`, `forbidden` (user token, or step-up expired), `not_found`.
+- Effects: marks relay draining, candidate selection skips it for new allocations, relay notified on next state poll, logs `admin.relay_drained`.
+
+### 9.11 `GET /admin/v1/audit-events`
+- Purpose: Query append-only administrative and security audit events.
+- Auth: admin. Query: `cursor?`, `limit?`.
+- Success `200`: `{events: AuditEvent[], next_cursor?}`.
+- Errors: `unauthenticated`, `forbidden` (user token).
+- Data minimization: guest IPs masked (`PRIV-002`), secrets redacted (`INV-5`).
+
+### 9.12 Open questions and spike findings
+
+1. **WebAuthn client enforcement:** Spike completed in `docs/webauthn-admin-spike.md` confirming W3C WebAuthentication Level 3 / FIDO2 CTAP2 client enforcement, browser compatibility, platform authenticators, counter monotonicity, and disaster recovery.
+2. **Owner-as-user:** Product boundary confirmed — administrator is a distinct identity store (`admins`, `admin_sessions`) separate from consumer users (`users`, `auth_sessions`).
+3. **Automated administration:** Relays poll via internal API (`/internal/v1`); automated controller identities remain out of scope for single-owner operations.
 
 ## 10. Tunnel protocol (engine ↔ relay)
 
@@ -310,6 +372,8 @@ The UI calls the engine in-process (Tauri commands). Illustrative interface:
 | `get_managed_server_status` | optional profile id | Managed server state, version, last log excerpt, world backup status |
 | `backup_world` / `restore_world` | profile id, backup id | Backup created / restored |
 | `update_managed_server` | profile id | Update accepted; refused without confirmation while a tunnel is active |
+| `detect_tailscale` | none | Local Tailscale node status (`BackendState`, `100.64.0.0/10` IPv4, MagicDNS, share URL) (`ADR-022`) |
+| `start_tailscale_share` | none | Starts Free-tier local Tailscale Node Share forwarder on `<tailscale_ip>:<port>` (`ADR-022`) |
 
 Events pushed to the UI: `tunnel_status_changed{state, reason}`, `local_probe_result{mapping_key, level, ok, detail}`, `players_seen{tcp_flows, udp_flows}`, `engine_error{code, message}`, and (added 2026-10-17) `managed_server_status_changed{state, progress?}`, `managed_server_log{excerpt}`, `managed_server_update{state}`.
 
@@ -351,4 +415,4 @@ Events pushed to the UI: `tunnel_status_changed{state, reason}`, `local_probe_re
 
 ## 17. Links
 
-`api.md` (inventory), `data-model.md`, `architecture.md`, `research.md`, schemas in `docs/contracts/`.
+`api.md` (inventory), `data-model.md`, `architecture.md`, `research.md`, schemas in `contracts/`.

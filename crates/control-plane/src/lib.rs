@@ -12,9 +12,14 @@
 //! may not see, so the policy layer decides what that means (`not_found` per
 //! `contracts.md`, not `forbidden`).
 
+pub mod admin;
 pub mod db;
 pub mod error;
+pub mod keys;
+pub mod limiter;
 pub mod policy;
+pub mod redaction;
+pub mod routes;
 
 pub use db::Database;
 pub use error::{PersistenceError, Rejection, Result};

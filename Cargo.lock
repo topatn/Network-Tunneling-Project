@@ -420,8 +420,11 @@ name = "gtt-control-plane"
 version = "0.0.0"
 dependencies = [
  "chrono",
+ "gtt-profiles",
+ "gtt-protocol",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "sqlx",
  "tokio",
  "uuid",
@@ -430,6 +433,14 @@ dependencies = [
 [[package]]
 name = "gtt-engine"
 version = "0.0.0"
+dependencies = [
+ "gtt-profiles",
+ "gtt-protocol",
+ "gtt-relay",
+ "gtt-server-manager",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "gtt-profiles"
@@ -443,10 +454,18 @@ dependencies = [
 [[package]]
 name = "gtt-protocol"
 version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+]
 
 [[package]]
 name = "gtt-relay"
 version = "0.0.0"
+dependencies = [
+ "gtt-protocol",
+]
 
 [[package]]
 name = "gtt-server-manager"

@@ -657,3 +657,70 @@ impl_from_row!(IdempotencyRecord {
     created_at,
     expires_at
 });
+
+/// A row of `admins` (ADR-019, `SEC-018`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Admin {
+    /// Primary key.
+    pub id: Uuid,
+    /// Administrator username (unique).
+    pub username: String,
+    /// Human-facing display name.
+    pub display_name: String,
+    /// WebAuthn / FIDO2 passkey credential ID.
+    pub passkey_credential_id: Vec<u8>,
+    /// Passkey public key bytes (COSE/DER format).
+    pub passkey_public_key: Vec<u8>,
+    /// Monotonic signature counter for clone detection.
+    pub passkey_counter: i64,
+    /// SHA-256 hash of single-use offline recovery code.
+    pub recovery_code_hash: String,
+    /// When recovery code was redeemed, if ever.
+    pub recovery_used_at: Option<DateTime<Utc>>,
+    /// Creation time.
+    pub created_at: DateTime<Utc>,
+    /// Last update time.
+    pub updated_at: DateTime<Utc>,
+}
+
+impl_from_row!(Admin {
+    id,
+    username,
+    display_name,
+    passkey_credential_id,
+    passkey_public_key,
+    passkey_counter,
+    recovery_code_hash,
+    recovery_used_at,
+    created_at,
+    updated_at
+});
+
+/// A row of `admin_sessions` (ADR-019, `contracts.md` §9.1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdminSession {
+    /// Primary key.
+    pub id: Uuid,
+    /// Scoping administrator.
+    pub admin_id: Uuid,
+    /// SHA-256 hash of the administrative bearer token.
+    pub token_hash: String,
+    /// Creation time.
+    pub created_at: DateTime<Utc>,
+    /// Session expiration time (short-lived, e.g. 15m TTL).
+    pub expires_at: DateTime<Utc>,
+    /// Active step-up authorization window for destructive actions.
+    pub step_up_until: Option<DateTime<Utc>>,
+    /// Revocation timestamp.
+    pub revoked_at: Option<DateTime<Utc>>,
+}
+
+impl_from_row!(AdminSession {
+    id,
+    admin_id,
+    token_hash,
+    created_at,
+    expires_at,
+    step_up_until,
+    revoked_at
+});

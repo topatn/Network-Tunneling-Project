@@ -128,6 +128,28 @@ pub async fn set_user_status(
         .execute(&mut *tx)
         .await?;
 
+        sqlx::query(
+            "update allocation_ports set released_at = now()
+             where released_at is null
+               and allocation_id in (
+                   select a.id from relay_allocations a
+                   join tunnels t on t.id = a.tunnel_id
+                   where t.owner_id = $1 and a.state in ('reserved', 'active')
+               )",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "update relay_allocations set state = 'released', released_at = now()
+             where state in ('reserved', 'active')
+               and tunnel_id in (select id from tunnels where owner_id = $1)",
+        )
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+
         // Refresh tokens for a suspended account must stop working immediately, or the
         // suspension would be defeatable with a token issued before it.
         sqlx::query(
@@ -137,6 +159,74 @@ pub async fn set_user_status(
         .execute(&mut *tx)
         .await?;
     }
+
+    tx.commit().await?;
+    Ok(updated.rows_affected())
+}
+
+/// Mark a user account for deletion (`deleted_at = now()`, `PRIV-004`).
+///
+/// In the same transaction:
+/// 1. Sets `deleted_at = now()` on the `users` row.
+/// 2. Terminates any active or created tunnels (`state = 'terminated'`).
+/// 3. Releases all allocated ports and relay reservations.
+/// 4. Revokes all active `auth_sessions`.
+///
+/// Returns the number of affected user rows (1 if marked, 0 if not found or already deleted).
+pub async fn soft_delete_user(pool: &PgPool, user_id: Uuid) -> Result<u64> {
+    let mut tx = pool.begin().await?;
+
+    let updated =
+        sqlx::query("update users set deleted_at = now() where id = $1 and deleted_at is null")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+    if updated.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Ok(0);
+    }
+
+    // Terminate existing active/created tunnels immediately upon deletion request (PRIV-004)
+    sqlx::query(
+        "update tunnels
+         set state = 'terminated',
+             stopped_at = now(),
+             termination_reason = 'account deleted'
+         where owner_id = $1 and state in ('created', 'active')",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "update allocation_ports set released_at = now()
+         where released_at is null
+           and allocation_id in (
+               select a.id from relay_allocations a
+               join tunnels t on t.id = a.tunnel_id
+               where t.owner_id = $1 and a.state in ('reserved', 'active')
+           )",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "update relay_allocations set state = 'released', released_at = now()
+         where state in ('reserved', 'active')
+           and tunnel_id in (select id from tunnels where owner_id = $1)",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+
+    // Revoke all auth sessions immediately
+    sqlx::query(
+        "update auth_sessions set revoked_at = now() where user_id = $1 and revoked_at is null",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok(updated.rows_affected())

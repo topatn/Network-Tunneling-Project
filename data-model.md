@@ -72,21 +72,21 @@ Types are PostgreSQL types. "Sensitive" means access-restricted and excluded fro
 - **Fields:** `id uuid PK default gen_random_uuid()`; `idp_issuer text NOT NULL`; `idp_subject text NOT NULL`; `display_name text NULL (1–64 chars)`; `status text NOT NULL default 'active' ('active'|'suspended')`; `created_at timestamptz NOT NULL default now()`; `deleted_at timestamptz NULL`.
 - **Unique:** (`idp_issuer`, `idp_subject`). **Indexes:** the unique index.
 - **Lifecycle:** created at first sign-in; `suspended` by an operator; deletion sets `deleted_at`, then a job stops the user's tunnels and removes the row (cascades to sessions, tunnels, invitations, idempotency keys).
-- **Sensitive:** `idp_subject`. **Retention:** until deletion request, then removed. Deletion timing *(proposal, to be set)*.
+- **Sensitive:** `idp_subject`. **Retention:** until deletion request; soft-deleted accounts (`deleted_at IS NOT NULL`) are hard-purged after 30 days (`PRIV-003`, `PRIV-004`, `T-109`).
 - **Invariants:** a suspended user cannot create or start tunnels or refresh tokens; existing active tunnels are terminated on suspension.
 
 ### auth_sessions
 - **Fields:** `id uuid PK`; `user_id uuid FK users ON DELETE CASCADE`; `family_id uuid NOT NULL`; `refresh_token_hash bytea NOT NULL UNIQUE`; `device_label text NULL (≤64)`; `created_at`; `last_used_at NULL`; `expires_at NOT NULL > created_at`; `revoked_at NULL`.
 - **Indexes:** partial on `user_id WHERE revoked_at IS NULL`; `family_id`.
 - **Lifecycle:** refresh rotates the token within a family; presenting an already-used token revokes the whole family (reuse detection).
-- **Sensitive:** `refresh_token_hash`. **Retention:** delete rows a *(proposal)* grace period after expiry or revocation.
+- **Sensitive:** `refresh_token_hash`. **Retention:** 7 days after expiry or revocation (`PRIV-003`, `T-109`), then deleted via `purge_expired_auth_sessions`.
 
 ### tunnels
 - **Fields:** `id uuid PK`; `owner_id FK users CASCADE`; `name text 1–64`; `game_profile_id text`; `profile_version int ≥1`; `state text default 'created' ('created'|'active'|'stopped'|'terminated'|'expired')`; `created_at`; `started_at NULL`; `stopped_at NULL`; `expires_at NOT NULL > created_at`; `termination_reason text NULL`.
 - **Indexes:** (`owner_id`,`state`); partial on `expires_at WHERE state='active'`.
 - **Lifecycle:** created → active (on start) → stopped (owner), terminated (operator/abuse), or expired (max lifetime). Terminal states are final; a new session is a new row.
 - **Invariants:** `stopped_at` is non-null exactly when state is terminal (enforced by CHECK); at most one live allocation (INV-3); per-user active-tunnel quota is application-enforced (limit *proposal*, set in requirements).
-- **Retention:** keep terminal rows for a *(proposal)* period for abuse review and usage reconciliation, then delete (cascades to mappings, allocations, usage).
+- **Retention:** terminal rows (`stopped`, `terminated`, `expired`) are kept for 30 days after `stopped_at` for abuse review and usage reconciliation (`PRIV-003`, `T-109`), then deleted via `purge_expired_terminal_tunnels` (cascades to mappings, allocations, usage).
 
 ### tunnel_mappings
 - **Fields:** `id uuid PK`; `tunnel_id FK CASCADE`; `mapping_key text` (profile-defined, e.g. a game port or an optional query/RCON mapping); `protocol 'tcp'|'udp'`; `position smallint ≥0`; `enabled bool default true`; `created_at`.
@@ -120,22 +120,36 @@ Types are PostgreSQL types. "Sensitive" means access-restricted and excluded fro
 - **Fields:** `id uuid PK`; `invitation_id`, `tunnel_id` (composite FK to `invitations(id, tunnel_id)`); `source_ip inet NOT NULL`; `created_at`; `expires_at > created_at`; `revoked_at NULL`.
 - **Indexes:** partial unique (`tunnel_id`,`source_ip`) `WHERE revoked_at IS NULL` (re-claim from the same IP refreshes instead of duplicating); index on `expires_at`.
 - **Lifecycle:** created when a guest claims an invitation; expires or is revoked; the relay enforces the live set.
-- **Sensitive:** `source_ip` (personal data). **Retention:** delete a short *(proposal)* time after expiry; never copied into logs or audit metadata.
+- **Sensitive:** `source_ip` (personal data). **Retention:** 24 hours after expiry or revocation (`PRIV-003`, `T-109`), then deleted via `purge_expired_guest_admissions`; never copied into logs or audit metadata.
 - **Dependency:** the whole table exists only if experiment E-13 shows source-IP admission is workable (ADR-007).
 
 ### usage_records
 - **Fields:** `tunnel_id FK CASCADE`, `relay_id FK RESTRICT`, `interval_start timestamptz`, `bytes_from_guests bigint ≥0`, `bytes_to_guests bigint ≥0`, `peak_flows int ≥0`, `datagrams_dropped bigint ≥0`; PK (`tunnel_id`,`relay_id`,`interval_start`).
-- **Lifecycle:** upserted per interval from relay reports; interval length *(proposal)* set in config. **Retention:** *(proposal)* long enough for billing/quota reconciliation, then aggregated and deleted.
+- **Lifecycle:** upserted per interval from relay reports; interval length *(proposal)* set in config. **Retention:** 90 days from `interval_start` (`PRIV-003`, `T-109`), then deleted via `purge_expired_usage_records`.
 
 ### audit_events
 - **Fields:** `id bigint identity PK`; `occurred_at`; `actor_type ('user'|'admin'|'system'|'relay')`; `actor_id uuid NULL`; `action text`; `subject_type text`; `subject_id uuid NULL`; `request_id text NULL`; `metadata jsonb`.
 - **Indexes:** `occurred_at`; (`subject_type`,`subject_id`).
 - **Invariant INV-5:** `metadata` never contains tokens, payloads, or raw guest IPs; enforced by a code-level allow-list and a secret-leak test.
-- **Retention:** *(proposal)* fixed period, then deletion. Append-only: no updates.
+- **Retention:** 90 days from `occurred_at` (`PRIV-003`, `T-109`), then deleted via `purge_expired_audit_events`. Append-only: no updates.
 
 ### idempotency_keys
 - **Fields:** `user_id FK CASCADE`, `route text`, `idem_key text 8–128`, `request_hash bytea`, `response_status int NULL`, `response_body jsonb NULL`, `created_at`, `expires_at`; PK (`user_id`,`route`,`idem_key`).
-- **Behavior:** same key + same hash → replay stored response; same key + different hash → conflict (`contracts.md` §8). **Retention:** expires after a *(proposal)* window.
+- **Behavior:** within the retention window, same key + same hash → replay stored response; same key + different hash → conflict (`contracts.md` §8). Expired rows are ignored on lookup and may be atomically replaced on reuse, independently of physical cleanup. Cleanup skips locked rows and rechecks expiry so it cannot remove a renewed response. **Retention:** 24 hours (`PRIV-003`, `T-109`), then deleted via `purge_expired_idempotency_keys`; enforced with the database statement clock. No physical schema change.
+
+### admins
+- **Fields:** `id uuid PK default gen_random_uuid()`; `username text NOT NULL UNIQUE`; `display_name text NOT NULL`; `passkey_credential_id bytea NOT NULL`; `passkey_public_key bytea NOT NULL`; `passkey_counter bigint NOT NULL default 0`; `recovery_code_hash text NOT NULL`; `recovery_used_at timestamptz NULL`; `created_at timestamptz NOT NULL default now()`; `updated_at timestamptz NOT NULL default now()`.
+- **Unique:** `username`.
+- **Lifecycle:** created by operator initialization; credentials updated via passkey enrollment; recovery code invalidated upon single use.
+- **Sensitive:** `recovery_code_hash` (hashed at rest, `SEC-002`, `INV-5`).
+- **Retention:** indefinite while administrator account is active.
+
+### admin_sessions
+- **Fields:** `id uuid PK default gen_random_uuid()`; `admin_id uuid NOT NULL FK admins(id) ON DELETE CASCADE`; `token_hash text NOT NULL UNIQUE`; `created_at timestamptz NOT NULL default now()`; `expires_at timestamptz NOT NULL`; `step_up_until timestamptz NULL`; `revoked_at timestamptz NULL`.
+- **Indexes:** `token_hash`; `admin_id`.
+- **Lifecycle:** created upon WebAuthn assertion or recovery code redemption; 15-minute TTL; step-up window valid for 5 minutes; revoked upon sign-out or session replacement.
+- **Sensitive:** `token_hash`.
+- **Retention:** 7 days after expiry or revocation (`PRIV-003`), purged via cleanup sweep.
 
 ## 5. Ephemeral and non-database state
 
@@ -179,7 +193,7 @@ pub struct MappingRequest {
 }
 ```
 
-Validation layering: (1) the wire-level contract, currently the definitions in `contracts.md` §15 and the message tables in `contracts.md` §§5 and 10 — **note 2026-10-17:** this originally cited a JSON Schema in `docs/contracts/`, which does not exist in this repository; T-031 must author the schemas, so until then `contracts.md` is authoritative; (2) typed deserialization rejects unknown fields; (3) a domain validation function checks profile rules (INV-2) and quotas; (4) database constraints are the last line of defense. A mismatch between layers is a test failure, not a runtime surprise.
+Validation layering: (1) the wire-level contract in `contracts.md` §§5, 10, 15 and the draft 2020-12 JSON Schemas in `contracts/*.schema.json` (authored and verified in T-031 against `contracts/examples.json`); (2) typed deserialization and wire validation in `gtt-protocol` (`crates/protocol`), which rejects unknown fields, malformed `uuid`/`date-time` values, and any `INV-1` local-target fields; (3) a domain validation function checks profile rules (INV-2) and quotas; (4) database constraints are the last line of defense. A mismatch between layers is a test failure, not a runtime surprise.
 
 ## 8. Migration strategy and compatibility rules
 

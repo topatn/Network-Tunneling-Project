@@ -5,7 +5,7 @@
 //! carefully.
 
 use chrono::{DateTime, Utc};
-use sqlx::{PgPool, Row};
+use sqlx::{Executor, PgPool, Postgres, Row};
 use uuid::Uuid;
 
 use crate::db::audit::AuditMetadata;
@@ -137,7 +137,10 @@ pub struct NewAuditEvent<'a> {
 ///
 /// Append-only: there is no update or delete function in this module, and `data-model.md`
 /// §4 specifies that audit rows are never updated.
-pub async fn append_audit_event(pool: &PgPool, event: &NewAuditEvent<'_>) -> Result<i64> {
+pub async fn append_audit_event<'e>(
+    pool: impl Executor<'e, Database = Postgres>,
+    event: &NewAuditEvent<'_>,
+) -> Result<i64> {
     let NewAuditEvent {
         actor_type,
         actor_id,
@@ -225,8 +228,9 @@ pub enum IdempotencyOutcome {
 ///
 /// The comparison is on `request_hash`, never on the body, so a large request is hashed
 /// once and the key table stays small.
-pub async fn check_idempotency(
-    pool: &PgPool,
+/// Expiry is enforced by the database clock even when the cleanup job has not run.
+pub async fn check_idempotency<'e>(
+    pool: impl Executor<'e, Database = Postgres>,
     user_id: Uuid,
     route: &str,
     idem_key: &str,
@@ -236,7 +240,8 @@ pub async fn check_idempotency(
         "select user_id, route, idem_key, request_hash, response_status, response_body,
                 created_at, expires_at
          from idempotency_keys
-         where user_id = $1 and route = $2 and idem_key = $3",
+         where user_id = $1 and route = $2 and idem_key = $3
+           and expires_at > statement_timestamp()",
     )
     .bind(user_id)
     .bind(route)
@@ -286,11 +291,11 @@ pub struct IdempotentResponse<'a> {
 
 /// Store a response against an idempotency key.
 ///
-/// Claiming the key is an `ON CONFLICT DO NOTHING`, so exactly one concurrent request
-/// wins and stores the response. A caller that loses the race re-reads and replays
-/// instead of overwriting.
-pub async fn store_idempotent_response(
-    pool: &PgPool,
+/// A conflict may replace only an expired row. PostgreSQL checks the expiry while
+/// holding the row lock, so concurrent reuse cannot overwrite a fresh winner.
+/// A live response is never replaced; callers must handle a `false` result.
+pub async fn store_idempotent_response<'e>(
+    pool: impl Executor<'e, Database = Postgres>,
     stored: &IdempotentResponse<'_>,
 ) -> Result<bool> {
     let IdempotentResponse {
@@ -307,7 +312,13 @@ pub async fn store_idempotent_response(
         "insert into idempotency_keys
              (user_id, route, idem_key, request_hash, response_status, response_body, expires_at)
          values ($1, $2, $3, $4, $5, $6, $7)
-         on conflict (user_id, route, idem_key) do nothing",
+         on conflict (user_id, route, idem_key) do update
+         set request_hash = excluded.request_hash,
+             response_status = excluded.response_status,
+             response_body = excluded.response_body,
+             created_at = statement_timestamp(),
+             expires_at = excluded.expires_at
+         where idempotency_keys.expires_at <= statement_timestamp()",
     )
     .bind(user_id)
     .bind(route)
@@ -322,14 +333,16 @@ pub async fn store_idempotent_response(
 }
 
 /// Delete expired idempotency keys. Returns the count, not the rows.
+/// Locked keys are skipped so cleanup neither waits for reuse nor deletes its fresh response.
 pub async fn purge_expired_idempotency_keys(pool: &PgPool, batch: i64) -> Result<u64> {
     let batch = batch.clamp(1, 1000);
     let res = sqlx::query(
         "delete from idempotency_keys
          where (user_id, route, idem_key) in (
              select user_id, route, idem_key from idempotency_keys
-             where expires_at <= now() order by expires_at limit $1
-         )",
+             where expires_at <= statement_timestamp() order by expires_at limit $1
+             for update skip locked
+         ) and expires_at <= statement_timestamp()",
     )
     .bind(batch)
     .execute(pool)

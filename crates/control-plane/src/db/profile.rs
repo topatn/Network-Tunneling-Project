@@ -56,4 +56,30 @@ impl ProfileSpec {
     pub fn matches(&self, profile_id: &str, profile_version: i32) -> bool {
         self.profile_id == profile_id && self.version == profile_version
     }
+
+    /// Build a [`ProfileSpec`] from a loaded [`gtt_profiles::Profile`] (T-042).
+    pub fn from_loaded(profile: &gtt_profiles::Profile) -> Self {
+        Self {
+            profile_id: profile.id.clone(),
+            version: profile.version,
+            mappings: profile
+                .mappings
+                .iter()
+                .map(|m| ProfileMapping {
+                    mapping_key: m.key.clone(),
+                    protocol: match m.protocol {
+                        gtt_profiles::Protocol::Tcp => crate::db::entities::Protocol::Tcp,
+                        gtt_profiles::Protocol::Udp => crate::db::entities::Protocol::Udp,
+                    },
+                    enabled_by_default: m.enabled_by_default(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<&gtt_profiles::Profile> for ProfileSpec {
+    fn from(profile: &gtt_profiles::Profile) -> Self {
+        Self::from_loaded(profile)
+    }
 }

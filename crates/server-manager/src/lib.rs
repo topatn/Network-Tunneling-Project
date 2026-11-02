@@ -48,6 +48,7 @@
 mod config;
 mod paths;
 mod provision;
+pub mod supervisor;
 mod verify;
 
 pub use config::{
@@ -56,4 +57,12 @@ pub use config::{
 };
 pub use paths::{DataPaths, PathError};
 pub use provision::{AcquisitionRecord, ProvisionError, ProvisionableSet};
+pub use supervisor::{
+    parse_java_major_version, parse_msmp_player_notification, validate_java_version_output,
+    ConfirmedPresenceSnapshot, ManagedServerError, ManagedServerState, ManagedServerStatusSnapshot,
+    ManagedServerSupervisor, MsmpPlayerNotification, ServerLaunchSpec, CONFIRMED_PRESENCE_LABEL,
+    DEFAULT_MAX_CRASH_RESTARTS, MAX_CONFIRMED_PLAYERS, MAX_LOG_EXCERPT_BYTES,
+    MAX_RETAINED_LOG_LINES, MINECRAFT_JAVA_EULA_MARKER, MINECRAFT_JAVA_PROFILE_ID,
+    MINECRAFT_JAVA_READY_MARKER,
+};
 pub use verify::{verify, ArtifactSource, Digest, VerifyError};

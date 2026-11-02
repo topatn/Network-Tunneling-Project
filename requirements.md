@@ -143,10 +143,22 @@ Counts: 117 requirements, 86 tasks.
 |---|---|---|---|---|---|---|---|
 | **PRIV-001** | The desktop client sends no telemetry by default. | P0 | Privacy by default. | Network capture of a default install during normal use shows traffic only to the API and relay endpoints needed for function. | Network capture test | — | Alpha |
 | **PRIV-002** | Logs and diagnostics exclude tokens, payload bytes, and raw guest IPs. | P0 | Data minimization. | Automated redaction tests and a log-scan over a test run find none of these. | Security test | — | Alpha |
-| **PRIV-003** | Retention periods are defined and enforced for guest IPs, audit events, usage records, and sessions. | P0 | Limit stored personal data. | Retention values are recorded in this document; a scheduled job test shows expired rows are removed. | Integration test | — | Beta |
+| **PRIV-003** | Retention periods are defined and enforced for guest IPs, audit events, usage records, and sessions. | P0 | Limit stored personal data. | Retention values are recorded in the retention table below (admissions 24h, idempotency 24h, sessions 7d, terminal tunnels 30d, usage 90d, audit 90d, account purge 30d); a scheduled job test shows expired rows are removed. | Integration test | — | Beta |
 | **PRIV-004** | A user can delete their account and associated data. | P0 | User control. | After deletion, the user's rows (users, sessions, tunnels, invitations) are gone; audit entries retain no personal data beyond what policy allows. | Integration test | PRIV-003 | Beta |
 | **PRIV-005** | The privacy notice states what relays and the operator can see. | P0 | Honest disclosure. | The notice names relayed game traffic, retained metadata, and retention periods and matches actual behavior. | Document review | SEC-011 | Alpha |
 | **PRIV-006** | No email address is stored unless a later decision requires it. | P1 | Data minimization. | Schema review confirms no email column; any change requires an ADR. | Schema review | — | Alpha |
+
+### Retention schedule (PRIV-003, PRIV-004, T-109)
+
+| Data Category | Table(s) | Retention Period | Post-Retention Action | Rationale |
+|---|---|---|---|---|
+| **Guest Admissions (Source IPs)** | `guest_admissions` | **24 hours** after expiration or revocation | Hard deletion via `purge_expired_guest_admissions` | Minimizes storage of guest personal IP addresses (`PRIV-002`, `SRV-016`) while permitting cursor delta sync to relays (`REL-004`). |
+| **Idempotency Keys & Responses** | `idempotency_keys` | **24 hours** after expiration (`created_at + 24h`) | Hard deletion via `purge_expired_idempotency_keys` | Prevents replay or duplicate operations within creation window (`contracts.md` §8). |
+| **Auth Sessions (Refresh Tokens)** | `auth_sessions` | **7 days** after expiration or revocation | Hard deletion via `purge_expired_auth_sessions` | Grace window for token reuse detection and breach forensics. |
+| **Terminal Tunnels & Child Rows** | `tunnels` (`stopped`, `terminated`, `expired`) | **30 days** after termination (`stopped_at`) | Hard deletion via `purge_expired_terminal_tunnels` | Retained for host history review and abuse investigation; cascades to child mappings, allocations, ports, and invitations. |
+| **Usage Records** | `usage_records` | **90 days** from interval start | Hard deletion via `purge_expired_usage_records` | Sufficient for quota reconciliation and billing disputes. |
+| **Audit Events** | `audit_events` | **90 days** from occurrence (`occurred_at`) | Hard deletion via `purge_expired_audit_events` | Append-only security and abuse review (`INV-5`); contains zero secrets or raw guest IPs. |
+| **Soft-Deleted User Accounts** | `users` (`deleted_at IS NOT NULL`) | **30 days** after deletion request | Hard deletion via `purge_soft_deleted_users` | Account deletion (`PRIV-004`) immediately stops tunnels and revokes sessions; final purge cascades to all user rows. |
 
 ## Host-local game server provisioning requirements (added 2026-10-17)
 

@@ -11,7 +11,9 @@ use sqlx::postgres::{PgPool, PgPoolOptions};
 use crate::error::Result;
 
 pub mod accounts;
+pub mod admin;
 pub mod audit;
+pub mod cleanup;
 pub mod entities;
 pub mod invariants;
 pub mod ops;
@@ -20,6 +22,7 @@ pub mod relay;
 pub mod sharing;
 pub mod tunnels;
 
+pub use cleanup::{RetentionPolicyConfig, RetentionSweepReport};
 pub use entities::*;
 pub use profile::{ProfileMapping, ProfileSpec};
 

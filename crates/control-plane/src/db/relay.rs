@@ -232,6 +232,27 @@ pub async fn get_live_allocation(
     Ok(allocation)
 }
 
+/// List allocations assigned to a specific relay (`contracts.md` §7, `REL-004`).
+pub async fn list_allocations_for_relay(
+    pool: &PgPool,
+    relay_id: Uuid,
+    limit: i64,
+) -> Result<Vec<RelayAllocation>> {
+    let limit = limit.clamp(1, 500);
+    let allocations = sqlx::query_as::<_, RelayAllocation>(
+        "select id, tunnel_id, relay_id, state, issued_at, expires_at, released_at
+         from relay_allocations
+         where relay_id = $1
+         order by issued_at desc, id
+         limit $2",
+    )
+    .bind(relay_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(allocations)
+}
+
 /// An allocation together with the tunnel that owns it.
 ///
 /// A named projection rather than a tuple: a tuple of structs goes through `Decode`,
@@ -383,6 +404,23 @@ pub async fn list_allocation_ports(
          order by mapping_id",
     )
     .bind(allocation_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(ports)
+}
+
+/// List all currently live (`released_at IS NULL`) published ports on a relay (`INV-6`).
+pub async fn list_live_ports_for_relay(
+    pool: &PgPool,
+    relay_id: Uuid,
+) -> Result<Vec<AllocationPort>> {
+    let ports = sqlx::query_as::<_, AllocationPort>(
+        "select allocation_id, mapping_id, relay_id, protocol, public_port, released_at
+         from allocation_ports
+         where relay_id = $1 and released_at is null
+         order by public_port",
+    )
+    .bind(relay_id)
     .fetch_all(pool)
     .await?;
     Ok(ports)

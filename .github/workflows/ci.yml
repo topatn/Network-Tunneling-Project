@@ -102,6 +102,156 @@ jobs:
       - name: Verify colour tokens and contrast claims
         run: python scripts/check_contrast.py
 
+  game-compat:
+    name: Game compatibility L0/L1 automation (T-090)
+    # TEST-005, GAME-001, GAME-002. Runs the Rust L0/L1 tunnel compatibility suite
+    # (`crates/engine/tests/game_compat.rs`) and the standalone Python L0/L1 +
+    # gap-inventory verifier (`tests/game-compat/run_game_compat.py`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: game-compat-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Rust L0/L1 tunnel compatibility integration tests
+        run: cargo test -p gtt-engine --test game_compat
+      - name: Run L0/L1 protocol and explicit gap inventory verifier
+        run: python tests/game-compat/run_game_compat.py
+
+  network-impairment:
+    name: Network impairment and IPv6 automation (T-092)
+    # TEST-003, NET-005, NET-010. Runs the Rust network impairment test suite
+    # (`crates/engine/tests/network_impairment.rs`) and the standalone Python harness
+    # (`tests/network/run_network_tests.py`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: network-impairment-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Rust network impairment and session resilience tests
+        run: cargo test -p gtt-engine --test network_impairment
+      - name: Run network impairment test harness
+        run: python tests/network/run_network_tests.py
+
+  perf-benchmarks:
+    name: Performance benchmarks and empirical baselines (T-095)
+    # TEST-006, PERF-001..PERF-004. Runs Rust performance benchmark harness
+    # (`crates/engine/tests/perf_benchmarks.rs`) and asserts empirical targets
+    # via standalone runner (`tests/perf/run_benchmarks.py`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: perf-benchmarks-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Rust performance benchmarks
+        run: cargo test -p gtt-engine --test perf_benchmarks -- --nocapture
+      - name: Run benchmark harness and verify targets
+        run: python tests/perf/run_benchmarks.py
+      - name: Run Rust relay load and capacity limit tests
+        run: cargo test -p gtt-relay --test load_capacity -- --nocapture
+      - name: Run relay load test runner and verify saturation limits
+        run: python tests/perf/run_relay_load.py
+
+  privacy-tests:
+    name: Privacy and zero-telemetry tests (T-098)
+    # PRIV-001, PRIV-003, PRIV-004. Runs privacy network capture, log redaction,
+    # retention schedule sweeps, and user account deletion verification.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: privacy-tests-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Privacy Automated Test Suite
+        run: python tests/privacy/run_privacy_tests.py
+
+  failure-injection:
+    name: Failure-injection tests (T-097)
+    # REL-001, REL-002, REL-004. Runs control-plane outage survival,
+    # unhealthy relay avoidance, connection drop failover, and relay restart recovery.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: failure-injection-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Failure-Injection Automated Test Suite
+        run: python tests/failure-injection/run_failure_injection.py
+
+  security-tests:
+    name: Security test suite (T-093)
+    # TEST-004, SEC-002, SEC-005, SEC-006, SEC-008, SEC-009, SEC-010, SEC-013, SEC-015, SEC-018.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: security-tests-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Security Automated Test Suite
+        run: python tests/security/run_security_tests.py
+
   dependency-scan:
     name: Dependency scan (SEC-017)
     runs-on: ubuntu-latest

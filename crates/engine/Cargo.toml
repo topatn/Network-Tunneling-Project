@@ -1,4 +1,4 @@
-﻿[package]
+[package]
 name = "gtt-engine"
 description = "Tunnel client: QUIC connection, streams, datagrams, local dialing, health checks."
 version.workspace = true
@@ -8,8 +8,14 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Intentionally empty. Dependencies are added by the task that needs them; each
-# requires a dependency-register row in the same change (AGENTS.md section 5).
+gtt-profiles = { path = "../profiles", version = "0.0.0" }
+gtt-protocol = { path = "../protocol", version = "0.0.0" }
+gtt-server-manager = { path = "../server-manager", version = "0.0.0" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+gtt-relay = { path = "../relay", version = "0.0.0" }
 
 [lints]
 workspace = true

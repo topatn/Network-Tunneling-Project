@@ -152,6 +152,19 @@ fn check_value(value: &Value) -> Result<(), crate::error::PersistenceError> {
 }
 
 impl AuditMetadata {
+    /// Build empty metadata.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Build metadata containing a single `reason` field.
+    pub fn with_reason(reason: &str) -> Result<Self, crate::error::PersistenceError> {
+        build(std::iter::once((
+            "reason".to_owned(),
+            Value::String(reason.to_owned()),
+        )))
+    }
+
     /// The validated value, for binding to a `jsonb` column.
     pub fn as_value(&self) -> &Value {
         &self.value
@@ -164,6 +177,91 @@ impl Default for AuditMetadata {
         // be fallible at the type level.
         Self {
             value: Value::Object(serde_json::Map::new()),
+        }
+    }
+}
+
+/// Canonical security-relevant actions recorded in `audit_events.action` (`SEC-013`, `T-046`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AuditAction {
+    /// User completed sign-in (`POST /v1/auth/exchange`).
+    AuthSignedIn,
+    /// User signed out (`POST /v1/auth/logout`).
+    AuthSignedOut,
+    /// Tunnel record created (`POST /v1/tunnels`).
+    TunnelCreated,
+    /// Tunnel started and relay allocated (`POST /v1/tunnels/{id}/start`).
+    TunnelStarted,
+    /// Tunnel stopped by owner (`POST /v1/tunnels/{id}/stop`).
+    TunnelStopped,
+    /// Tunnel reallocated onto a healthy relay during failover (`REL-002`).
+    TunnelReallocated,
+    /// Tunnel terminated by operator or abuse policy (`SEC-015`).
+    TunnelTerminated,
+    /// Invitation created (`POST /v1/tunnels/{id}/invitations`).
+    InvitationCreated,
+    /// Invitation revoked (`DELETE /v1/invitations/{id}`).
+    InvitationRevoked,
+    /// Invitation claimed by guest (`POST /v1/invitations/claim`).
+    InvitationClaimed,
+    /// Guest admission revoked (`DELETE /v1/admissions/{id}`).
+    AdmissionRevoked,
+    /// User account suspended by administrator (`SEC-015`, `SEC-018`).
+    AdminUserSuspended,
+    /// User account unsuspended / reinstated by administrator (`SEC-015`, `SEC-018`).
+    AdminUserUnsuspended,
+    /// Relay placed into draining state by administrator (`SEC-018`).
+    AdminRelayDrained,
+    /// Signing key rotated by administrator (`SEC-016`, `SEC-018`).
+    AdminSigningKeyRotated,
+    /// Administrator signed in via WebAuthn passkey assertion (`SEC-018`).
+    AdminLogin,
+    /// Administrator redeemed offline recovery code (`SEC-018`, `INV-5`).
+    AdminRecoveryUsed,
+}
+
+impl AuditAction {
+    /// All canonical [`AuditAction`] variants required by `SEC-013`.
+    pub const ALL: &[Self] = &[
+        Self::AuthSignedIn,
+        Self::AuthSignedOut,
+        Self::TunnelCreated,
+        Self::TunnelStarted,
+        Self::TunnelStopped,
+        Self::TunnelReallocated,
+        Self::TunnelTerminated,
+        Self::InvitationCreated,
+        Self::InvitationRevoked,
+        Self::InvitationClaimed,
+        Self::AdmissionRevoked,
+        Self::AdminUserSuspended,
+        Self::AdminUserUnsuspended,
+        Self::AdminRelayDrained,
+        Self::AdminSigningKeyRotated,
+        Self::AdminLogin,
+        Self::AdminRecoveryUsed,
+    ];
+
+    /// Stored string value for `audit_events.action`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AuthSignedIn => "auth.signed_in",
+            Self::AuthSignedOut => "auth.signed_out",
+            Self::TunnelCreated => "tunnel.created",
+            Self::TunnelStarted => "tunnel.started",
+            Self::TunnelStopped => "tunnel.stopped",
+            Self::TunnelReallocated => "tunnel.reallocated",
+            Self::TunnelTerminated => "tunnel.terminated",
+            Self::InvitationCreated => "invitation.created",
+            Self::InvitationRevoked => "invitation.revoked",
+            Self::InvitationClaimed => "invitation.claimed",
+            Self::AdmissionRevoked => "admission.revoked",
+            Self::AdminUserSuspended => "admin.user_suspended",
+            Self::AdminUserUnsuspended => "admin.user_unsuspended",
+            Self::AdminRelayDrained => "admin.relay_drained",
+            Self::AdminSigningKeyRotated => "admin.signing_key_rotated",
+            Self::AdminLogin => "admin.login",
+            Self::AdminRecoveryUsed => "admin.recovery_used",
         }
     }
 }

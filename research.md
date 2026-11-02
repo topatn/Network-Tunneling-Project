@@ -854,6 +854,8 @@ both is a UI decision belonging to T-080, and is not decided here.
 | ADR-019 | The project owner is the sole administrator; admin is a **separate identity** (not a role on `users`); WebAuthn required, no TOTP fallback; short sessions plus step-up before destructive actions; recovery codes. **Separation of duties is absent and recorded as an accepted risk** | **Decided 2026-10-17** by the product owner | 2026-10-17 | [V] that this is the decision; [A] on all design reasoning, none of it tested |
 | ADR-020 | Error codes for the 19 authorization-matrix cells `contracts.md` §2 leaves unspecified: capability failures answer `forbidden` uniformly, visibility failures answer `not_found` uniformly | **Candidate — owner decision required** | raised 2026-10-18 | Medium. The governing rule ("identifiers are not confirmable") is stated by `contracts.md`; the per-cell split is a reading, and one cell is not settled by it. See `research.md` §6a |
 | ADR-021 | Unverified game facts (`evidence: reported`) gate default exposure: `enabled_by_default = !optional && evidence == Verified`, so Left 4 Dead ships exposing nothing by default | **Candidate — owner decision required** | raised 2026-10-18 | Medium. The rule is a direct reading of `GAME-006`, but *opt-in rather than excluded* is a product judgement. See `research.md` §6b |
+| ADR-022 | Two-tier connectivity model: **Free tier** uses local Tailscale Tailnet Node Share (`tailscale status --json` discovery + `gtt-engine` listener on the host's `100.64.0.0/10` Tailscale IP forwarding to `127.0.0.1:25565`, no control-plane allocation required); **Paid tier** uses GTT Managed Relay (`ADR-007` G2). Both tiers run the game server on the host's own PC (`NG-1` preserved) | **Decided 2026-10-27** by the product owner | 2026-10-27 | **[V]** that this is the owner's decision; implemented in `crates/engine/src/tailscale.rs` and verified in `crates/engine/tests/tailscale_node_share.rs` |
+| ADR-023 | Empirical performance targets and limits: connection establishment <= 100 ms, added latency <= 5 ms, TCP throughput >= 25 MB/s, UDP throughput >= 10,000 pkts/s, per-session queue <= 1 MB | **Decided 2026-11-02** | 2026-11-02 | High. Derived from empirical baseline measurements in `docs/benchmarks-t095.md` and verified in `tests/perf/run_benchmarks.py` |
 
 **ADR-016 was missing from this table on 2026-10-17** even though its full record existed 30 lines below it, and ADR-017 was present. Found while adding ADR-018. That is the same defect class ADR-016 was written about: a claim that exists in the document but is not represented where a reader would look. The summary table is now checked by `scripts/audit_traceability.py`, which was extended to require that every `### ADR-nnn` heading in §7 has a matching row above it — the same check that would have caught this.
 
@@ -1053,6 +1055,65 @@ Everything in the right-hand column is why this is recorded as an **accepted ris
 5. **The remaining exposure is technical, not legal.** `SRV-014` is satisfied; E-13 is not. CGNAT, shared NAT, and mobile address changes (all recorded in RQ-13.1b and `AS-12`) now sit on the critical path to a working guest join, where before they sat behind a licensing question.
 
 **Confidence.** `[V]` that this is the owner's decision — stated directly. `[A]` on the consequence analysis above, none of it tested.
+
+### ADR-022 — Two-tier connectivity model: Free-tier Tailscale Node Share and Paid-tier GTT Managed Relay
+
+**Status: Decided 2026-10-27 by the product owner.** Implemented in `crates/engine/src/tailscale.rs`, wired into `crates/engine/src/lifecycle.rs`, and verified in `crates/engine/tests/tailscale_node_share.rs`.
+
+**Context.** Running public relays incurs continuous egress bandwidth cost for the operator (`G-5`, `PERF-006`). The product owner decided on 2026-10-27 to offer a two-tier connectivity model while keeping game server provisioning and execution strictly on the host's own PC (`context.md` §6 `NG-1` preserved) and focusing the initial implementation on **Minecraft: Java Edition** (`ADR-013`).
+
+**Options considered and decided with the product owner (2026-10-27):**
+
+1. **Integration mechanism on the host PC:**
+   - **Chosen:** Use the host's installed Tailscale CLI (`tailscale status --json`), keep the managed or local Minecraft: Java Edition server bound to `127.0.0.1:25565` (`SRV-005`), and have `gtt-engine` bind a TCP forwarder on the host's `100.64.0.0/10` (RFC 6598) Tailscale IP (`100.x.y.z:25565`) so GTT's local probes (`T-072`) and `players_seen` tracking (`T-073`) continue to work identically across both modes.
+   - **Rejected:** Binding `server.properties` directly to the Tailscale IP (would bypass `gtt-engine` flow counting and target policy enforcement) or bundling a separate userspace `tailscaled` daemon in the first cut.
+2. **Tier boundary (`context.md` §§1, 6, 7):**
+   - **Free tier (Tailscale Node Share mode):** The host self-hosts on their PC and shares their Tailscale node with friends via Tailscale's Tailnet Node Sharing (`https://login.tailscale.com/admin/machines`). Guests accept the node share in Tailscale and connect with the stock Minecraft client to `100.x.y.z:25565` (or MagicDNS `hostname.tailnet.ts.net:25565`). Zero operator relay bandwidth is used.
+   - **Paid tier (GTT Managed Relay mode):** The host self-hosts on their PC and tunnels through GTT relays (`ADR-007` G2). Guests connect to a public `relay.host:public_port` address with zero client or VPN installation.
+3. **Control-plane independence:**
+   - **Chosen:** Tailscale Node Share mode runs purely locally in `gtt-engine` (`SessionConnectivityMode::TailscaleNodeShare`) without requiring a `gtt-control-plane` tunnel record or relay allocation token.
+
+**Security and privacy consequences (`GAME-002`, `GAME-008`, `SEC-006`, `SRV-005`, `PRIV-002`):**
+
+1. **Loopback isolation and default-off optional mappings (`GAME-002`, `GAME-008`, `SEC-006`):** `TailscaleNodeShareForwarder` binds listeners only for enabled TCP mappings in `ValidatedLocalTargetTable` (`game` on TCP 25565 for `minecraft-java`; `rcon` and `query` remain off by default).
+2. **OS-level node-share disclosure (`TAILSCALE_NODE_SHARE_SECURITY_NOTE`):** Because OS-level Tailscale node sharing shares the host's Tailscale network interface with the recipient's tailnet, `TailscaleNodeStatus` surfaces a mandatory security disclosure advising the host to restrict shared-node access to `tcp:25565` in Tailnet ACLs/Grants if other services on the PC listen on `0.0.0.0`.
+3. **No raw guest IP logging (`PRIV-002`, `INV-5`):** Peer Tailscale IPs are tracked only in a bounded in-memory set (`MAX_TAILSCALE_PEERS_TRACKED = 256`) to compute `distinct_sources` for `PlayersSeenSnapshot` and are never logged or persisted.
+
+**Confidence.** `[V]` on the owner's decision and the automated L1 Minecraft: Java Edition SLP forwarding test in `crates/engine/tests/tailscale_node_share.rs`.
+
+### ADR-023 — Empirical Performance Targets and Limits
+
+**Status: Decided 2026-11-02.** Derived from empirical baseline measurements in `docs/benchmarks-t095.md` and verified in `tests/perf/run_benchmarks.py` and `crates/engine/tests/perf_benchmarks.rs`.
+
+**Context.** `requirements.md` explicitly forbids unmeasured latency, throughput, capacity, or memory claims (`PERF-001`..`PERF-004`, `TEST-006`). Instead, reproducible baseline measurements must be taken before targets are recorded in `research.md` as an ADR. Following the completion of the `T-095` benchmark harness, empirical data was gathered across Windows x86_64 environments for loopback socket bridges and in-memory frame processing.
+
+**Empirical Baselines Measured (`docs/benchmarks-t095.md`):**
+1. **Connection Establishment (`PERF-004`):** State machine progression from `Idle -> Connecting -> Authenticating -> Active`, including cryptographic HMAC token validation and mapping negotiation across 500 samples:
+   - Median (p50): $2.1\text{ }\mu\text{s}$
+   - 95th Percentile (p95): $4.1\text{ }\mu\text{s}$
+   - Maximum: $282.1\text{ }\mu\text{s}$ ($< 0.3\text{ ms}$)
+2. **Relay-Added Forwarding Overhead (`PERF-001`):** End-to-end round trip time through relay framing, token bucket limiter, bounded session queue, and engine socket bridge:
+   - TCP (64-byte payload, 100 samples): p50 $= 17.7\text{ }\mu\text{s}$, p95 $= 35.8\text{ }\mu\text{s}$, Max $= 43.7\text{ }\mu\text{s}$
+   - UDP (512-byte payload, 200 samples): p50 $= 8.0\text{ }\mu\text{s}$, p95 $= 18.0\text{ }\mu\text{s}$, Max $= 57.4\text{ }\mu\text{s}$
+   - In-memory and loopback relay forwarding latency overhead is consistently $< 0.05\text{ ms}$.
+3. **Transport Throughput (`PERF-002`):**
+   - TCP single-stream bulk transfer (4 MB in 64 KB frames): $> 4,100\text{ MB/s}$ local loopback rate.
+   - UDP datagram burst (5,000 packets of 1,200 bytes): $> 2,800,000\text{ pkts/s}$ ($> 3,400\text{ MB/s}$).
+4. **Memory Footprint Bounds (`PERF-003`, `NET-006`):**
+   - Idle: 0 TCP flows, 0 UDP flows, 0 queued bytes.
+   - Full Saturation (64/64 TCP, 64/64 UDP): strictly bounded at $128.0\text{ KB}$ (131,072 bytes) by `GlobalRelayMemoryBudget`.
+
+**Decided Targets and Thresholds:**
+1. **Connection Establishment Budget (`PERF-004`): $\le 100\text{ ms}$ (p95).**
+   - *Rationale:* Local token validation and mapping negotiation take $< 0.3\text{ ms}$. The $100\text{ ms}$ budget accommodates typical WAN RTT during control-plane and relay connection handshakes over domestic consumer broadband.
+2. **Relay-Added Forwarding Latency (`PERF-001`): $\le 5\text{ ms}$ (p95).**
+   - *Rationale:* Relay processing overhead is measured at $< 0.05\text{ ms}$. A budget of $5\text{ ms}$ provides $100\times$ margin for OS scheduler delay, epoll wakeups, and cryptographic framing in production relay deployments while keeping game added ping imperceptible to players.
+3. **Transport Throughput (`PERF-002`): $\ge 25\text{ MB/s}$ TCP, $\ge 10,000\text{ pkts/s}$ UDP.**
+   - *Rationale:* Typical host residential upstream bandwidth is $20\text{–}200\text{ Mbps}$ ($\approx 2.5\text{–}25\text{ MB/s}$). A target of $25\text{ MB/s}$ ensures the relay pipeline is never the throughput bottleneck for large world transfers. For UDP game ticks ($20\text{–}60\text{ Hz}$ per client, $\approx 1,000\text{ pkts/s}$ for 16 players), $10,000\text{ pkts/s}$ provides a $10\times$ headroom for intense combat/tick bursts.
+4. **Memory and Flow Bounds (`PERF-003`, `NET-006`): $\le 1\text{ MB}$ queue reservation per session, $\le 30\text{ MB}$ engine idle RSS, $\le 75\text{ MB}$ engine active RSS.**
+   - *Rationale:* Bounded session queues prevent OOM attacks or bufferbloat under packet floods.
+
+**Confidence.** `[V]` on empirical measurements in `docs/benchmarks-t095.md`, verified continuously by `tests/perf/run_benchmarks.py` and `crates/engine/tests/perf_benchmarks.rs`.
 
 ## 8. Open experiments
 
