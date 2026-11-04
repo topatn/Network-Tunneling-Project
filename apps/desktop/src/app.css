@@ -34,6 +34,33 @@ code, pre, [data-ui] {
   outline-offset: 2px;
 }
 
+.skip-link {
+  position: absolute;
+  top: -48px;
+  left: 12px;
+  z-index: 2000;
+  padding: 8px 14px;
+  background-color: var(--primary);
+  color: var(--primary-ink);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--gtt-radius-control);
+  text-decoration: none;
+  transition: top 120ms ease;
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
 /* ============================================================================
  * 1. FRAMED-SHEET APP SHELL (app-screens.md §3.1)
  * One tinted L-shaped frame (--ground) holds the 228px sidebar and 48px topbar
@@ -1121,6 +1148,65 @@ code, pre, [data-ui] {
   padding: 8px 14px;
   font-size: 14px;
   font-weight: 500;
+}
+
+/* ============================================================================
+ * 8B. MANAGED SERVER 4TH INDICATOR & PROVISIONING STEPPER (T-088, SRV-006, SRV-011)
+ * ============================================================================ */
+.managed-status-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  padding: 12px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-card);
+  background-color: var(--surface);
+  align-items: center;
+}
+
+.provisioning-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.provisioning-step {
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-control);
+  padding: 10px 12px;
+  background-color: var(--subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.provisioning-step.is-active {
+  border-color: var(--accent);
+  background-color: var(--surface);
+}
+
+.provisioning-step.is-completed {
+  border-color: var(--positive);
+}
+
+.provisioning-step.is-failed {
+  border-color: var(--negative);
+  background-color: var(--pill-err-bg);
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background-color: var(--ground);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--accent);
+  transition: width 150ms ease;
 }
 
 /* ============================================================================

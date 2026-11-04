@@ -89,10 +89,13 @@ jobs:
         run: python scripts/audit_traceability.py
 
   contrast:
-    name: Design token contrast (UX-005)
+    name: Design token contrast & Desktop UI tests (T-080, T-082, T-083, T-084, T-085, T-086, T-088)
     # Added 2026-10-17 with scripts/check_contrast.py. Recomputes the DESIGN.md
     # section 3 table from the tokens in section 2, so an edited token or an
     # overstated ratio fails the build instead of rotting in the document.
+    # Extended 2026-11-04/05 to run Desktop UI shell, game selection/local config,
+    # three-layer tunnel dashboard, invitation sharing, error/troubleshooter,
+    # keyboard-only accessibility, and managed server screen test suites.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -100,7 +103,21 @@ jobs:
         with:
           python-version: "3.13"
       - name: Verify colour tokens and contrast claims
-        run: python scripts/check_contrast.py
+        run: python scripts/check_contrast.py --strict
+      - name: Run Desktop UI Shell and Token tests (T-080)
+        run: node apps/desktop/tests/ui_shell_test.js
+      - name: Run Game Selection and Local Config tests (T-082)
+        run: node apps/desktop/tests/game_selection_and_config_test.js
+      - name: Run Tunnel Dashboard Three-Layer Status tests (T-083)
+        run: node apps/desktop/tests/tunnel_dashboard_test.js
+      - name: Run Invitations and Sharing tests (T-084)
+        run: node apps/desktop/tests/invitations_and_sharing_test.js
+      - name: Run Error Catalog and Troubleshooter tests (T-085)
+        run: node apps/desktop/tests/errors_and_troubleshooting_test.js
+      - name: Run Accessibility and Keyboard-Only Flow tests (T-086)
+        run: node apps/desktop/tests/accessibility_test.js
+      - name: Run Managed Server Screens and 4th Indicator tests (T-088)
+        run: node apps/desktop/tests/managed_server_screens_test.js
 
   game-compat:
     name: Game compatibility L0/L1 automation (T-090)
@@ -289,6 +306,30 @@ jobs:
           python-version: "3.13"
       - name: Run Incident Response Tabletop Drill
         run: python scripts/incident_tabletop_exercise.py
+
+  packaging-and-updater:
+    name: Per-user installer, signed updater, rollback, and uninstaller (T-100 / T-101 / T-102)
+    # INST-001, INST-002, INST-003, INST-004, INST-005, SEC-012, SEC-014, SRV-010:
+    # Verify per-user installer (asInvoker), WebView2 runtime probe, signed updater tamper rejection,
+    # interrupted-update atomic rollback, and clean uninstallation on a standard Windows runner.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: packaging-and-updater-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Packaging, Signed Updater, Rollback, and Uninstall Staging Exercise
+        run: python scripts/verify_packaging_and_updater.py
 
   dependency-scan:
     name: Dependency scan (SEC-017)

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Game Session · Game Tunnel (G1)</title>
+  <link rel="stylesheet" href="src/tokens.css">
+  <link rel="stylesheet" href="src/app.css">
+</head>
+<body>
+  <main class="sheet" style="max-width: 760px; margin: 32px auto; border-radius: 16px;" aria-live="polite">
+    <div class="sheet-header">
+      <div class="sheet-header__titles">
+        <h1 class="sheet-title">Join Hosted Game Server</h1>
+        <p class="sheet-subtitle">
+          Enter or confirm your invitation secret to authorize your network address at the relay (<code data-ui>POST /v1/invitations/claim</code>).
+        </p>
+      </div>
+      <span id="guest-claim-badge" class="pill pill--info">Ready to Claim</span>
+    </div>
+
+    <form id="guest-claim-form" class="panel" novalidate>
+      <div class="field-group">
+        <label class="field-label" for="guest-secret-input">Invitation Secret</label>
+        <div class="copy-field-container">
+          <input type="text"
+                 id="guest-secret-input"
+                 class="field-input"
+                 style="flex: 1;"
+                 placeholder="gtt_inv_..."
+                 required />
+          <button type="submit" id="btn-submit-claim" class="gtt-btn gtt-btn-primary">
+            Claim Access
+          </button>
+        </div>
+        <div id="guest-claim-error" class="field-error-message" role="alert"></div>
+      </div>
+    </form>
+
+    <section id="guest-claim-result" class="panel" style="display: none;" aria-label="Connection details">
+      <div class="panel__head">
+        <h2 id="claim-game-title" class="panel__title">Minecraft: Java Edition</h2>
+        <span class="pill pill--ok">Source IP Admitted</span>
+      </div>
+      <div class="copy-field-container">
+        <input type="text" id="claim-public-address" class="copy-input" readonly value="fra1.relay.gtt.gg:25565" />
+        <button type="button" id="btn-guest-copy" class="gtt-btn gtt-btn-secondary">Copy Address</button>
+      </div>
+      <p id="claim-game-instruction" style="font-size: 14px; color: var(--text);"></p>
+      <div class="disclosure-callout" role="note">
+        <strong>Same-network requirement:</strong> Open this invitation link on the same network and device you will use to launch the game. If your game connects from a different IP address or IPv4/IPv6 family than the browser that claimed this link, the relay will refuse the unverified source address.
+      </div>
+    </section>
+  </main>
+</body>
+</html>

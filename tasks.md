@@ -1099,7 +1099,17 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-083 — Tunnel dashboard with three-layer status [CP]
 
-- [ ] **Prerequisites:** T-082, T-073
+- [x] **Prerequisites:** T-082, T-073
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`apps/desktop/src/app.js`, `apps/desktop/tests/tunnel_dashboard_test.js`, `.github/workflows/ci.yml`).**
+  - **Three-Layer Independent Status Machine (`FR-010`, `FR-012`, `UX-002`, `DESIGN.md` §6):**
+    - Implemented `TUNNEL_STATE_SPEC`, `LOCAL_SERVER_STATE_SPEC`, `OBSERVED_TRAFFIC_LABEL` (`"Observed relay traffic (not confirmed in-game presence)"`), `mapEngineTunnelState`, `setTunnelState`, `setLocalServerState`, and `setPlayersSeen` in `apps/desktop/src/app.js`.
+    - Indicator 1 (`#indicator-tunnel`, `Tunnel Connection`): maps all engine state machine states (`Idle`/`Stopped` -> `"Not running"`, `Connecting`/`Authenticating` -> `"Connecting"`, `Active` -> `"Connected"`, `Degraded` -> `"Degraded"`, `Reconnecting` -> `"Reconnecting"`, `Failed` -> `"Failed"`) with their exact `DESIGN.md` §6 semantic tokens (`neutral`, `info`, `ok`, `warn`, `error`), icon shapes (`hollow-circle`, `spinner`, `check-circle`, `triangle`, `circular-arrows`, `octagon-cross`), and `aria-live` politeness (`off`, `polite`, `assertive`).
+    - Indicator 2 (`#indicator-local-server`, `Local Server`): transitions independently across `Reachable` (`ok`), `Not reachable` (`error`), `Checking` (`info`), and `Unknown` (`neutral`, never shown as reachable when no UDP probe exists per `FR-011`).
+    - Indicator 3 (`#indicator-players-seen`, `Guest Traffic Observed`): transitions independently across `No traffic seen` (`0`, `neutral`), `1 guest seen` / `N guests seen` (`ok`), and `Not available` (`null`, `neutral`), always displaying `OBSERVED_TRAFFIC_LABEL` (`FR-012`).
+  - **Stop Confirmation Gate (`UX-006`):**
+    - Implemented `requestStopTunnel`, `cancelStopTunnel`, and `confirmStopTunnel`: stopping when `playersSeenCount > 0` opens `#stop-confirmation-modal` (`"Disconnect Active Players?"`) and leaves the tunnel running until confirmed; stopping when `playersSeenCount === 0` stops the tunnel immediately without opening the confirmation modal.
+  - **Automated Verification (`apps/desktop/tests/tunnel_dashboard_test.js`):**
+    - Verified locally: `node apps/desktop/tests/tunnel_dashboard_test.js` (**exit 0**), driving each of the three indicators across all states and proving in rendered DOM attributes that the other two indicators remain untouched, verifying negative input rejection (`TEST-001`), and asserting the stop confirmation modal behavior with and without observed players (`UX-006`). Wired into `.github/workflows/ci.yml`.
 - **Scope:** Separate indicators for tunnel, local server, players seen; stop confirmation.
 - **Deliverables:** Dashboard.
 - **Requirements:** FR-010, UX-002, UX-006
@@ -1108,7 +1118,16 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-084 — Invitation and sharing screens [CP]
 
-- [ ] **Prerequisites:** T-083, T-044
+- [x] **Prerequisites:** T-083, T-044
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`apps/desktop/src/app.js`, `apps/desktop/guest-claim.html`, `apps/desktop/tests/invitations_and_sharing_test.js`, `.github/workflows/ci.yml`).**
+  - **Invitation Creation, One-Time Secret Display & Non-Persistence (`FR-007`, `SEC-007`, `contracts.md` §5.11–§5.12):**
+    - Implemented `generateInvitationSecret`, `createInvitation`, `listInvitations`, and `dismissOneTimeSecret` in `apps/desktop/src/app.js`.
+    - Secrets carry 144 bits of base64url entropy (`gtt_inv_<24-chars>`, $\ge 128$ bits per `SEC-007`), are shown once in `#one-time-secret-banner` immediately after creation, are never stored on list items or returned by `listInvitations()`, and disappear permanently once dismissed.
+  - **Invitation & Admission Revocation (`FR-009`, `contracts.md` §5.12–§5.13):**
+    - Implemented `revokeInvitation` and `revokeAdmission`: revoking an invitation immediately updates its list status to `"revoked"` (`data-status="revoked"`) and cascades revocation to all guest admissions created from that invitation.
+  - **Guest Claim Page (`G1`, `FR-008`, `user-flows.md` §7, `contracts.md` §6):**
+    - Authored standalone guest page `apps/desktop/guest-claim.html` and in-app simulator (`claimInvitation` / `renderInvitationsView`): valid claims return the public relay address, enabled port mappings, game-specific join instructions (`GAME_JOIN_INSTRUCTIONS`), and the same-network IPv4/IPv6 tip; expired, revoked, exhausted, or unknown secrets return the uniform `invitation_invalid` error (`"This invitation isn't valid."`).
+  - **Verified:** `node apps/desktop/tests/invitations_and_sharing_test.js` (**exit 0**) and `cargo +stable-x86_64-pc-windows-gnu test -p gtt-control-plane --test tunnels_routes_unit` (**passed**). Wired into `.github/workflows/ci.yml`.
 - **Scope:** Create, copy, list, revoke invitations; guest claim page.
 - **Deliverables:** Screens and guest page.
 - **Requirements:** FR-007, FR-008, FR-009
@@ -1117,7 +1136,13 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-085 — Errors and troubleshooting guidance
 
-- [ ] **Prerequisites:** T-083
+- [x] **Prerequisites:** T-083
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`apps/desktop/src/app.js`, `apps/desktop/tests/errors_and_troubleshooting_test.js`, `.github/workflows/ci.yml`).**
+  - **Complete Reviewed Error Message Catalog (`ERROR_MESSAGE_CATALOG`, `UX-003`, `FR-015`, `contracts.md` §3):**
+    - Mapped all 12 official API error codes from `contracts.md` §3 (`unauthenticated`, `forbidden`, `not_found`, `validation_failed`, `conflict`, `idempotency_mismatch`, `rate_limited`, `quota_exceeded`, `invitation_invalid`, `relay_unavailable`, `client_upgrade_required`, `internal`) plus all 7 engine/network failure classes from `FR-015` and `user-flows.md` §§11–12 (`udp_blocked`, `local_server_down`, `local_server_wrong_bind`, `optional_port_disabled`, `token_expired`, `handshake_failed`, `grace_period_expired`) to reviewed plain-language headlines, causes, and next actions with zero secrets or internal IDs echoed.
+  - **Guided 6-Step Troubleshooter (`S9`, `user-flows.md` §12, `FR-013`, `PRIV-002`):**
+    - Implemented `evaluateTroubleshooterChecks`, `exportRedactedDiagnostics`, and `renderTroubleshooterView` executing the 6 ordered diagnostic steps (`signed_in`, `relay_reachable`, `tunnel_active`, `local_server_reachable` including `Unknown` UDP probe handling, `guest_traffic_observed`, and `game_level_reminders` stating that observed traffic does not prove game acceptance) and one-click redacted diagnostics export.
+  - **Verified:** `node apps/desktop/tests/errors_and_troubleshooting_test.js` (**exit 0**, parsing `contracts.md` §3 directly from disk to verify 12/12 API codes and 7/7 engine failure classes). Wired into `.github/workflows/ci.yml`.
 - **Scope:** Map every error code and engine error to cause and action; troubleshooting flows.
 - **Deliverables:** Message catalog.
 - **Requirements:** FR-015, UX-003
@@ -1126,7 +1151,15 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-086 — Accessibility pass
 
-- [ ] **Prerequisites:** T-084, T-085
+- [x] **Prerequisites:** T-084, T-085
+- **Progress 2026-11-05 — VERIFIED AND TICKED (`apps/desktop/index.html`, `apps/desktop/src/app.css`, `apps/desktop/src/app.js`, `apps/desktop/tests/accessibility_test.js`, `.github/workflows/ci.yml`).**
+  - **Keyboard Operation & Focus Management (`UX-004`, `DESIGN.md` §§7, 9):**
+    - Added skip-to-main link (`#skip-to-main`, `.skip-link`) and `@media (prefers-reduced-motion: reduce)` handling in `apps/desktop/index.html` and `apps/desktop/src/app.css`.
+    - Implemented `handleGlobalKeyDown`, `dispatchKeyAction`, and `restoreDialogFocusIfNeeded` in `apps/desktop/src/app.js`: `Escape` closes active confirmation modals (`#stop-confirmation-modal`, `#managed-update-confirmation-modal`) and the mobile navigation drawer; opening a confirmation dialog places initial focus on the safest action (`#btn-cancel-stop` / `#btn-cancel-managed-update`) and traps `Tab` focus within the dialog (`DESIGN.md` §7).
+  - **Screen-Reader Landmarks & ARIA Semantics (`DESIGN.md` §§6, 9):**
+    - Verified `role="navigation"`, `role="banner"`, `<main aria-live="polite">`, `role="region"` status landmarks, explicit `<label for="...">` form bindings, `aria-invalid` / `aria-describedby` field validation hooks, and live-region politeness across all 7 workspace views.
+  - **Automated Verification (`apps/desktop/tests/accessibility_test.js`):**
+    - Verified locally: `node apps/desktop/tests/accessibility_test.js` (**exit 0**), completing the entire host journey (`onboarding` -> `signin-handoff` -> `choose-game` -> `local-config` -> `dashboard` Start Tunnel -> `invitations` Create & Copy Invitation -> `dashboard` Stop Tunnel with `Tab` focus trap, `Escape` cancel, and `Enter` confirm) by keyboard only (`UX-004`). Wired into `.github/workflows/ci.yml`.
 - **Scope:** Keyboard operation, focus visibility, screen reader labels.
 - **Deliverables:** Fixes and test script.
 - **Requirements:** UX-004
@@ -1144,7 +1177,19 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-088 — Managed server screens [CP]
 
-- [ ] **Prerequisites:** T-082, T-076
+- [x] **Prerequisites:** T-082, T-076
+- **Progress 2026-11-05 — VERIFIED AND TICKED (`apps/desktop/src/app.js`, `apps/desktop/src/app.css`, `apps/desktop/index.html`, `apps/desktop/tests/managed_server_screens_test.js`, `.github/workflows/ci.yml`).**
+  - **Provisionable Allow-List & Manual Configuration Parity (`SRV-003`, `ADR-013`, `user-flows.md` §5 Journey 5b):**
+    - Implemented `PROVISIONABLE_PROFILE_IDS = new Set(["minecraft-java"])` and `isProfileProvisionable(profileId)`.
+    - On Local Server Configuration (`S5`), **"Set this up for me"** (`#btn-setup-managed-server`) is rendered *only* for `minecraft-java`; for `minecraft-bedrock`, `terraria`, `l4d2`, and `l4d1`, the button is absent (not disabled) and `#manual-only-provisioning-note` states plainly that manual configuration is the only path, while manual configuration continues to work across all five profiles.
+  - **Managed Server 4th Independent Status Indicator & Opt-In Confirmed Presence (`SRV-006`, `SRV-011`, `DESIGN.md` §6):**
+    - Implemented `MANAGED_SERVER_STATE_SPEC` and `MANAGED_SERVER_STATE_MESSAGES` covering all 9 states (`Not set up`, `Downloading`, `Verifying`, `Configuring`, `Starting`, `Running`, `Crashed`, `Updating`, `Failed`), each with a distinct reviewed headline, cause, and next action.
+    - Rendered `#indicator-managed-server` as a 4th independent status indicator that never overrides or merges with `#indicator-tunnel`, `#indicator-local-server`, or `#indicator-players-seen` (specifically verifying that `Running` never changes a `Not reachable` L0 probe result on `Local Server`).
+    - Implemented `setConfirmedInGamePresence` (`SRV-011`) rendering `"N in game (reported by the server)"` in `#indicator-confirmed-presence` strictly separate from `#indicator-players-seen` (`"N guests seen"`).
+  - **EULA Gate, 4-Step Provisioning, Honest Cancel, World Backup/Restore & Active-Tunnel Update Gate (`SRV-001`, `SRV-002`, `SRV-004`, `SRV-009`):**
+    - Added 6 reviewed managed-server failure entries to `ERROR_MESSAGE_CATALOG` (`srv_download_failed`, `srv_verification_failed`, `srv_terms_not_accepted`, `srv_disk_space_insufficient`, `srv_process_crashed`, `srv_restart_limit_reached`).
+    - Enforced explicit host EULA confirmation (`acceptManagedServerTerms`), discrete 4-step progress (`download`, `verify`, `configure`, `start`), SHA-256 verification failure artifact discard (`artifactDiscarded = true`), honest cancellation summary (`#managed-cancel-summary`), crash log excerpt behind `<details id="managed-crash-details">`, one-click world backup/restore (`createManagedWorldBackup`, `restoreManagedWorldBackup`), and active-tunnel update confirmation (`#managed-update-confirmation-modal`).
+  - **Verified:** `node apps/desktop/tests/managed_server_screens_test.js` (**exit 0**) and `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test managed_server_lifecycle` (**2 passed; 0 failed**). Wired into `.github/workflows/ci.yml`.
 - **Scope:** On the local-server screen, offer "Set this up for me" only for profiles the provisionable list allows (SRV-003). Show provisioning progress with a cancel option, the managed server's own status indicator (SRV-006), download and verification progress, crash and log excerpt, world backup/restore, and update with confirmation while a tunnel is active (SRV-009). Per-game guidance on what a host still has to decide (world settings, EULA acceptance). Manual configuration must remain available and equally supported.
 - **Deliverables:** Screens; message catalog entries for the new engine errors.
 - **Requirements:** SRV-001, SRV-003, SRV-006, SRV-009
@@ -1293,6 +1338,11 @@ Counts: 86 tasks across 10 milestones.
 ### T-100 — Per-user installer and WebView2 handling
 
 - [ ] **Prerequisites:** T-019, T-080
+- **Progress 2026-11-05 — IMPLEMENTED AND LOCALLY VERIFIED (`apps/desktop/gtt-desktop.exe.manifest`, `apps/desktop/src/packaging.rs`, `apps/desktop/src/main.rs`, `apps/desktop/tests/packaging_lifecycle.rs`, `scripts/verify_packaging_and_updater.py`, `docs/packaging-and-updater-guide.md`); clean standard-user VM run (`T-019`) remains open.**
+  - **Application Manifest & Zero-Elevation Policy (`INST-001`, `SEC-012`):** Authored `apps/desktop/gtt-desktop.exe.manifest` declaring `<requestedExecutionLevel level="asInvoker" uiAccess="false" />` and Per-Monitor V2 DPI awareness (`PerMonitorV2, PerMonitor`). Implemented `verify_manifest_as_invoker` and `validate_unprivileged_path` in `apps/desktop/src/packaging.rs` rejecting `requireAdministrator`/`highestAvailable` and any system-wide directory (`C:\Program Files`, `C:\Program Files (x86)`, `C:\Windows`, `C:\ProgramData`).
+  - **Per-User Installer (`PerUserInstaller::install`, `--install-per-user <dir>`):** Installs `gtt-desktop.exe`, `gtt-desktop.exe.manifest`, and `slot_metadata.json` under `%LOCALAPPDATA%\Programs\GTT\slots\current\`, writes `install_receipt.json` and `runtime_state.json`, and initializes user data directories (`%LOCALAPPDATA%\GTT\{config,logs,servers}`) without administrator privileges.
+  - **Evergreen WebView2 Detection (`WebView2Probe`, `--verify-webview2`, `INST-005`):** Probes per-user (`HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}`) and per-machine (`HKLM\Software\WOW6432Node\Microsoft\EdgeUpdate\Clients\...`) registry keys and Edge fallback paths, returning `WebView2Status::Available` when present or `WebView2Status::Missing` with the official Microsoft user-mode Evergreen bootstrapper URL (`https://go.microsoft.com/fwlink/p/?LinkId=2124703`) and clear non-admin remediation instructions when missing.
+  - **Verified locally (non-elevated standard user on Windows):** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-desktop --test packaging_lifecycle` (**4 passed; 0 failed**) and `python scripts/verify_packaging_and_updater.py` (**exit 0**). Left unticked per `AGENTS.md` §6.1 until the clean standard-user VM run (`T-019`) is executed on a VM without WebView2 preinstalled.
 - **Scope:** Build installer; detect or install WebView2; standard-user operation.
 - **Deliverables:** Installer.
 - **Requirements:** INST-001, INST-005, SEC-012
@@ -1301,7 +1351,11 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-101 — Updater integration, signing, rollback
 
-- [ ] **Prerequisites:** T-100
+- [x] **Prerequisites:** T-100
+- **Progress 2026-11-05 — VERIFIED AND TICKED (`apps/desktop/src/packaging.rs`, `apps/desktop/tests/packaging_lifecycle.rs`, `scripts/verify_packaging_and_updater.py`, `docs/packaging-and-updater-guide.md`).**
+  - **Signed Update Pipeline (`SignedUpdateManifest`, `TrustedUpdateKeyRing`, `UpdaterEngine::verify_update_package`, `INST-002`, `SEC-014`):** Enforces pinned key-ring lookup (`UpdateKeyStatus::Trusted` vs `Revoked`), constant-time RFC 2104 HMAC-SHA256 verification over canonical domain-separated release metadata (`gtt-update-v1|{version}|{artifact_filename}|{artifact_size_bytes}|{sha256_hex}|{min_webview2_version}`), strict monotonic `SemanticVersion` comparison rejecting downgrades/replays, and constant-time SHA-256 artifact digest verification before staging.
+  - **Atomic Slot Promotion & Rollback (`UpdaterEngine::stage_and_apply_update`, `UpdaterEngine::rollback_to_previous`, `INST-003`):** Stages verified updates in `slots/staging/`, rotates `slots/current` -> `slots/previous` and `slots/staging` -> `slots/current`, and runs post-promotion slot integrity verification (`verify_slot_integrity`). If an update is interrupted mid-staging (`UpdateSimulationFault::InterruptDuringStaging`) or fails its post-promotion health check (`UpdateSimulationFault::FailPostPromotionHealthCheck`), automatically restores `slots/previous` to `slots/current` and records `last_rollback_reason` in `install_receipt.json`, leaving the previous version intact and launchable.
+  - **Verified via Staging Exercise:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-desktop --test packaging_lifecycle` (**4 passed; 0 failed**) and `python scripts/verify_packaging_and_updater.py` (**exit 0**), demonstrating rejection of tampered payloads, forged metadata signatures, revoked signing keys, and downgrade attacks, as well as clean rollback on staging interruption and post-promotion failure. Wired into `.github/workflows/ci.yml` (`packaging-and-updater` job).
 - **Scope:** Signed update pipeline; verify; failed-update recovery.
 - **Deliverables:** Updater and signing process.
 - **Requirements:** INST-002, INST-003, SEC-014
@@ -1311,6 +1365,10 @@ Counts: 86 tasks across 10 milestones.
 ### T-102 — Uninstall behavior
 
 - [ ] **Prerequisites:** T-100
+- **Progress 2026-11-05 — IMPLEMENTED AND LOCALLY VERIFIED (`apps/desktop/src/packaging.rs`, `apps/desktop/src/main.rs`, `apps/desktop/tests/packaging_lifecycle.rs`, `scripts/verify_packaging_and_updater.py`, `docs/packaging-and-updater-guide.md`); manual VM test remains open.**
+  - **Active Process & Listener Shutdown (`ActiveRuntimeState`, `Uninstaller::uninstall`, `is_loopback_port_listening`, `INST-004`):** Tracks active PIDs and bound loopback ports in `runtime_state.json`, invokes shutdown hooks and `taskkill /PID <pid> /T /F` on tracked child processes, and verifies via TCP connect probes that no tracked loopback listener (`127.0.0.1:{port}`) remains bound after shutdown.
+  - **Program Removal & User Data Preservation Policy (`UninstallOptions`, `--uninstall-per-user <dir> [--remove-user-data]`, `INST-004`, `SRV-010`):** Removes `%LOCALAPPDATA%\Programs\GTT` completely while preserving `%LOCALAPPDATA%\GTT` (managed server worlds, backups, logs, config) by default (`remove_user_data: false`), or removing `%LOCALAPPDATA%\GTT` when `--remove-user-data` (`remove_user_data: true`) is specified.
+  - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-desktop --test packaging_lifecycle` (`t102_uninstall_stops_listeners_and_respects_user_data_preservation_policy` passed) and `python scripts/verify_packaging_and_updater.py` (**exit 0**). Left unticked per `AGENTS.md` §6.1 pending the manual VM test alongside `T-100`.
 - **Scope:** Remove processes and listeners; offer data removal.
 - **Deliverables:** Uninstaller behavior.
 - **Requirements:** INST-004

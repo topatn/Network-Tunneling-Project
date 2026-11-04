@@ -1,31 +1,140 @@
 //! Standalone native Windows desktop application executable for Game Tunnel Tooling (GTT)
-//! (`T-080`, `T-081`, `T-100`, `ADR-005`, `DESIGN.md`).
+//! (`T-080`, `T-081`, `T-100`, `T-101`, `T-102`, `ADR-005`, `DESIGN.md`).
 //!
-//! Embeds all frontend assets (HTML, tokens.css, app.css, app.js) into the binary,
-//! hosts an in-memory loopback HTTP server on `127.0.0.1`, and launches the native
-//! standalone application window in WebView2/Edge app mode.
+//! Embeds all frontend assets (HTML, tokens.css, app.css, app.js) and the Windows `asInvoker`
+//! application manifest into the binary, provides CLI entrypoints for per-user installation,
+//! WebView2 runtime detection, startup self-checks, and clean uninstallation, and hosts an
+//! in-memory loopback HTTP server on `127.0.0.1` for the standalone WebView2/Edge window.
 
 use std::env;
+use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, ExitCode};
 use std::thread;
 use std::time::Duration;
+
+use gtt_desktop::packaging::{
+    verify_manifest_as_invoker, PerUserInstaller, PerUserPaths, UninstallOptions, Uninstaller,
+    WebView2Probe, APPLICATION_MANIFEST_XML,
+};
 
 const INDEX_HTML: &str = include_str!("../index.html");
 const TOKENS_CSS: &str = include_str!("tokens.css");
 const APP_CSS: &str = include_str!("app.css");
 const APP_JS: &str = include_str!("app.js");
 
-fn main() {
-    let args: Vec<String> = env::args().collect();
-    let no_open = args.iter().any(|a| a == "--no-open");
-    let target_port: Option<u16> = args
-        .windows(2)
-        .find(|w| w.first().map(|s| s.as_str()) == Some("--port"))
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find(|w| w.first().map(String::as_str) == Some(flag))
         .and_then(|w| w.get(1))
-        .and_then(|p| p.parse().ok());
+        .map(String::as_str)
+}
+
+fn main() -> ExitCode {
+    let args: Vec<String> = env::args().collect();
+
+    // 1. `--self-check`: verify embedded assets + `asInvoker` manifest policy (`T-100`, `T-101`).
+    if args.iter().any(|a| a == "--self-check") {
+        if let Err(e) = verify_manifest_as_invoker(APPLICATION_MANIFEST_XML) {
+            eprintln!("[ERROR] Self-check failed: {e}");
+            return ExitCode::FAILURE;
+        }
+        if INDEX_HTML.is_empty() || TOKENS_CSS.is_empty() || APP_CSS.is_empty() || APP_JS.is_empty()
+        {
+            eprintln!("[ERROR] Self-check failed: embedded UI assets are empty");
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "{{\"status\":\"ok\",\"version\":{:?},\"execution_level\":\"asInvoker\"}}",
+            env!("CARGO_PKG_VERSION")
+        );
+        return ExitCode::SUCCESS;
+    }
+
+    // 2. `--verify-webview2`: probe Evergreen WebView2 runtime status (`T-100`, `INST-005`).
+    if args.iter().any(|a| a == "--verify-webview2") {
+        let probe = WebView2Probe::from_host_system();
+        let status = probe.evaluate();
+        match serde_json::to_string_pretty(&status) {
+            Ok(json) => {
+                println!("{json}");
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Failed to serialize WebView2 status: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    // 3. `--install-per-user <localappdata_dir> [--version <ver>]`: install per-user (`T-100`, `INST-001`, `SEC-012`).
+    if let Some(base_dir) = flag_value(&args, "--install-per-user") {
+        let version = flag_value(&args, "--version").unwrap_or("0.1.0");
+        let paths = match PerUserPaths::from_local_app_data(Path::new(base_dir)) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[ERROR] Invalid per-user install path: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let current_exe = match env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[ERROR] Could not resolve current executable path: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let binary_bytes = match fs::read(&current_exe) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[ERROR] Could not read current executable bytes: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let probe = WebView2Probe::from_host_system();
+        match PerUserInstaller::install(&paths, version, &binary_bytes, &probe) {
+            Ok(receipt) => {
+                if let Ok(json) = serde_json::to_string_pretty(&receipt) {
+                    println!("{json}");
+                }
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Per-user installation failed: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    // 4. `--uninstall-per-user <localappdata_dir> [--remove-user-data]` (`T-102`, `INST-004`, `SRV-010`).
+    if let Some(base_dir) = flag_value(&args, "--uninstall-per-user") {
+        let remove_user_data = args.iter().any(|a| a == "--remove-user-data");
+        let paths = match PerUserPaths::from_local_app_data(Path::new(base_dir)) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[ERROR] Invalid per-user uninstall path: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let options = UninstallOptions { remove_user_data };
+        match Uninstaller::uninstall(&paths, options, |_| {}) {
+            Ok(report) => {
+                if let Ok(json) = serde_json::to_string_pretty(&report) {
+                    println!("{json}");
+                }
+                return ExitCode::SUCCESS;
+            }
+            Err(e) => {
+                eprintln!("[ERROR] Per-user uninstallation failed: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    let no_open = args.iter().any(|a| a == "--no-open");
+    let target_port: Option<u16> = flag_value(&args, "--port").and_then(|p| p.parse().ok());
 
     // Bind loopback listener (try target port, then 5173..=5180, then auto-assigned 0)
     let listener = match target_port {
@@ -33,7 +142,7 @@ fn main() {
             Ok(l) => l,
             Err(e) => {
                 eprintln!("[ERROR] Could not bind to requested port {p}: {e}");
-                return;
+                return ExitCode::FAILURE;
             }
         },
         None => {
@@ -50,7 +159,7 @@ fn main() {
                     Ok(l) => l,
                     Err(e) => {
                         eprintln!("[ERROR] Could not bind loopback listener: {e}");
-                        return;
+                        return ExitCode::FAILURE;
                     }
                 },
             }
@@ -61,7 +170,7 @@ fn main() {
         Ok(addr) => addr,
         Err(e) => {
             eprintln!("[ERROR] Could not get local address: {e}");
-            return;
+            return ExitCode::FAILURE;
         }
     };
 
@@ -95,6 +204,8 @@ fn main() {
             }
         }
     }
+
+    ExitCode::SUCCESS
 }
 
 fn handle_connection(mut stream: TcpStream) {
@@ -157,7 +268,7 @@ fn launch_window(url: &str) {
         .map(|p| Path::new(&p).join("GTT").join("webview-profile"))
         .unwrap_or_else(|_| env::temp_dir().join("gtt-webview-profile"));
 
-    let _ = std::fs::create_dir_all(&user_data_dir);
+    let _ = fs::create_dir_all(&user_data_dir);
     let user_data_arg = format!("--user-data-dir={}", user_data_dir.display());
 
     for path in edge_paths {

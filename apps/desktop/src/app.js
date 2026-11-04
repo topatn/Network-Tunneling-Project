@@ -231,8 +231,9 @@ function createInitialMappingConfigs(profile) {
 
 // App State - defaults to "dashboard" so the landing screen is the working tool
 const state = {
-  currentView: "dashboard", // "dashboard" | "choose-game" | "local-config" | "onboarding" | "signin-handoff"
+  currentView: "dashboard", // "dashboard" | "choose-game" | "local-config" | "invitations" | "troubleshooter" | "onboarding" | "signin-handoff"
   theme: localStorage.getItem("gtt-theme") || "system",
+  isSignedIn: true,
   selectedProfile: SHIPPED_PROFILES[0],
   mappingConfigs: createInitialMappingConfigs(SHIPPED_PROFILES[0]),
   validationErrors: {},
@@ -240,14 +241,743 @@ const state = {
     game: { status: "reachable", latencyMs: 1 },
   },
   // 3-Part Status Machine (FR-010, UX-002)
-  tunnelState: "Connected", // "Not running" | "Connecting" | "Connected"
-  localServerState: "Reachable", // "Reachable" | "Not reachable"
+  tunnelState: "Connected", // "Not running" | "Connecting" | "Connected" | "Degraded" | "Reconnecting" | "Failed"
+  localServerState: "Reachable", // "Reachable" | "Not reachable" | "Checking" | "Unknown"
   playersSeenCount: ACTIVE_GUEST_FLOWS.length,
   publicAddress: "fra1.relay.gtt.gg:25565",
   isStopModalOpen: false,
   chartMetric: "throughput", // "throughput" | "rtt"
   filterQuery: "",
+  // T-084: Invitations & Guest Admissions (FR-007, FR-008, FR-009, SEC-007)
+  // Note: Invitation list NEVER stores plaintext secrets (contracts.md §5.12)
+  invitations: [
+    {
+      id: "inv_01J9K7M1",
+      createdAt: "13:30:00 UTC",
+      expiresAt: "15:30:00 UTC",
+      expiresInSeconds: 7200,
+      maxClaims: 4,
+      claimCount: 2,
+      status: "active", // "active" | "revoked" | "expired" | "exhausted"
+    },
+    {
+      id: "inv_01J9K8B4",
+      createdAt: "13:50:00 UTC",
+      expiresAt: "14:50:00 UTC",
+      expiresInSeconds: 3600,
+      maxClaims: 2,
+      claimCount: 1,
+      status: "active",
+    },
+  ],
+  oneTimeInvitationBanner: null, // { invitationId, secret, claimUrl } — shown once at creation, never stored in list
+  guestAdmissions: [
+    {
+      id: "adm_01J9K8A2",
+      invitationId: "inv_01J9K7M1",
+      guestSubnet: "73.162.48.0/24",
+      admittedAt: "13:39:42 UTC",
+      admittedUntil: "15:30:00 UTC",
+      status: "active", // "active" | "revoked"
+    },
+    {
+      id: "adm_01J9K8F9",
+      invitationId: "inv_01J9K7M1",
+      guestSubnet: "86.14.119.0/24",
+      admittedAt: "13:46:04 UTC",
+      admittedUntil: "15:30:00 UTC",
+      status: "active",
+    },
+    {
+      id: "adm_01J9K9C4",
+      invitationId: "inv_01J9K8B4",
+      guestSubnet: "174.91.204.0/24",
+      admittedAt: "14:02:17 UTC",
+      admittedUntil: "14:50:00 UTC",
+      status: "active",
+    },
+  ],
+  guestClaimPreviewResult: null,
+  // T-085: Active error code selected in troubleshooter / banner (FR-015, UX-003)
+  selectedErrorCode: "relay_unavailable",
+  lastDiagnosticsExport: null,
+  // T-086: Accessibility focus tracking (UX-004, DESIGN.md §7 & §9)
+  activeFocusedElementId: null,
+  // T-088: Managed Server Lifecycle & Provisioning State (SRV-001..SRV-011, DESIGN.md §6 & §8)
+  isManagedUpdateModalOpen: false,
+  pendingManagedUpdateVersion: null,
+  managedServer: {
+    profileId: "minecraft-java",
+    state: "Not set up", // "Not set up" | "Downloading" | "Verifying" | "Configuring" | "Starting" | "Running" | "Crashed" | "Updating" | "Failed"
+    termsAccepted: false,
+    eulaUrl: "https://aka.ms/MinecraftEULA",
+    currentVersion: "1.21.1",
+    availableUpdateVersion: "1.21.3",
+    listenAddress: "127.0.0.1:25565",
+    progressPercent: 0,
+    activeStep: null, // "download" | "verify" | "configure" | "start" | null
+    stepStatuses: {
+      download: "pending",
+      verify: "pending",
+      configure: "pending",
+      start: "pending",
+    },
+    cancelSummary: null,
+    failureCode: null,
+    restartAttempt: 0,
+    maxRestartAttempts: 3,
+    artifactVerified: false,
+    artifactDiscarded: false,
+    crashLogExcerpt:
+      "[14:21:09] [Server thread/ERROR]: Encountered an unexpected exception\njava.lang.OutOfMemoryError: Java heap space\n  at net.minecraft.server.MinecraftServer.runServer(MinecraftServer.java:682)",
+    generatedConfig: {
+      serverIp: "127.0.0.1",
+      serverPort: 25565,
+      onlineMode: true,
+      enableRcon: false,
+      enableQuery: false,
+      whiteList: true,
+      motd: "GTT Managed Minecraft Server",
+    },
+    confirmedInGameCount: null, // SRV-011: null when Server Management Protocol is off; integer when on
+    serverManagementProtocolEnabled: false,
+    backups: [
+      {
+        id: "bkp_01J9K5A0",
+        label: "Pre-session world snapshot",
+        version: "1.21.1",
+        createdAt: "13:15:00 UTC",
+        sizeMb: 48.4,
+      },
+    ],
+    lastRestoredBackupId: null,
+  },
 };
+
+// Per-game join instructions shown on Guest Claim Page G1 (user-flows.md §7)
+const GAME_JOIN_INSTRUCTIONS = {
+  "minecraft-java": "Open Minecraft: Java Edition -> Multiplayer -> Direct Connection and paste the public address.",
+  "minecraft-bedrock": "Open Minecraft: Bedrock Edition (Windows PC) -> Play -> Servers -> Add Server with the host and port.",
+  terraria: "Open Terraria -> Multiplayer -> Join via IP and enter the public host and port.",
+  l4d2: "Open Left 4 Dead 2 developer console (~) and run: connect <host:port>",
+  l4d1: "Open Left 4 Dead developer console (~) and run: connect <host:port>",
+};
+
+// In-memory server-side simulation vault mapping issued secret -> invitationId (never exposed in list responses)
+const invitationSecretVault = new Map();
+let invitationSeqCounter = 100;
+
+// Generates >= 128-bit entropy base64url invitation secret (24 base64url chars = 144 bits, SEC-007)
+function generateInvitationSecret() {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  let token = "gtt_inv_";
+  for (let i = 0; i < 24; i++) {
+    const idx = Math.floor(Math.random() * alphabet.length);
+    token += alphabet[idx];
+  }
+  return token;
+}
+
+// POST /v1/tunnels/{id}/invitations (FR-007, SEC-007, contracts.md §5.11)
+function createInvitation(options = {}) {
+  const expiresInSeconds = Number(options.expiresInSeconds ?? 3600);
+  const maxClaims = Number(options.maxClaims ?? 4);
+
+  if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 604800) {
+    return {
+      ok: false,
+      error: {
+        code: "validation_failed",
+        message: "Expiry must be between 60 seconds (1 minute) and 604800 seconds (7 days).",
+      },
+    };
+  }
+
+  if (!Number.isInteger(maxClaims) || maxClaims < 1 || maxClaims > 32) {
+    return {
+      ok: false,
+      error: {
+        code: "validation_failed",
+        message: "Maximum claims must be an integer between 1 and 32.",
+      },
+    };
+  }
+
+  if (state.tunnelState === "Failed") {
+    return {
+      ok: false,
+      error: {
+        code: "conflict",
+        message: "Cannot create an invitation while the tunnel is in Failed state.",
+      },
+    };
+  }
+
+  invitationSeqCounter += 1;
+  const invId = `inv_01J9K9_${invitationSeqCounter}`;
+  const secret = generateInvitationSecret();
+
+  // Stored list record NEVER includes the secret field (FR-007, contracts.md §5.12)
+  const record = {
+    id: invId,
+    createdAt: "14:22:15 UTC",
+    expiresAt: `in ${Math.round(expiresInSeconds / 60)}m`,
+    expiresInSeconds,
+    maxClaims,
+    claimCount: 0,
+    status: "active",
+  };
+
+  state.invitations.unshift(record);
+  invitationSecretVault.set(secret, invId);
+
+  const claimUrl = `https://join.gtt.gg/i#${secret}`;
+  state.oneTimeInvitationBanner = {
+    invitationId: invId,
+    secret,
+    claimUrl,
+  };
+
+  render();
+  return {
+    ok: true,
+    invitation: { ...record },
+    oneTimeSecret: secret,
+    claimUrl,
+  };
+}
+
+// GET /v1/tunnels/{id}/invitations — never returns secrets (FR-007, contracts.md §5.12)
+function listInvitations() {
+  return state.invitations.map((inv) => {
+    const copy = { ...inv };
+    delete copy.secret;
+    return copy;
+  });
+}
+
+function dismissOneTimeSecret() {
+  state.oneTimeInvitationBanner = null;
+  render();
+}
+
+// DELETE /v1/invitations/{id} — revokes invitation and cascades to its admissions (FR-009, contracts.md §5.12)
+function revokeInvitation(invitationId) {
+  const target = state.invitations.find((inv) => inv.id === invitationId);
+  if (!target) {
+    return {
+      ok: false,
+      error: { code: "not_found", message: "Invitation not found." },
+    };
+  }
+
+  target.status = "revoked";
+  target.revokedAt = "14:24:00 UTC";
+
+  // Cascade revocation to any guest admissions created by this invitation
+  state.guestAdmissions.forEach((adm) => {
+    if (adm.invitationId === invitationId) {
+      adm.status = "revoked";
+    }
+  });
+
+  if (state.oneTimeInvitationBanner && state.oneTimeInvitationBanner.invitationId === invitationId) {
+    state.oneTimeInvitationBanner = null;
+  }
+
+  render();
+  return { ok: true, invitation: { ...target } };
+}
+
+// DELETE /v1/admissions/{id} (FR-009, contracts.md §5.13)
+function revokeAdmission(admissionId) {
+  const adm = state.guestAdmissions.find((a) => a.id === admissionId);
+  if (!adm) {
+    return {
+      ok: false,
+      error: { code: "not_found", message: "Admission not found." },
+    };
+  }
+  adm.status = "revoked";
+  render();
+  return { ok: true, admission: { ...adm } };
+}
+
+// POST /v1/invitations/claim — Guest claim endpoint (FR-008, contracts.md §6, user-flows.md §7)
+// Expired, revoked, exhausted, or unknown secrets all return "invitation_invalid" so a guesser learns nothing.
+function claimInvitation(secret, observedGuestSubnet = "198.51.100.0/24") {
+  const cleanSecret = String(secret || "").trim();
+  const invId = invitationSecretVault.get(cleanSecret);
+  if (!invId) {
+    const errResp = {
+      ok: false,
+      error: {
+        code: "invitation_invalid",
+        message: "This invitation isn't valid.",
+      },
+    };
+    state.guestClaimPreviewResult = errResp;
+    render();
+    return errResp;
+  }
+
+  const inv = state.invitations.find((i) => i.id === invId);
+  if (!inv || inv.status !== "active" || inv.claimCount >= inv.maxClaims) {
+    if (inv && inv.status === "active" && inv.claimCount >= inv.maxClaims) {
+      inv.status = "exhausted";
+    }
+    const errResp = {
+      ok: false,
+      error: {
+        code: "invitation_invalid",
+        message: "This invitation isn't valid.",
+      },
+    };
+    state.guestClaimPreviewResult = errResp;
+    render();
+    return errResp;
+  }
+
+  inv.claimCount += 1;
+  if (inv.claimCount >= inv.maxClaims) {
+    inv.status = "exhausted";
+  }
+
+  const admission = {
+    id: `adm_01J9K9_${invitationSeqCounter + inv.claimCount}`,
+    invitationId: inv.id,
+    guestSubnet: observedGuestSubnet,
+    admittedAt: "14:23:10 UTC",
+    admittedUntil: inv.expiresAt,
+    status: "active",
+  };
+  state.guestAdmissions.unshift(admission);
+
+  const enabledMappings = state.selectedProfile.mappings
+    .filter((m) => state.mappingConfigs[m.key]?.enabled)
+    .map((m) => ({
+      mapping_key: m.key,
+      protocol: m.protocol,
+      public_port: state.mappingConfigs[m.key]?.port || m.defaultPort,
+    }));
+
+  const successResp = {
+    ok: true,
+    data: {
+      invitation_id: inv.id,
+      admission_id: admission.id,
+      game_profile_id: state.selectedProfile.id,
+      game_name: state.selectedProfile.name,
+      public_address: state.publicAddress,
+      mappings: enabledMappings,
+      instruction: GAME_JOIN_INSTRUCTIONS[state.selectedProfile.id] || GAME_JOIN_INSTRUCTIONS["minecraft-java"],
+      admitted_until: inv.expiresAt,
+      network_mismatch_tip:
+        "Open this invitation link on the same network and device you will use to launch the game.",
+    },
+  };
+  state.guestClaimPreviewResult = successResp;
+  render();
+  return successResp;
+}
+
+// ============================================================================
+// T-085: Error Message Catalog & Guided Troubleshooter (FR-015, UX-003, contracts.md §3)
+// Every code in contracts.md §3 and every engine failure class maps to a reviewed
+// plain-language cause and next action. Never echoes secrets or internal IDs.
+// ============================================================================
+const REQUIRED_CONTRACT_ERROR_CODES = [
+  "unauthenticated",
+  "forbidden",
+  "not_found",
+  "validation_failed",
+  "conflict",
+  "idempotency_mismatch",
+  "rate_limited",
+  "quota_exceeded",
+  "invitation_invalid",
+  "relay_unavailable",
+  "client_upgrade_required",
+  "internal",
+];
+
+const REQUIRED_ENGINE_FAILURE_CLASSES = [
+  "udp_blocked",
+  "local_server_down",
+  "local_server_wrong_bind",
+  "optional_port_disabled",
+  "token_expired",
+  "handshake_failed",
+  "grace_period_expired",
+  "srv_download_failed",
+  "srv_verification_failed",
+  "srv_terms_not_accepted",
+  "srv_disk_space_insufficient",
+  "srv_process_crashed",
+  "srv_restart_limit_reached",
+];
+
+const MANAGED_SERVER_FAILURE_CODES = [
+  "srv_download_failed",
+  "srv_verification_failed",
+  "srv_terms_not_accepted",
+  "srv_disk_space_insufficient",
+  "srv_process_crashed",
+  "srv_restart_limit_reached",
+];
+
+const ERROR_MESSAGE_CATALOG = {
+  // 12 Official Contract Error Codes (contracts.md §3)
+  unauthenticated: {
+    code: "unauthenticated",
+    category: "api",
+    httpStatus: 401,
+    title: "Sign-in required or session expired",
+    cause: "Your sign-in session has expired or was signed out on another device.",
+    action: "Sign in again through your system web browser to continue hosting.",
+    actionLabel: "Sign In Again",
+  },
+  forbidden: {
+    code: "forbidden",
+    category: "api",
+    httpStatus: 403,
+    title: "This account can't create or run tunnels",
+    cause: "Your account is currently suspended or restricted from starting relay sessions.",
+    action: "Contact support with your request ID if you believe this restriction was applied in error.",
+    actionLabel: "Contact Support",
+  },
+  not_found: {
+    code: "not_found",
+    category: "api",
+    httpStatus: 404,
+    title: "Tunnel or invitation no longer exists",
+    cause: "The requested tunnel, invitation, or admission was stopped, deleted, or belongs to another account.",
+    action: "Refresh your tunnel list or create a new tunnel from the Choose Game screen.",
+    actionLabel: "Refresh Workspace",
+  },
+  validation_failed: {
+    code: "validation_failed",
+    category: "api",
+    httpStatus: 400,
+    title: "Configuration settings need attention",
+    cause: "One or more fields (such as port range, host address, or invitation expiry) did not pass validation.",
+    action: "Review the highlighted fields, enter a valid port (1–65535) or loopback address (127.0.0.1), and save again.",
+    actionLabel: "Review Fields",
+  },
+  conflict: {
+    code: "conflict",
+    category: "api",
+    httpStatus: 409,
+    title: "Action conflicts with current tunnel state",
+    cause: "The tunnel is already stopping, stopped, or in a state that does not allow this operation right now.",
+    action: "Wait for the current state transition to finish, or start a fresh tunnel session.",
+    actionLabel: "Reload Tunnel State",
+  },
+  idempotency_mismatch: {
+    code: "idempotency_mismatch",
+    category: "api",
+    httpStatus: 422,
+    title: "Duplicate request had different settings",
+    cause: "A retry reused an existing operation key while changing the tunnel or invitation parameters.",
+    action: "Submit the action again as a new request without modifying settings mid-flight.",
+    actionLabel: "Retry Clean Request",
+  },
+  rate_limited: {
+    code: "rate_limited",
+    category: "api",
+    httpStatus: 429,
+    title: "Too many requests in a short time",
+    cause: "You or a guest sent requests faster than the rate limit allows.",
+    action: "Wait a moment for the cooldown timer (Retry-After) to finish, then try again.",
+    actionLabel: "Wait & Retry",
+  },
+  quota_exceeded: {
+    code: "quota_exceeded",
+    category: "api",
+    httpStatus: 403,
+    title: "You've reached your active tunnel or data limit",
+    cause: "Your account has reached its maximum concurrent tunnels or monthly relay egress allowance.",
+    action: "Stop an existing active tunnel or wait for your quota cycle to reset before starting another.",
+    actionLabel: "Manage Active Tunnels",
+  },
+  invitation_invalid: {
+    code: "invitation_invalid",
+    category: "api",
+    httpStatus: 400,
+    title: "This invitation isn't valid",
+    cause: "The invitation link has expired, was revoked by the host, reached its maximum claims, or was mistyped.",
+    action: "Ask the host to generate and share a fresh invitation link.",
+    actionLabel: "Create New Invitation",
+  },
+  relay_unavailable: {
+    code: "relay_unavailable",
+    category: "api",
+    httpStatus: 503,
+    title: "We can't reach a connection server right now",
+    cause: "No healthy relay server with available port capacity is reachable in your region.",
+    action: "Click Retry to request another relay allocation, or check service status if the outage persists.",
+    actionLabel: "Retry Connection",
+  },
+  client_upgrade_required: {
+    code: "client_upgrade_required",
+    category: "api",
+    httpStatus: 426,
+    title: "App update required to connect",
+    cause: "This version of the desktop app is older than the minimum protocol version supported by the relay.",
+    action: "Download and verify the latest signed release, then restart the app.",
+    actionLabel: "Check for Updates",
+  },
+  internal: {
+    code: "internal",
+    category: "api",
+    httpStatus: 500,
+    title: "Something went wrong on our side",
+    cause: "The control plane encountered an unexpected server error while processing your request.",
+    action: "Try the action again in a few seconds. If it continues, export a redacted diagnostics bundle for support.",
+    actionLabel: "Export Diagnostics",
+  },
+
+  // 7 Engine & Network Failure Classes (FR-015, user-flows.md §§11–12)
+  udp_blocked: {
+    code: "udp_blocked",
+    category: "engine",
+    httpStatus: null,
+    title: "Your network is blocking outbound UDP traffic",
+    cause: "A local firewall, campus network, or router blocked the outbound QUIC/UDP connection to the relay.",
+    action: "Allow outbound UDP port 4433 in Windows Defender Firewall, or switch to a less restrictive network.",
+    actionLabel: "Run Troubleshooter",
+  },
+  local_server_down: {
+    code: "local_server_down",
+    category: "engine",
+    httpStatus: null,
+    title: "Nothing is answering at your local server port",
+    cause: "The L0 probe could not connect to your configured local game server address and port.",
+    action: "Start your dedicated game server first, verify its port matches Configure Server, and click Check Again.",
+    actionLabel: "Check Server Again",
+  },
+  local_server_wrong_bind: {
+    code: "local_server_wrong_bind",
+    category: "engine",
+    httpStatus: null,
+    title: "Game server may be listening on a different address",
+    cause: "Loopback (127.0.0.1) refused the connection because the game server is bound to a specific LAN interface.",
+    action: "Set server-ip to blank/127.0.0.1 in your game server config, or update Local Host Address and confirm.",
+    actionLabel: "Edit Local Target",
+  },
+  optional_port_disabled: {
+    code: "optional_port_disabled",
+    category: "engine",
+    httpStatus: null,
+    title: "Optional Query or RCON port is off by default",
+    cause: "Optional administrative and status ports (RCON, Query, SourceTV) stay disabled by default for security (GAME-008).",
+    action: "Open Configure Server and explicitly enable the optional mapping only if you intend to expose it.",
+    actionLabel: "Configure Mappings",
+  },
+  token_expired: {
+    code: "token_expired",
+    category: "engine",
+    httpStatus: null,
+    title: "Relay allocation token expired",
+    cause: "The short-lived allocation token expired while your computer was asleep or disconnected from the network.",
+    action: "Click Start Tunnel to request a fresh allocation token and reconnect.",
+    actionLabel: "Reconnect Tunnel",
+  },
+  handshake_failed: {
+    code: "handshake_failed",
+    category: "engine",
+    httpStatus: null,
+    title: "Encrypted relay handshake timed out",
+    cause: "The TLS 1.3 / QUIC handshake with the relay did not complete within the connection timeout.",
+    action: "Check your internet connection and system clock accuracy, then click Retry.",
+    actionLabel: "Retry Handshake",
+  },
+  grace_period_expired: {
+    code: "grace_period_expired",
+    category: "engine",
+    httpStatus: null,
+    title: "Network interruption exceeded the reconnect window",
+    cause: "Your connection was offline longer than the 30-second relay grace period, so the public port reservation was released.",
+    action: "Start the tunnel again and share the new public address with your guests if the port changed.",
+    actionLabel: "Start Tunnel Again",
+  },
+
+  // 6 Managed Server Engine Failure Codes (T-088, SRV-001, SRV-002, SRV-006, user-flows.md §5 step 6)
+  srv_download_failed: {
+    code: "srv_download_failed",
+    category: "engine",
+    httpStatus: null,
+    title: "Managed server download could not complete",
+    cause: "The official server archive or Java runtime download was interrupted before completion.",
+    action: "Check your internet connection and click Retry Provisioning to resume from a clean download.",
+    actionLabel: "Retry Provisioning",
+  },
+  srv_verification_failed: {
+    code: "srv_verification_failed",
+    category: "engine",
+    httpStatus: null,
+    title: "Downloaded server file failed SHA-256 verification",
+    cause: "The downloaded artifact's cryptographic hash did not match the pinned official manifest. The unverified file was discarded and was never executed.",
+    action: "Do not run unverified binaries. Click Retry Provisioning to fetch a fresh copy from the official distribution mirror.",
+    actionLabel: "Discard & Retry",
+  },
+  srv_terms_not_accepted: {
+    code: "srv_terms_not_accepted",
+    category: "engine",
+    httpStatus: null,
+    title: "Game server EULA confirmation is required",
+    cause: "The app cannot accept the Minecraft End User License Agreement on your behalf (SRV-001).",
+    action: "Review the official EULA link, check the host confirmation box, or return to manual configuration.",
+    actionLabel: "Confirm EULA Terms",
+  },
+  srv_disk_space_insufficient: {
+    code: "srv_disk_space_insufficient",
+    category: "engine",
+    httpStatus: null,
+    title: "Not enough free disk space for managed server",
+    cause: "The local per-user server directory requires at least 500 MB of free disk space for the runtime, server jar, and world backups.",
+    action: "Free up disk space on your local drive and click Retry Provisioning.",
+    actionLabel: "Retry After Freeing Space",
+  },
+  srv_process_crashed: {
+    code: "srv_process_crashed",
+    category: "engine",
+    httpStatus: null,
+    title: "Managed game server exited unexpectedly",
+    cause: "The local server process terminated with a non-zero exit code. Automatic bounded recovery is attempting a restart.",
+    action: "Expand Details to inspect the server log excerpt, or restore the latest world backup if world data was corrupted.",
+    actionLabel: "Inspect Crash Log",
+  },
+  srv_restart_limit_reached: {
+    code: "srv_restart_limit_reached",
+    category: "engine",
+    httpStatus: null,
+    title: "Managed server stopped after repeated crashes",
+    cause: "The server crashed 3 times in a row, reaching the bounded automatic restart limit.",
+    action: "Open Show Log to inspect the root cause, restore a known-good world backup, and click Start Server Again.",
+    actionLabel: "Show Log & Start Again",
+  },
+};
+
+function lookupErrorGuidance(codeOrError) {
+  const code =
+    typeof codeOrError === "string"
+      ? codeOrError.trim().toLowerCase()
+      : String(codeOrError?.error?.code || codeOrError?.code || "").trim().toLowerCase();
+  return ERROR_MESSAGE_CATALOG[code] || ERROR_MESSAGE_CATALOG.internal;
+}
+
+// Guided 6-Step Troubleshooter (user-flows.md §12, FR-015, UX-003)
+function evaluateTroubleshooterChecks() {
+  const primaryMapping = state.selectedProfile.mappings[0];
+  const primaryCfg = state.mappingConfigs[primaryMapping.key] || {
+    host: "127.0.0.1",
+    port: primaryMapping.defaultPort,
+  };
+
+  const step1Pass = Boolean(state.isSignedIn);
+  const step2Pass = state.tunnelState !== "Failed";
+  const step3Pass = state.tunnelState === "Connected";
+  const step4Unknown = state.localServerState === "Unknown";
+  const step4Pass = state.localServerState === "Reachable";
+  const step5Pass = typeof state.playersSeenCount === "number" && state.playersSeenCount > 0;
+
+  return [
+    {
+      step: 1,
+      id: "signed_in",
+      label: "Signed in and session token valid",
+      status: step1Pass ? "pass" : "fail",
+      summary: step1Pass
+        ? "Authenticated via system browser (RFC 8252 PKCE S256)."
+        : ERROR_MESSAGE_CATALOG.unauthenticated.cause,
+      action: step1Pass ? "No action needed." : ERROR_MESSAGE_CATALOG.unauthenticated.action,
+    },
+    {
+      step: 2,
+      id: "relay_reachable",
+      label: "Relay server reachable",
+      status: step2Pass ? "pass" : "fail",
+      summary: step2Pass
+        ? `Relay ${SESSION_SUMMARY.relayRegion} reachable (${SESSION_SUMMARY.meanRttMs} ms QUIC RTT).`
+        : ERROR_MESSAGE_CATALOG.relay_unavailable.cause,
+      action: step2Pass ? "No action needed." : ERROR_MESSAGE_CATALOG.relay_unavailable.action,
+    },
+    {
+      step: 3,
+      id: "tunnel_active",
+      label: "Tunnel session Active",
+      status: step3Pass ? "pass" : state.tunnelState === "Degraded" || state.tunnelState === "Reconnecting" ? "warn" : "fail",
+      summary: step3Pass
+        ? `Tunnel is Connected and forwarding to ${state.publicAddress}.`
+        : `Tunnel is currently ${state.tunnelState}.`,
+      action: step3Pass
+        ? "No action needed."
+        : "Click Start Tunnel on the dashboard to establish the relay session.",
+    },
+    {
+      step: 4,
+      id: "local_server_reachable",
+      label: `Local server reachable (${primaryCfg.host}:${primaryCfg.port})`,
+      status: step4Pass ? "pass" : step4Unknown ? "unknown" : "fail",
+      summary: step4Pass
+        ? `L0 probe connected to ${primaryCfg.host}:${primaryCfg.port} in 1.1 ms.`
+        : step4Unknown
+        ? "Cannot be probed automatically for this UDP mapping; check the game server console manually."
+        : `Nothing is answering at ${primaryCfg.host}:${primaryCfg.port}.`,
+      action: step4Pass
+        ? "No action needed."
+        : step4Unknown
+        ? "Verify the UDP game server window shows it is listening on the configured port."
+        : ERROR_MESSAGE_CATALOG.local_server_down.action,
+    },
+    {
+      step: 5,
+      id: "guest_traffic_observed",
+      label: "Guest traffic observed at relay",
+      status: step5Pass ? "pass" : "warn",
+      summary: step5Pass
+        ? `${state.playersSeenCount} guest source flow(s) observed (${OBSERVED_TRAFFIC_LABEL}).`
+        : "No guest packets have arrived through the relay yet.",
+      action: step5Pass
+        ? "Tunnel is carrying guest traffic."
+        : "Verify the guest claimed a valid invitation link on the same network they use to play.",
+    },
+    {
+      step: 6,
+      id: "game_level_reminders",
+      label: "Game-level settings check (whitelist, version, password)",
+      status: "info",
+      summary:
+        "Tunnel status and observed traffic do not prove the game server accepted the player into the world.",
+      action:
+        "If traffic is observed in Step 5 but a player still cannot join, check game version parity, server password, allowlist/whitelist, and online-mode.",
+    },
+  ];
+}
+
+// Redacted diagnostics export (FR-013, PRIV-002, INV-5)
+function exportRedactedDiagnostics() {
+  const checks = evaluateTroubleshooterChecks();
+  const bundle = {
+    schema_version: 1,
+    exported_at: "2026-11-04T14:25:00Z",
+    profile_id: state.selectedProfile.id,
+    status_layers: {
+      tunnel_state: state.tunnelState,
+      local_server_state: state.localServerState,
+      players_seen_count: state.playersSeenCount,
+      players_seen_label: OBSERVED_TRAFFIC_LABEL,
+    },
+    troubleshooter_steps: checks,
+    active_guest_subnets_masked: ACTIVE_GUEST_FLOWS.map((f) => f.guestSubnet),
+    redaction_policy: "tokens=[REDACTED_TOKEN] secrets=[REDACTED_SECRET] guest_ips=/24_masked payloads=excluded",
+  };
+  state.lastDiagnosticsExport = bundle;
+  showToast("Redacted diagnostics bundle exported (0 secrets, /24 masked)");
+  render();
+  return bundle;
+}
 
 // Target Policy & Validation Functions (contracts.md §13, FR-003, SEC-006, GAME-009)
 function isLoopbackHost(host) {
@@ -491,6 +1221,21 @@ function render() {
   if (navDashBadge) {
     navDashBadge.textContent = state.tunnelState === "Connected" ? "LIVE" : "IDLE";
   }
+  const navInvBadge = document.getElementById("nav-badge-invitations");
+  if (navInvBadge) {
+    const activeInvCount = state.invitations.filter((i) => i.status === "active").length;
+    navInvBadge.textContent = String(activeInvCount);
+  }
+  const navTroubleBadge = document.getElementById("nav-badge-troubleshooter");
+  if (navTroubleBadge) {
+    const checks = evaluateTroubleshooterChecks();
+    const passCount = checks.filter((c) => c.status === "pass" || c.status === "info").length;
+    navTroubleBadge.textContent = `${passCount}/${checks.length}`;
+  }
+  const navManagedBadge = document.getElementById("nav-badge-managed");
+  if (navManagedBadge) {
+    navManagedBadge.textContent = state.managedServer.state === "Running" ? "RUN" : "Java";
+  }
 
   if (state.currentView === "onboarding") {
     if (viewTitle) viewTitle.textContent = "Welcome & Privacy";
@@ -508,6 +1253,18 @@ function render() {
     if (viewTitle) viewTitle.textContent = `Configure Server · ${state.selectedProfile.name}`;
     mainContent.innerHTML = renderLocalConfigView();
     bindLocalConfigEvents();
+  } else if (state.currentView === "managed-server") {
+    if (viewTitle) viewTitle.textContent = "Managed Server Setup (S12)";
+    mainContent.innerHTML = renderManagedServerView();
+    bindManagedServerEvents();
+  } else if (state.currentView === "invitations") {
+    if (viewTitle) viewTitle.textContent = "Invitations & Guest Sharing";
+    mainContent.innerHTML = renderInvitationsView();
+    bindInvitationsEvents();
+  } else if (state.currentView === "troubleshooter") {
+    if (viewTitle) viewTitle.textContent = "Troubleshooter & Error Catalog";
+    mainContent.innerHTML = renderTroubleshooterView();
+    bindTroubleshooterEvents();
   } else {
     if (viewTitle) viewTitle.textContent = "Tunnel Dashboard";
     mainContent.innerHTML = renderDashboardView();
@@ -515,6 +1272,17 @@ function render() {
   }
 
   updateSidebarNav();
+  restoreDialogFocusIfNeeded();
+}
+
+function restoreDialogFocusIfNeeded() {
+  if (state.isStopModalOpen) {
+    state.activeFocusedElementId = "btn-cancel-stop";
+    document.getElementById("btn-cancel-stop")?.focus?.();
+  } else if (state.isManagedUpdateModalOpen) {
+    state.activeFocusedElementId = "btn-cancel-managed-update";
+    document.getElementById("btn-cancel-managed-update")?.focus?.();
+  }
 }
 
 function updateSidebarNav() {
@@ -796,10 +1564,11 @@ function bindChooseGameEvents() {
   });
 }
 
-// S5: Local Server Configuration Screen (FR-003, GAME-009, GAME-008, contracts.md §13)
+// S5: Local Server Configuration Screen (FR-003, GAME-009, GAME-008, SRV-003, contracts.md §13)
 function renderLocalConfigView() {
   const profile = state.selectedProfile;
   const generalError = state.validationErrors._general;
+  const provisionable = isProfileProvisionable(profile.id);
 
   return `
     <div class="sheet-header">
@@ -816,8 +1585,32 @@ function renderLocalConfigView() {
         <button type="button" id="btn-probe-targets" class="gtt-btn gtt-btn-secondary">
           Check Server Reachability (L0 Probe)
         </button>
+        ${
+          provisionable
+            ? `<button type="button" id="btn-setup-managed-server" class="gtt-btn gtt-btn-primary">
+                Set this up for me
+               </button>`
+            : ""
+        }
       </div>
     </div>
+
+    <!-- SRV-003 & user-flows.md §5 Journey 5b: Provisioning Offer vs Plain Manual-Only Notice -->
+    ${
+      provisionable
+        ? `
+      <section id="provisionable-offer-banner" class="disclosure-callout" role="region" aria-label="Managed server setup option">
+        <strong>Managed Server Provisioning Available (<code data-ui>SRV-001</code>, <code data-ui>SRV-003</code>):</strong>
+        Click <strong>Set this up for me</strong> to download the official Minecraft: Java Edition server jar and pinned Java 21 runtime, verify SHA-256 digests before running, and generate safe loopback defaults (<code data-ui>127.0.0.1:25565</code>, RCON off, Query off). Manual configuration below remains equally supported.
+      </section>
+    `
+        : `
+      <section id="manual-only-provisioning-note" class="disclosure-callout" role="note" aria-label="Manual server configuration notice">
+        <strong>Manual server configuration only for ${profile.name} (<code data-ui>SRV-003</code>):</strong>
+        Automatic server provisioning is offered only for profiles on the verified provisionable list (<code data-ui>minecraft-java</code>). Start your ${profile.name} dedicated server manually and enter its local address and port below.
+      </section>
+    `
+    }
 
     ${
       generalError
@@ -1000,6 +1793,10 @@ function bindLocalConfigEvents() {
     navigateTo("choose-game");
   });
 
+  document.getElementById("btn-setup-managed-server")?.addEventListener("click", () => {
+    navigateTo("managed-server");
+  });
+
   document.querySelectorAll(".mapping-enable-toggle").forEach((toggle) => {
     toggle.addEventListener("change", (e) => {
       const key = e.target.getAttribute("data-mapping-key");
@@ -1110,25 +1907,450 @@ function bindLocalConfigEvents() {
   });
 }
 
-// S7: Dashboard View with Divided 4-Cell Status Strip, SVG Telemetry Chart & Reconciled Flows Table
-function renderDashboardView() {
-  const isTunnelActive = state.tunnelState === "Connected";
-  const isTunnelConnecting = state.tunnelState === "Connecting";
+// S7: Three-Layer Independent Status Machine (T-083, FR-010, FR-012, UX-002, UX-006, DESIGN.md §6)
+const OBSERVED_TRAFFIC_LABEL = "Observed relay traffic (not confirmed in-game presence)";
 
-  let tunnelBadgeClass = "neutral";
-  let tunnelPillClass = "pill--idle";
-  if (state.tunnelState === "Connected") {
-    tunnelBadgeClass = "ok";
-    tunnelPillClass = "pill--ok";
-  } else if (state.tunnelState === "Connecting") {
-    tunnelBadgeClass = "info";
-    tunnelPillClass = "pill--info";
+const TUNNEL_STATE_SPEC = {
+  "Not running": { token: "neutral", pill: "pill--idle", iconShape: "hollow-circle", ariaLive: "off" },
+  Connecting: { token: "info", pill: "pill--info", iconShape: "spinner", ariaLive: "polite" },
+  Connected: { token: "ok", pill: "pill--ok", iconShape: "check-circle", ariaLive: "polite" },
+  Degraded: { token: "warn", pill: "pill--warn", iconShape: "triangle", ariaLive: "polite" },
+  Reconnecting: { token: "warn", pill: "pill--warn", iconShape: "circular-arrows", ariaLive: "polite" },
+  Failed: { token: "error", pill: "pill--err", iconShape: "octagon-cross", ariaLive: "assertive" },
+};
+
+const LOCAL_SERVER_STATE_SPEC = {
+  Reachable: { token: "ok", pill: "pill--ok", iconShape: "check" },
+  "Not reachable": { token: "error", pill: "pill--err", iconShape: "cross" },
+  Checking: { token: "info", pill: "pill--info", iconShape: "spinner" },
+  Unknown: { token: "neutral", pill: "pill--idle", iconShape: "question-mark" },
+};
+
+// Maps engine state machine states (contracts.md §12) to UI labels (DESIGN.md §6)
+function mapEngineTunnelState(engineState) {
+  const normalized = String(engineState || "").trim();
+  if (normalized === "Idle" || normalized === "Stopped" || normalized === "Not running") {
+    return "Not running";
+  }
+  if (normalized === "Connecting" || normalized === "Authenticating") {
+    return "Connecting";
+  }
+  if (normalized === "Active" || normalized === "Connected") {
+    return "Connected";
+  }
+  if (normalized === "Degraded") {
+    return "Degraded";
+  }
+  if (normalized === "Reconnecting") {
+    return "Reconnecting";
+  }
+  if (normalized === "Failed") {
+    return "Failed";
+  }
+  return "Not running";
+}
+
+// 1. Update Tunnel indicator independently (never mutates localServerState or playersSeenCount)
+function setTunnelState(nextState) {
+  const mapped = TUNNEL_STATE_SPEC[nextState] ? nextState : mapEngineTunnelState(nextState);
+  state.tunnelState = mapped;
+  render();
+  return state.tunnelState;
+}
+
+// 2. Update Local Server indicator independently (never mutates tunnelState or playersSeenCount)
+function setLocalServerState(nextServerState) {
+  if (!LOCAL_SERVER_STATE_SPEC[nextServerState]) {
+    throw new Error(`Invalid local server state: ${nextServerState}`);
+  }
+  state.localServerState = nextServerState;
+  render();
+  return state.localServerState;
+}
+
+// 3. Update Players Seen indicator independently (never mutates tunnelState or localServerState)
+function setPlayersSeen(countOrUnavailable) {
+  if (countOrUnavailable === null || countOrUnavailable === "Not available") {
+    state.playersSeenCount = null;
+  } else {
+    const n = Number(countOrUnavailable);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new Error(`Invalid playersSeenCount: ${countOrUnavailable}`);
+    }
+    state.playersSeenCount = n;
+  }
+  render();
+  return state.playersSeenCount;
+}
+
+function formatPlayersSeenText(count) {
+  if (count === null || count === undefined) return "Not available";
+  if (count === 0) return "No traffic seen";
+  if (count === 1) return "1 guest seen";
+  return `${count} guests seen`;
+}
+
+// Stop tunnel confirmation gate (UX-006): confirmation appears ONLY when playersSeenCount > 0
+// Initial focus lands on the safest action (#btn-cancel-stop, "Keep Running") per DESIGN.md §7.
+function requestStopTunnel() {
+  if (typeof state.playersSeenCount === "number" && state.playersSeenCount > 0) {
+    state.isStopModalOpen = true;
+    state.activeFocusedElementId = "btn-cancel-stop";
+    render();
+    return { confirmedImmediately: false, modalOpened: true, initialFocusId: "btn-cancel-stop" };
+  }
+  state.isStopModalOpen = false;
+  executeStopTunnel();
+  return { confirmedImmediately: true, modalOpened: false, initialFocusId: null };
+}
+
+function cancelStopTunnel() {
+  state.isStopModalOpen = false;
+  state.activeFocusedElementId = "btn-stop-tunnel";
+  render();
+}
+
+function confirmStopTunnel() {
+  state.isStopModalOpen = false;
+  state.activeFocusedElementId = "btn-start-tunnel";
+  executeStopTunnel();
+}
+
+// ============================================================================
+// T-088: Managed Server Provisioning & 4th Independent Indicator (SRV-001..SRV-011, DESIGN.md §6 & §8)
+// ============================================================================
+// SRV-003 & ADR-013: Provisioning is offered ONLY for profiles on the verified provisionable list.
+const PROVISIONABLE_PROFILE_IDS = new Set(["minecraft-java"]);
+
+function isProfileProvisionable(profileId) {
+  return PROVISIONABLE_PROFILE_IDS.has(String(profileId || "").trim().toLowerCase());
+}
+
+const MANAGED_SERVER_STATE_SPEC = {
+  "Not set up": { token: "neutral", pill: "pill--idle", iconShape: "hollow-circle", ariaLive: "off" },
+  Downloading: { token: "info", pill: "pill--info", iconShape: "spinner", ariaLive: "polite" },
+  Verifying: { token: "info", pill: "pill--info", iconShape: "spinner", ariaLive: "polite" },
+  Configuring: { token: "info", pill: "pill--info", iconShape: "spinner", ariaLive: "polite" },
+  Starting: { token: "info", pill: "pill--info", iconShape: "spinner", ariaLive: "polite" },
+  Running: { token: "ok", pill: "pill--ok", iconShape: "check", ariaLive: "polite" },
+  Crashed: { token: "error", pill: "pill--err", iconShape: "cross", ariaLive: "assertive" },
+  Updating: { token: "info", pill: "pill--info", iconShape: "spinner", ariaLive: "polite" },
+  Failed: { token: "error", pill: "pill--err", iconShape: "octagon-cross", ariaLive: "assertive" },
+};
+
+// Every managed server state has a distinct, reviewed message with a cause and an action (T-088 Done-when)
+const MANAGED_SERVER_STATE_MESSAGES = {
+  "Not set up": {
+    state: "Not set up",
+    headline: "Managed game server is not installed yet",
+    cause: "No local managed server instance has been provisioned in your per-user app directory.",
+    action: "Confirm the game EULA terms and click Provision & Start Server, or configure an existing server manually.",
+  },
+  Downloading: {
+    state: "Downloading",
+    headline: "Downloading official server archive and runtime",
+    cause: "Fetching the pinned Minecraft: Java Edition server jar and Java 21 runtime over HTTPS.",
+    action: "Wait for the download to finish, or click Cancel Provisioning to stop and remove partial files.",
+  },
+  Verifying: {
+    state: "Verifying",
+    headline: "Verifying cryptographic SHA-256 digest before execution",
+    cause: "Checking the downloaded archive against the pinned SHA-256 digest so no unverified code is ever run (SRV-002).",
+    action: "Wait for verification to complete, or click Cancel Provisioning to abort before configuration.",
+  },
+  Configuring: {
+    state: "Configuring",
+    headline: "Writing safe loopback server configuration",
+    cause: "Generating server.properties bound to 127.0.0.1:25565 with RCON off, Query off, and online-mode on (SRV-004).",
+    action: "Review the generated configuration summary below while setup completes.",
+  },
+  Starting: {
+    state: "Starting",
+    headline: "Starting local managed server process",
+    cause: "Launching the verified Java server process inside a Windows Job Object with kill-on-close protection (SRV-007).",
+    action: "Wait for the server to finish loading the world and bind to 127.0.0.1:25565.",
+  },
+  Running: {
+    state: "Running",
+    headline: "Managed server process is running on 127.0.0.1:25565",
+    cause: "The managed Minecraft: Java Edition server process is active and bound to loopback.",
+    action: "Create a world backup, check for updates, or stop the managed server when your session ends.",
+  },
+  Crashed: {
+    state: "Crashed",
+    headline: "Managed server process exited unexpectedly",
+    cause: "The server process terminated with a non-zero exit code. Bounded automatic restart is tracking attempts.",
+    action: "Expand Details to inspect the crash log excerpt, restore a world backup, or click Start Server Again.",
+  },
+  Updating: {
+    state: "Updating",
+    headline: "Applying verified server version update",
+    cause: "Created an automatic pre-update world backup and verifying the new server version archive (SRV-009).",
+    action: "Wait for the update verification and restart sequence to complete.",
+  },
+  Failed: {
+    state: "Failed",
+    headline: "Managed server setup or recovery could not complete",
+    cause: "A provisioning check (terms, download, SHA-256 verification, disk space, or crash limit) stopped execution.",
+    action: "Review the specific failure cause and recommended action below, then click Retry Provisioning.",
+  },
+};
+
+// 4. Update Managed Server indicator independently (SRV-006: NEVER mutates tunnelState, localServerState, or playersSeenCount)
+function setManagedServerState(nextState, options = {}) {
+  if (!MANAGED_SERVER_STATE_SPEC[nextState]) {
+    throw new Error(`Invalid managed server state: ${nextState}`);
+  }
+  const ms = state.managedServer;
+  ms.state = nextState;
+
+  if (options.progressPercent !== undefined) {
+    ms.progressPercent = Number(options.progressPercent);
+  }
+  if (options.failureCode !== undefined) {
+    ms.failureCode = options.failureCode;
+  } else if (nextState !== "Failed" && nextState !== "Crashed") {
+    ms.failureCode = null;
+  }
+  if (options.restartAttempt !== undefined) {
+    ms.restartAttempt = Number(options.restartAttempt);
   }
 
-  const serverBadgeClass = state.localServerState === "Reachable" ? "ok" : "error";
-  const serverPillClass = state.localServerState === "Reachable" ? "pill--ok" : "pill--err";
-  const playersBadgeClass = state.playersSeenCount > 0 ? "ok" : "neutral";
-  const playersPillClass = state.playersSeenCount > 0 ? "pill--ok" : "pill--idle";
+  // Update step statuses to match discrete state
+  if (nextState === "Not set up") {
+    ms.activeStep = null;
+    ms.progressPercent = 0;
+    ms.stepStatuses = { download: "pending", verify: "pending", configure: "pending", start: "pending" };
+  } else if (nextState === "Downloading") {
+    ms.activeStep = "download";
+    if (!options.progressPercent) ms.progressPercent = 25;
+    ms.stepStatuses = { download: "active", verify: "pending", configure: "pending", start: "pending" };
+  } else if (nextState === "Verifying") {
+    ms.activeStep = "verify";
+    if (!options.progressPercent) ms.progressPercent = 55;
+    ms.stepStatuses = { download: "completed", verify: "active", configure: "pending", start: "pending" };
+  } else if (nextState === "Configuring") {
+    ms.activeStep = "configure";
+    if (!options.progressPercent) ms.progressPercent = 80;
+    ms.artifactVerified = true;
+    ms.stepStatuses = { download: "completed", verify: "completed", configure: "active", start: "pending" };
+  } else if (nextState === "Starting") {
+    ms.activeStep = "start";
+    if (!options.progressPercent) ms.progressPercent = 92;
+    ms.artifactVerified = true;
+    ms.stepStatuses = { download: "completed", verify: "completed", configure: "completed", start: "active" };
+  } else if (nextState === "Running") {
+    ms.activeStep = null;
+    ms.progressPercent = 100;
+    ms.artifactVerified = true;
+    ms.artifactDiscarded = false;
+    ms.cancelSummary = null;
+    ms.stepStatuses = { download: "completed", verify: "completed", configure: "completed", start: "completed" };
+  } else if (nextState === "Crashed") {
+    if (!ms.failureCode) ms.failureCode = "srv_process_crashed";
+    if (!ms.restartAttempt) ms.restartAttempt = 1;
+  } else if (nextState === "Failed") {
+    if (!ms.failureCode) ms.failureCode = "srv_download_failed";
+    if (ms.failureCode === "srv_verification_failed") {
+      // SRV-002 & user-flows.md §5 step 6: Verification failure discards the artifact and never runs it
+      ms.artifactVerified = false;
+      ms.artifactDiscarded = true;
+      ms.stepStatuses = { download: "completed", verify: "failed", configure: "pending", start: "pending" };
+    }
+  }
+
+  render();
+  return ms.state;
+}
+
+function acceptManagedServerTerms(accepted) {
+  state.managedServer.termsAccepted = Boolean(accepted);
+  if (state.managedServer.termsAccepted && state.managedServer.failureCode === "srv_terms_not_accepted") {
+    state.managedServer.failureCode = null;
+    if (state.managedServer.state === "Failed") {
+      state.managedServer.state = "Not set up";
+    }
+  }
+  render();
+  return state.managedServer.termsAccepted;
+}
+
+function startManagedServerProvisioning() {
+  if (!isProfileProvisionable(state.selectedProfile.id)) {
+    return {
+      ok: false,
+      error: {
+        code: "validation_failed",
+        message: `Profile ${state.selectedProfile.id} is not on the provisionable allow-list (SRV-003).`,
+      },
+    };
+  }
+  if (!state.managedServer.termsAccepted) {
+    setManagedServerState("Failed", { failureCode: "srv_terms_not_accepted", progressPercent: 0 });
+    return {
+      ok: false,
+      error: lookupErrorGuidance("srv_terms_not_accepted"),
+    };
+  }
+  state.managedServer.cancelSummary = null;
+  state.managedServer.artifactDiscarded = false;
+  setManagedServerState("Downloading", { progressPercent: 25 });
+  return { ok: true, state: state.managedServer.state };
+}
+
+function advanceManagedServerProvisioningStep() {
+  const current = state.managedServer.state;
+  if (current === "Downloading") {
+    setManagedServerState("Verifying", { progressPercent: 55 });
+  } else if (current === "Verifying") {
+    setManagedServerState("Configuring", { progressPercent: 80 });
+  } else if (current === "Configuring") {
+    setManagedServerState("Starting", { progressPercent: 92 });
+  } else if (current === "Starting") {
+    setManagedServerState("Running", { progressPercent: 100 });
+  }
+  return state.managedServer.state;
+}
+
+function cancelManagedServerProvisioning() {
+  const previousState = state.managedServer.state;
+  const previousProgress = state.managedServer.progressPercent;
+  state.managedServer.cancelSummary = `Cancelled during ${previousState} (${previousProgress}%). Temporary unverified files were removed; no server process was started.`;
+  setManagedServerState("Not set up", { progressPercent: 0 });
+  return state.managedServer.cancelSummary;
+}
+
+function stopManagedServer() {
+  state.managedServer.confirmedInGameCount = null;
+  setManagedServerState("Not set up", { progressPercent: 0 });
+  showToast("Managed server stopped cleanly");
+  return state.managedServer.state;
+}
+
+let backupSeqCounter = 200;
+function createManagedWorldBackup(label = "Manual world backup") {
+  backupSeqCounter += 1;
+  const bkp = {
+    id: `bkp_01J9K9_${backupSeqCounter}`,
+    label: String(label || "Manual world backup").trim(),
+    version: state.managedServer.currentVersion,
+    createdAt: "14:26:00 UTC",
+    sizeMb: 49.2,
+  };
+  state.managedServer.backups.unshift(bkp);
+  showToast(`World backup created (${bkp.id})`);
+  render();
+  return bkp;
+}
+
+function restoreManagedWorldBackup(backupId) {
+  const found = state.managedServer.backups.find((b) => b.id === backupId);
+  if (!found) {
+    return { ok: false, error: { code: "not_found", message: "Backup snapshot not found." } };
+  }
+  state.managedServer.lastRestoredBackupId = found.id;
+  state.managedServer.currentVersion = found.version;
+  showToast(`Restored world backup ${found.id}`);
+  render();
+  return { ok: true, restoredBackup: { ...found } };
+}
+
+// SRV-009 & DESIGN.md §7: Applying a game server update while a tunnel is active requires confirmation
+function requestManagedServerUpdate(targetVersion = state.managedServer.availableUpdateVersion) {
+  const isTunnelActive =
+    state.tunnelState === "Connected" ||
+    state.tunnelState === "Degraded" ||
+    state.tunnelState === "Reconnecting";
+
+  state.pendingManagedUpdateVersion = targetVersion;
+  if (isTunnelActive) {
+    state.isManagedUpdateModalOpen = true;
+    state.activeFocusedElementId = "btn-cancel-managed-update";
+    render();
+    return {
+      updatedImmediately: false,
+      modalOpened: true,
+      initialFocusId: "btn-cancel-managed-update",
+    };
+  }
+
+  state.isManagedUpdateModalOpen = false;
+  executeManagedServerUpdate(targetVersion);
+  return {
+    updatedImmediately: true,
+    modalOpened: false,
+    initialFocusId: null,
+  };
+}
+
+function cancelManagedServerUpdate() {
+  state.isManagedUpdateModalOpen = false;
+  state.pendingManagedUpdateVersion = null;
+  state.activeFocusedElementId = "btn-update-managed-server";
+  render();
+}
+
+function confirmManagedServerUpdate() {
+  const targetVersion = state.pendingManagedUpdateVersion || state.managedServer.availableUpdateVersion;
+  state.isManagedUpdateModalOpen = false;
+  state.pendingManagedUpdateVersion = null;
+  executeManagedServerUpdate(targetVersion);
+}
+
+function executeManagedServerUpdate(targetVersion) {
+  // SRV-009: Create pre-update backup automatically before updating
+  createManagedWorldBackup(`Pre-update backup (v${state.managedServer.currentVersion})`);
+  setManagedServerState("Updating", { progressPercent: 65 });
+  state.managedServer.currentVersion = targetVersion;
+  setManagedServerState("Running", { progressPercent: 100 });
+  showToast(`Managed server updated to v${targetVersion}`);
+}
+
+// SRV-011 & user-flows.md §0: Opt-in Server Management Protocol confirmed in-game presence
+// Never merges with state.playersSeenCount ("N guests seen")
+function setConfirmedInGamePresence(countOrNull) {
+  if (countOrNull === null || countOrNull === undefined) {
+    state.managedServer.serverManagementProtocolEnabled = false;
+    state.managedServer.confirmedInGameCount = null;
+  } else {
+    const n = Number(countOrNull);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new Error(`Invalid confirmedInGameCount: ${countOrNull}`);
+    }
+    state.managedServer.serverManagementProtocolEnabled = true;
+    state.managedServer.confirmedInGameCount = n;
+  }
+  render();
+  return state.managedServer.confirmedInGameCount;
+}
+
+// S7: Dashboard View with Divided 4-Cell Status Strip, SVG Telemetry Chart & Reconciled Flows Table
+function renderDashboardView() {
+  const isTunnelActive =
+    state.tunnelState === "Connected" ||
+    state.tunnelState === "Degraded" ||
+    state.tunnelState === "Reconnecting";
+  const isTunnelConnecting = state.tunnelState === "Connecting";
+
+  const tunnelSpec = TUNNEL_STATE_SPEC[state.tunnelState] || TUNNEL_STATE_SPEC["Not running"];
+  const tunnelBadgeClass = tunnelSpec.token;
+
+  const serverSpec =
+    LOCAL_SERVER_STATE_SPEC[state.localServerState] || LOCAL_SERVER_STATE_SPEC["Unknown"];
+  const serverBadgeClass = serverSpec.token;
+
+  const hasObservedPlayers = typeof state.playersSeenCount === "number" && state.playersSeenCount > 0;
+  const playersBadgeClass = hasObservedPlayers ? "ok" : "neutral";
+  const playersLabelText = formatPlayersSeenText(state.playersSeenCount);
+
+  const managedSpec =
+    MANAGED_SERVER_STATE_SPEC[state.managedServer.state] || MANAGED_SERVER_STATE_SPEC["Not set up"];
+  const managedBadgeClass = managedSpec.token;
+  const confirmedCount = state.managedServer.confirmedInGameCount;
+  const confirmedPresenceText =
+    state.managedServer.serverManagementProtocolEnabled && typeof confirmedCount === "number"
+      ? `${confirmedCount} in game (reported by the server)`
+      : "Server Management Protocol off · traffic count only";
 
   const primaryMapping = state.selectedProfile.mappings[0];
   const primaryCfg = state.mappingConfigs[primaryMapping.key] || {
@@ -1138,7 +2360,7 @@ function renderDashboardView() {
 
   const query = (state.filterQuery || "").trim().toLowerCase();
   const activeFlows = isTunnelActive
-    ? ACTIVE_GUEST_FLOWS.filter(
+    ? ACTIVE_GUEST_FLOWS.slice(0, Math.max(0, Number(state.playersSeenCount) || 0)).filter(
         (f) =>
           !query ||
           f.flowId.toLowerCase().includes(query) ||
@@ -1180,45 +2402,45 @@ function renderDashboardView() {
     <!-- 3-Part Independent Status Machine + Quota Cell in a Single Divided Strip (UX-002, FR-010, app-screens.md §5.2) -->
     <section class="kpis" role="region" aria-label="Service status summary">
       <!-- 1. Tunnel Connection -->
-      <div class="kpi">
+      <div class="kpi" id="indicator-tunnel" data-indicator="tunnel" data-state="${state.tunnelState}" data-token="${tunnelBadgeClass}" aria-live="${tunnelSpec.ariaLive}">
         <div class="kpi__label">
           <span>Tunnel Connection</span>
         </div>
         <div class="kpi__value-row">
           <div class="indicator-badge ${tunnelBadgeClass}">
-            <span class="status-icon ${tunnelBadgeClass}"></span>
-            <span class="kpi__value">${state.tunnelState}</span>
+            <span class="status-icon ${tunnelBadgeClass}" data-icon-shape="${tunnelSpec.iconShape}"></span>
+            <span class="kpi__value" data-role="indicator-value">${state.tunnelState}</span>
           </div>
         </div>
         <div class="kpi__sub">QUIC v1 · ${SESSION_SUMMARY.meanRttMs} ms RTT to fra1</div>
       </div>
 
       <!-- 2. Local Server -->
-      <div class="kpi">
+      <div class="kpi" id="indicator-local-server" data-indicator="local-server" data-state="${state.localServerState}" data-token="${serverBadgeClass}" aria-live="polite">
         <div class="kpi__label">
           <span>Local Server (${primaryCfg.host})</span>
         </div>
         <div class="kpi__value-row">
           <div class="indicator-badge ${serverBadgeClass}">
-            <span class="status-icon ${serverBadgeClass}"></span>
-            <span class="kpi__value">${state.localServerState}</span>
+            <span class="status-icon ${serverBadgeClass}" data-icon-shape="${serverSpec.iconShape}"></span>
+            <span class="kpi__value" data-role="indicator-value">${state.localServerState}</span>
           </div>
         </div>
-        <div class="kpi__sub">${primaryMapping.protocol.toUpperCase()} port ${primaryCfg.port} · 1.1 ms local</div>
+        <div class="kpi__sub">${primaryMapping.protocol.toUpperCase()} port ${primaryCfg.port} · L0 connect probe</div>
       </div>
 
       <!-- 3. Guest Traffic Observed -->
-      <div class="kpi">
+      <div class="kpi" id="indicator-players-seen" data-indicator="players-seen" data-state="${playersLabelText}" data-token="${playersBadgeClass}" aria-live="polite">
         <div class="kpi__label">
           <span>Guest Traffic Observed</span>
         </div>
         <div class="kpi__value-row">
           <div class="indicator-badge ${playersBadgeClass}">
-            <span class="status-icon ${playersBadgeClass}"></span>
-            <span class="kpi__value">${state.playersSeenCount > 0 ? `${state.playersSeenCount} guests seen` : "No traffic seen"}</span>
+            <span class="status-icon ${playersBadgeClass}" data-icon-shape="${hasObservedPlayers ? "check-circle" : "hollow-circle"}"></span>
+            <span class="kpi__value" data-role="indicator-value">${playersLabelText}</span>
           </div>
         </div>
-        <div class="kpi__sub">${isTunnelActive ? `${SESSION_SUMMARY.sessionEgressMb} MB across ${state.playersSeenCount} flows` : "Awaiting guest packets"}</div>
+        <div class="kpi__sub" data-role="observed-traffic-disclosure">${OBSERVED_TRAFFIC_LABEL}</div>
       </div>
 
       <!-- 4. Relay Egress & Quota -->
@@ -1231,6 +2453,38 @@ function renderDashboardView() {
           <span class="kpi__sub">/ ${SESSION_SUMMARY.monthlyQuotaGb} GB</span>
         </div>
         <div class="kpi__sub kpi__sub--ok">95.88 GB remaining (4.1% used)</div>
+      </div>
+    </section>
+
+    <!-- 4th Separate Status Indicator: Managed Server & Separate Confirmed Presence (SRV-006, SRV-011, DESIGN.md §6) -->
+    <section class="managed-status-bar" role="region" aria-label="Managed server and confirmed in-game presence">
+      <div class="kpi" id="indicator-managed-server" data-indicator="managed-server" data-state="${state.managedServer.state}" data-token="${managedBadgeClass}" aria-live="${managedSpec.ariaLive}">
+        <div class="kpi__label">
+          <span>Managed Server (4th Indicator · <code data-ui>SRV-006</code>)</span>
+        </div>
+        <div class="kpi__value-row">
+          <div class="indicator-badge ${managedBadgeClass}">
+            <span class="status-icon ${managedBadgeClass}" data-icon-shape="${managedSpec.iconShape}"></span>
+            <span class="kpi__value" data-role="indicator-value">${state.managedServer.state}</span>
+          </div>
+        </div>
+        <div class="kpi__sub">${MANAGED_SERVER_STATE_MESSAGES[state.managedServer.state]?.headline || ""}</div>
+      </div>
+
+      <div class="kpi" id="indicator-confirmed-presence" data-indicator="confirmed-presence" data-state="${confirmedPresenceText}" data-token="${typeof confirmedCount === "number" ? "ok" : "neutral"}" aria-live="polite">
+        <div class="kpi__label">
+          <span>Confirmed In-Game Presence (Opt-in · <code data-ui>SRV-011</code>)</span>
+        </div>
+        <div class="kpi__value-row">
+          <span class="kpi__value" style="font-size: 16px;">${confirmedPresenceText}</span>
+        </div>
+        <div class="kpi__sub">Separate from Guest Traffic Observed (<code data-ui>UX-002</code>)</div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end;">
+        <button type="button" id="btn-open-managed-server-dash" class="gtt-btn gtt-btn-secondary gtt-btn-sm">
+          Open Managed Server Setup
+        </button>
       </div>
     </section>
 
@@ -1455,6 +2709,10 @@ function bindDashboardEvents() {
     navigateTo("local-config");
   });
 
+  document.getElementById("btn-open-managed-server-dash")?.addEventListener("click", () => {
+    navigateTo("managed-server");
+  });
+
   document.querySelectorAll(".tab-btn[data-metric]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const m = btn.getAttribute("data-metric");
@@ -1480,22 +2738,15 @@ function bindDashboardEvents() {
 
   // Stop tunnel (enforces UX-006 confirmation if players seen)
   document.getElementById("btn-stop-tunnel")?.addEventListener("click", () => {
-    if (state.playersSeenCount > 0) {
-      state.isStopModalOpen = true;
-      render();
-    } else {
-      executeStopTunnel();
-    }
+    requestStopTunnel();
   });
 
   document.getElementById("btn-cancel-stop")?.addEventListener("click", () => {
-    state.isStopModalOpen = false;
-    render();
+    cancelStopTunnel();
   });
 
   document.getElementById("btn-confirm-stop")?.addEventListener("click", () => {
-    state.isStopModalOpen = false;
-    executeStopTunnel();
+    confirmStopTunnel();
   });
 
   document.getElementById("btn-copy-address")?.addEventListener("click", () => {
@@ -1513,6 +2764,1020 @@ function executeStopTunnel() {
   showToast("Tunnel stopped");
   render();
 }
+
+// S8 & G1: Invitations, One-Time Secret Banner, Revocation & Guest Claim View (T-084, FR-007, FR-008, FR-009, SEC-007)
+function renderInvitationsView() {
+  const banner = state.oneTimeInvitationBanner;
+  const invitations = listInvitations();
+  const claimPreview = state.guestClaimPreviewResult;
+
+  return `
+    <div class="sheet-header">
+      <div class="sheet-header__titles">
+        <h2 class="sheet-title">Invitations &amp; Guest Admission Control</h2>
+        <p class="sheet-subtitle">
+          Create scoped, expiring invitation links (<code data-ui>FR-007</code>). Secrets have &ge;128 bits of entropy, are shown once at creation, and are never stored in plaintext (<code data-ui>SEC-007</code>).
+        </p>
+      </div>
+      <div class="sheet-header__actions">
+        <button type="button" id="btn-back-to-dash-from-inv" class="gtt-btn gtt-btn-secondary">
+          Back to Dashboard
+        </button>
+      </div>
+    </div>
+
+    <!-- One-Time Secret Banner (Shown ONLY immediately after creation; FR-007, contracts.md §5.11) -->
+    ${
+      banner
+        ? `
+      <section id="one-time-secret-banner" class="panel" style="border-color: var(--accent); background-color: var(--subtle);" role="region" aria-label="One-time invitation secret">
+        <div class="panel__head">
+          <div>
+            <h3 class="panel__title">One-Time Invitation Secret Created (<code data-ui>${banner.invitationId}</code>)</h3>
+            <span class="panel__sub">Copy this secret now. For security, it will never be shown again once dismissed (<code data-ui>contracts.md §5.12</code>).</span>
+          </div>
+          <span class="pill pill--warn">Shown Once Only</span>
+        </div>
+        <div class="copy-field-container">
+          <input type="text"
+                 id="one-time-secret-input"
+                 class="copy-input"
+                 readonly
+                 value="${banner.secret}"
+                 aria-label="One-time invitation secret" />
+          <button type="button" id="btn-copy-secret" class="gtt-btn gtt-btn-primary">
+            Copy Secret
+          </button>
+          <button type="button" id="btn-dismiss-secret" class="gtt-btn gtt-btn-secondary">
+            I've Saved It · Dismiss
+          </button>
+        </div>
+      </section>
+    `
+        : ""
+    }
+
+    <div class="workspace-grid">
+      <!-- Left 5 Columns: Create Invitation Form & Guest Claim Page Simulator (G1) -->
+      <div class="col-5" style="display: flex; flex-direction: column; gap: 16px;">
+        <form id="create-invitation-form" class="panel" novalidate>
+          <div class="panel__head">
+            <h3 class="panel__title">Create New Invitation (S8)</h3>
+            <span class="pill pill--info">POST /v1/tunnels/{id}/invitations</span>
+          </div>
+          <div class="mapping-fields-grid">
+            <div class="field-group">
+              <label class="field-label" for="inv-expiry-select">Expires In</label>
+              <select id="inv-expiry-select" class="field-input">
+                <option value="1800">30 minutes (1800s)</option>
+                <option value="3600" selected>1 hour (3600s)</option>
+                <option value="14400">4 hours (14400s)</option>
+                <option value="86400">24 hours (86400s)</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="inv-max-claims">Max Claims</label>
+              <input type="number" id="inv-max-claims" class="field-input" value="4" min="1" max="32" />
+            </div>
+          </div>
+          <button type="submit" id="btn-create-invitation" class="gtt-btn gtt-btn-primary" style="width: 100%;">
+            Generate One-Time Invitation
+          </button>
+        </form>
+
+        <!-- Guest Claim Page Simulator (G1, FR-008, user-flows.md §7) -->
+        <form id="guest-claim-simulator-form" class="panel" novalidate>
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">Guest Claim Page Preview (G1)</h3>
+              <span class="panel__sub">Simulates <code data-ui>POST /v1/invitations/claim</code></span>
+            </div>
+            <span class="pill pill--idle">Guest Web View</span>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="sim-claim-secret">Invitation Secret to Claim</label>
+            <div class="copy-field-container">
+              <input type="text"
+                     id="sim-claim-secret"
+                     class="field-input"
+                     style="flex: 1;"
+                     value="${banner ? banner.secret : ""}"
+                     placeholder="Paste gtt_inv_... secret" />
+              <button type="submit" id="btn-simulate-claim" class="gtt-btn gtt-btn-secondary">
+                Claim as Guest
+              </button>
+            </div>
+          </div>
+
+          ${
+            claimPreview
+              ? claimPreview.ok
+                ? `
+              <div id="guest-claim-preview-box" class="disclosure-callout" role="status">
+                <strong>Admitted (${claimPreview.data.game_name}):</strong><br>
+                Connect to <code data-ui>${claimPreview.data.public_address}</code> (admitted ${claimPreview.data.admitted_until}).<br>
+                <span>${claimPreview.data.instruction}</span><br>
+                <span style="font-size: 12px;">Tip: ${claimPreview.data.network_mismatch_tip}</span>
+              </div>
+            `
+                : `
+              <div id="guest-claim-preview-box" class="non-loopback-warning" role="alert">
+                <strong>${claimPreview.error.message}</strong>
+                <span style="font-size: 12px; color: var(--muted);">Code: <code data-ui>${claimPreview.error.code}</code> (uniform response for expired, revoked, exhausted, or unknown secrets)</span>
+              </div>
+            `
+              : ""
+          }
+        </form>
+      </div>
+
+      <!-- Right 7 Columns: Invitations List (Never Shows Secrets) & Active Guest Admissions -->
+      <div class="col-7" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="panel panel--flush">
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">Tunnel Invitations (<code data-ui>FR-007</code>, <code data-ui>FR-009</code>)</h3>
+              <span class="panel__sub">List responses never include invitation secrets (<code data-ui>contracts.md §5.12</code>)</span>
+            </div>
+            <span class="pill pill--ok">${invitations.filter((i) => i.status === "active").length} Active</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="invitations-table">
+              <thead>
+                <tr>
+                  <th>Invitation ID</th>
+                  <th>Expires</th>
+                  <th class="num">Claims Used</th>
+                  <th class="num">Status</th>
+                  <th class="num">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${invitations
+                  .map((inv) => {
+                    let pillClass = "pill--idle";
+                    if (inv.status === "active") pillClass = "pill--ok";
+                    if (inv.status === "revoked") pillClass = "pill--err";
+                    if (inv.status === "exhausted") pillClass = "pill--warn";
+
+                    return `
+                      <tr data-invitation-id="${inv.id}" data-status="${inv.status}">
+                        <td><code data-ui>${inv.id}</code></td>
+                        <td>${inv.expiresAt}</td>
+                        <td class="num">${inv.claimCount} / ${inv.maxClaims}</td>
+                        <td class="num"><span class="pill ${pillClass}">${inv.status}</span></td>
+                        <td class="num">
+                          ${
+                            inv.status === "active"
+                              ? `<button type="button" class="gtt-btn gtt-btn-destructive gtt-btn-sm btn-revoke-invitation" data-invitation-id="${inv.id}">Revoke</button>`
+                              : `<span style="color: var(--muted); font-size: 12px;">—</span>`
+                          }
+                        </td>
+                      </tr>
+                    `;
+                  })
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel panel--flush">
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">Guest Source Admissions (<code data-ui>/24</code> Masked)</h3>
+              <span class="panel__sub">Revoking an invitation automatically revokes its linked admissions</span>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="admissions-table">
+              <thead>
+                <tr>
+                  <th>Admission ID</th>
+                  <th>Invitation</th>
+                  <th>Masked Subnet</th>
+                  <th class="num">Status</th>
+                  <th class="num">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${state.guestAdmissions
+                  .map(
+                    (adm) => `
+                  <tr data-admission-id="${adm.id}" data-status="${adm.status}">
+                    <td><code data-ui>${adm.id}</code></td>
+                    <td><code data-ui>${adm.invitationId}</code></td>
+                    <td><code data-ui>${adm.guestSubnet}</code></td>
+                    <td class="num">
+                      <span class="pill ${adm.status === "active" ? "pill--ok" : "pill--err"}">${adm.status}</span>
+                    </td>
+                    <td class="num">
+                      ${
+                        adm.status === "active"
+                          ? `<button type="button" class="gtt-btn gtt-btn-destructive gtt-btn-sm btn-revoke-admission" data-admission-id="${adm.id}">Revoke</button>`
+                          : `<span style="color: var(--muted); font-size: 12px;">Revoked</span>`
+                      }
+                    </td>
+                  </tr>
+                `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindInvitationsEvents() {
+  document.getElementById("btn-back-to-dash-from-inv")?.addEventListener("click", () => {
+    navigateTo("dashboard");
+  });
+
+  document.getElementById("btn-copy-secret")?.addEventListener("click", () => {
+    const input = document.getElementById("one-time-secret-input");
+    if (input) {
+      navigator.clipboard?.writeText(input.value);
+      showToast("One-time invitation secret copied to clipboard");
+    }
+  });
+
+  document.getElementById("btn-dismiss-secret")?.addEventListener("click", () => {
+    dismissOneTimeSecret();
+  });
+
+  document.getElementById("create-invitation-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const expSelect = document.getElementById("inv-expiry-select");
+    const maxInput = document.getElementById("inv-max-claims");
+    const res = createInvitation({
+      expiresInSeconds: expSelect ? Number(expSelect.value) : 3600,
+      maxClaims: maxInput ? Number(maxInput.value) : 4,
+    });
+    if (res.ok) {
+      showToast("Invitation created — copy your one-time secret now");
+    } else {
+      showToast(res.error.message);
+    }
+  });
+
+  document.getElementById("guest-claim-simulator-form")?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const secretInput = document.getElementById("sim-claim-secret");
+    const secretVal = secretInput ? secretInput.value : "";
+    claimInvitation(secretVal, "198.51.100.0/24");
+  });
+
+  document.querySelectorAll(".btn-revoke-invitation").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const invId = btn.getAttribute("data-invitation-id");
+      if (invId) {
+        revokeInvitation(invId);
+        showToast("Invitation revoked; may take a moment to take effect at relay");
+      }
+    });
+  });
+
+  document.querySelectorAll(".btn-revoke-admission").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const admId = btn.getAttribute("data-admission-id");
+      if (admId) {
+        revokeAdmission(admId);
+        showToast("Guest admission revoked");
+      }
+    });
+  });
+}
+
+// S9: Guided Troubleshooter & Reviewed Error Message Catalog View (T-085, FR-015, UX-003, contracts.md §3)
+function renderTroubleshooterView() {
+  const checks = evaluateTroubleshooterChecks();
+  const activeGuidance = lookupErrorGuidance(state.selectedErrorCode);
+  const allCatalogEntries = Object.values(ERROR_MESSAGE_CATALOG);
+
+  return `
+    <div class="sheet-header">
+      <div class="sheet-header__titles">
+        <h2 class="sheet-title">Guided Troubleshooter &amp; Error Message Catalog</h2>
+        <p class="sheet-subtitle">
+          Ordered 6-step diagnostic checks (<code data-ui>user-flows.md §12</code>) and reviewed cause-and-action guidance for every error code in <code data-ui>contracts.md §3</code> (<code data-ui>FR-015</code>, <code data-ui>UX-003</code>).
+        </p>
+      </div>
+      <div class="sheet-header__actions">
+        <button type="button" id="btn-export-diagnostics" class="gtt-btn gtt-btn-secondary">
+          Export Redacted Diagnostics (FR-013)
+        </button>
+        <button type="button" id="btn-rerun-troubleshooter" class="gtt-btn gtt-btn-primary">
+          Re-Run Checks
+        </button>
+      </div>
+    </div>
+
+    <div class="workspace-grid">
+      <!-- Left 6 Columns: 6-Step Ordered Troubleshooter (user-flows.md §12) -->
+      <div class="panel panel--flush col-6">
+        <div class="panel__head">
+          <div>
+            <h3 class="panel__title">6-Step Connection Troubleshooter (S9)</h3>
+            <span class="panel__sub">Reports each layer independently; never claims game acceptance from traffic alone</span>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table" id="troubleshooter-steps-table">
+            <thead>
+              <tr>
+                <th>Step</th>
+                <th>Diagnostic Check &amp; Next Action</th>
+                <th class="num">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${checks
+                .map((c) => {
+                  let pillClass = "pill--idle";
+                  if (c.status === "pass") pillClass = "pill--ok";
+                  if (c.status === "warn") pillClass = "pill--warn";
+                  if (c.status === "fail") pillClass = "pill--err";
+                  if (c.status === "info") pillClass = "pill--info";
+
+                  return `
+                    <tr data-step-id="${c.id}" data-status="${c.status}">
+                      <td><code data-ui>#${c.step}</code></td>
+                      <td>
+                        <div style="font-weight: 600; color: var(--text);">${c.label}</div>
+                        <div style="font-size: 13px; color: var(--muted);">${c.summary}</div>
+                        <div style="font-size: 12px; color: var(--text); margin-top: 2px;"><strong>Next step:</strong> ${c.action}</div>
+                      </td>
+                      <td class="num"><span class="pill ${pillClass}">${c.status.toUpperCase()}</span></td>
+                    </tr>
+                  `;
+                })
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Right 6 Columns: Active Error Inspector & Failure Class Simulator -->
+      <div class="panel col-6">
+        <div class="panel__head">
+          <div>
+            <h3 class="panel__title">Error Guidance Inspector (<code data-ui>UX-003</code>)</h3>
+            <span class="panel__sub">Every error states a clear cause and a concrete next action</span>
+          </div>
+          <span class="pill ${activeGuidance.category === "api" ? "pill--info" : "pill--warn"}">
+            ${activeGuidance.category.toUpperCase()} ${activeGuidance.httpStatus ? `· HTTP ${activeGuidance.httpStatus}` : "· Engine"}
+          </span>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="select-error-code">Inspect Error Code or Failure Class</label>
+          <select id="select-error-code" class="field-input">
+            ${allCatalogEntries
+              .map(
+                (entry) => `
+              <option value="${entry.code}" ${entry.code === state.selectedErrorCode ? "selected" : ""}>
+                ${entry.code} (${entry.category === "api" ? `HTTP ${entry.httpStatus}` : "Engine"}) · ${entry.title}
+              </option>
+            `
+              )
+              .join("")}
+          </select>
+        </div>
+
+        <div id="error-inspector-card" class="disclosure-callout" role="region" aria-label="Reviewed error guidance">
+          <div style="font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px;">
+            ${activeGuidance.title} (<code data-ui>${activeGuidance.code}</code>)
+          </div>
+          <p style="margin-bottom: 6px;"><strong>Cause:</strong> ${activeGuidance.cause}</p>
+          <p><strong>Next step:</strong> ${activeGuidance.action}</p>
+        </div>
+      </div>
+
+      <!-- Full-Width 12 Columns: Complete Reviewed Message Catalog (contracts.md §3 + FR-015) -->
+      <div class="panel panel--flush col-12">
+        <div class="panel__head">
+          <div>
+            <h3 class="panel__title">Complete Error Message Catalog (<code data-ui>contracts.md §3</code> &amp; <code data-ui>FR-015</code>)</h3>
+            <span class="panel__sub">12 API error codes + 7 engine failure classes · Zero secrets or internal IDs echoed</span>
+          </div>
+          <span class="pill pill--ok">${allCatalogEntries.length} Reviewed Codes</span>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table" id="error-catalog-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Source</th>
+                <th>User-Facing Headline</th>
+                <th>Cause Stated</th>
+                <th>Next Action Stated</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${allCatalogEntries
+                .map(
+                  (e) => `
+                <tr data-error-code="${e.code}">
+                  <td><code data-ui>${e.code}</code></td>
+                  <td>${e.category === "api" ? `API (${e.httpStatus})` : "Engine"}</td>
+                  <td style="font-weight: 600;">${e.title}</td>
+                  <td>${e.cause}</td>
+                  <td>${e.action}</td>
+                </tr>
+              `
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindTroubleshooterEvents() {
+  document.getElementById("btn-rerun-troubleshooter")?.addEventListener("click", () => {
+    showToast("Diagnostic checks completed");
+    render();
+  });
+
+  document.getElementById("btn-export-diagnostics")?.addEventListener("click", () => {
+    exportRedactedDiagnostics();
+  });
+
+  document.getElementById("select-error-code")?.addEventListener("change", (e) => {
+    state.selectedErrorCode = e.target.value;
+    render();
+  });
+}
+
+// ============================================================================
+// S12: Managed Server Setup, Provisioning, World Backup/Restore & Update View (T-088, SRV-001..SRV-011)
+// ============================================================================
+function renderManagedServerView() {
+  const profile = state.selectedProfile;
+  const provisionable = isProfileProvisionable(profile.id);
+  const ms = state.managedServer;
+  const managedSpec = MANAGED_SERVER_STATE_SPEC[ms.state] || MANAGED_SERVER_STATE_SPEC["Not set up"];
+  const managedBadgeClass = managedSpec.token;
+  const stateMsg = MANAGED_SERVER_STATE_MESSAGES[ms.state] || MANAGED_SERVER_STATE_MESSAGES["Not set up"];
+  const failureGuidance = ms.failureCode ? lookupErrorGuidance(ms.failureCode) : null;
+
+  const isInProgress =
+    ms.state === "Downloading" ||
+    ms.state === "Verifying" ||
+    ms.state === "Configuring" ||
+    ms.state === "Starting" ||
+    ms.state === "Updating";
+
+  const stepMeta = [
+    { key: "download", label: "1. Download", detail: "Official server.jar + JRE 21" },
+    { key: "verify", label: "2. Verify SHA-256", detail: "Checked before execution (SRV-002)" },
+    { key: "configure", label: "3. Configure", detail: "127.0.0.1 · RCON & Query off" },
+    { key: "start", label: "4. Start Process", detail: "Windows Job Object (SRV-007)" },
+  ];
+
+  return `
+    <div class="sheet-header">
+      <div class="sheet-header__titles">
+        <h2 class="sheet-title">Managed Server Setup (S12) · ${profile.name}</h2>
+        <p class="sheet-subtitle">
+          Provision, verify, back up, and update a local server without editing configuration files by hand (<code data-ui>SRV-001</code>, <code data-ui>SRV-006</code>, <code data-ui>SRV-009</code>).
+        </p>
+      </div>
+      <div class="sheet-header__actions">
+        <button type="button" id="btn-back-to-local-config" class="gtt-btn gtt-btn-secondary">
+          Manual Server Config (S5)
+        </button>
+        <button type="button" id="btn-back-to-dash-from-managed" class="gtt-btn gtt-btn-secondary">
+          Back to Dashboard
+        </button>
+      </div>
+    </div>
+
+    ${
+      !provisionable
+        ? `
+      <section id="managed-not-provisionable-card" class="non-loopback-warning" role="region" aria-label="Manual configuration required">
+        <div style="font-size: 15px; font-weight: 600;">
+          ${profile.name} uses manual server configuration (<code data-ui>SRV-003</code>)
+        </div>
+        <p style="font-size: 13px; color: var(--muted);">
+          Automatic server provisioning is only offered for profiles on the verified provisionable allow-list (<code data-ui>minecraft-java</code>). Use Configure Server (S5) to point to your manually started ${profile.name} server.
+        </p>
+      </section>
+    `
+        : ""
+    }
+
+    <!-- 4th Separate Status Indicator: Managed Server (SRV-006, DESIGN.md §6) -->
+    <section class="managed-status-bar" role="region" aria-label="Managed server status indicator">
+      <div class="kpi" id="indicator-managed-server" data-indicator="managed-server" data-state="${ms.state}" data-token="${managedBadgeClass}" aria-live="${managedSpec.ariaLive}">
+        <div class="kpi__label">
+          <span>Managed Server Status (4th Indicator · <code data-ui>SRV-006</code>)</span>
+        </div>
+        <div class="kpi__value-row">
+          <div class="indicator-badge ${managedBadgeClass}">
+            <span class="status-icon ${managedBadgeClass}" data-icon-shape="${managedSpec.iconShape}"></span>
+            <span class="kpi__value" data-role="indicator-value">${ms.state}</span>
+          </div>
+          <span class="pill ${managedSpec.pill}">v${ms.currentVersion}</span>
+        </div>
+        <div class="kpi__sub" data-role="managed-state-headline">${stateMsg.headline}</div>
+      </div>
+
+      <div class="kpi">
+        <div class="kpi__label">
+          <span>Reviewed State Cause &amp; Next Action</span>
+        </div>
+        <div style="font-size: 13px; color: var(--text);" data-role="managed-state-cause">
+          <strong>Cause:</strong> ${failureGuidance ? failureGuidance.cause : stateMsg.cause}
+        </div>
+        <div style="font-size: 13px; color: var(--muted);" data-role="managed-state-action">
+          <strong>Next step:</strong> ${failureGuidance ? failureGuidance.action : stateMsg.action}
+        </div>
+      </div>
+    </section>
+
+    <!-- Honest Cancellation Summary if Cancelled (DESIGN.md §8, user-flows.md §5 step 3) -->
+    ${
+      ms.cancelSummary
+        ? `
+      <div id="managed-cancel-summary" class="disclosure-callout" role="status">
+        <strong>Provisioning Cancelled:</strong> ${ms.cancelSummary}
+      </div>
+    `
+        : ""
+    }
+
+    <!-- Crash or Failure Banner with Log Excerpt Behind Details (DESIGN.md §6, user-flows.md §5 step 6) -->
+    ${
+      ms.state === "Crashed" || ms.state === "Failed"
+        ? `
+      <section id="managed-failure-banner" class="non-loopback-warning" role="alert" aria-label="Managed server failure details">
+        <div style="font-size: 15px; font-weight: 600;">
+          ${failureGuidance ? failureGuidance.title : stateMsg.headline}
+          ${ms.state === "Crashed" ? `(Restart attempt ${ms.restartAttempt} / ${ms.maxRestartAttempts})` : ""}
+        </div>
+        <p style="font-size: 13px;"><strong>Cause:</strong> ${failureGuidance ? failureGuidance.cause : stateMsg.cause}</p>
+        <p style="font-size: 13px;"><strong>Action:</strong> ${failureGuidance ? failureGuidance.action : stateMsg.action}</p>
+        ${
+          ms.artifactDiscarded
+            ? `<p style="font-size: 13px; font-weight: 600;">Security guarantee (SRV-002): The unverified download artifact was discarded and never executed.</p>`
+            : ""
+        }
+        ${
+          ms.state === "Crashed" || ms.failureCode === "srv_process_crashed" || ms.failureCode === "srv_restart_limit_reached"
+            ? `
+          <details id="managed-crash-details">
+            <summary style="cursor: pointer; font-weight: 600; font-size: 13px;">Details · Show crash log excerpt</summary>
+            <pre style="margin-top: 8px; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; overflow-x: auto;">${ms.crashLogExcerpt}</pre>
+          </details>
+        `
+            : ""
+        }
+      </section>
+    `
+        : ""
+    }
+
+    <div class="workspace-grid">
+      <!-- Left 7 Columns: EULA Gate, Multi-Step Provisioning Progress & Generated Config Summary -->
+      <div class="col-7" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="panel">
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">1. Host EULA Confirmation &amp; Provisioning Steps (<code data-ui>SRV-001</code>, <code data-ui>SRV-002</code>)</h3>
+              <span class="panel__sub">The app never accepts terms on your behalf and never executes unverified binaries</span>
+            </div>
+            <span class="pill ${ms.termsAccepted ? "pill--ok" : "pill--warn"}">
+              ${ms.termsAccepted ? "EULA Confirmed by Host" : "EULA Confirmation Required"}
+            </span>
+          </div>
+
+          <label class="checkbox-label" for="checkbox-accept-eula">
+            <input type="checkbox"
+                   id="checkbox-accept-eula"
+                   ${ms.termsAccepted ? "checked" : ""} />
+            <span>
+              I have read and agree to the official Minecraft End User License Agreement (<code data-ui>${ms.eulaUrl}</code>)
+            </span>
+          </label>
+
+          <!-- Discrete 4-Step Progress (Download -> Verify -> Configure -> Start, DESIGN.md §8) -->
+          <div class="provisioning-stepper" role="list" aria-label="Provisioning steps">
+            ${stepMeta
+              .map((s) => {
+                const st = ms.stepStatuses[s.key] || "pending";
+                let stepClass = "";
+                if (st === "active") stepClass = "is-active";
+                if (st === "completed") stepClass = "is-completed";
+                if (st === "failed") stepClass = "is-failed";
+                return `
+                  <div class="provisioning-step ${stepClass}" data-step-key="${s.key}" data-step-status="${st}" role="listitem">
+                    <div style="font-size: 13px; font-weight: 600;">${s.label}</div>
+                    <div style="font-size: 12px; color: var(--muted);">${s.detail}</div>
+                    <div style="font-size: 12px; font-weight: 600; text-transform: uppercase;">${st}</div>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+
+          <div class="progress-track" role="progressbar" aria-valuenow="${ms.progressPercent}" aria-valuemin="0" aria-valuemax="100" aria-label="Provisioning progress">
+            <div class="progress-fill" style="width: ${ms.progressPercent}%;"></div>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+            <span style="font-size: 13px; color: var(--muted);">
+              Progress: <strong>${ms.progressPercent}%</strong> · Loopback listen address: <code data-ui>${ms.listenAddress}</code>
+            </span>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              ${
+                isInProgress
+                  ? `
+                <button type="button" id="btn-advance-provisioning" class="gtt-btn gtt-btn-secondary gtt-btn-sm">
+                  Next Step
+                </button>
+                <button type="button" id="btn-cancel-provisioning" class="gtt-btn gtt-btn-destructive gtt-btn-sm">
+                  Cancel Provisioning
+                </button>
+              `
+                  : ""
+              }
+              ${
+                ms.state !== "Running"
+                  ? `
+                <button type="button" id="btn-start-provisioning" class="gtt-btn gtt-btn-primary" ${!provisionable ? "disabled" : ""}>
+                  Provision &amp; Start Server
+                </button>
+              `
+                  : `
+                <button type="button" id="btn-stop-managed-server" class="gtt-btn gtt-btn-destructive">
+                  Stop Managed Server
+                </button>
+              `
+              }
+            </div>
+          </div>
+        </div>
+
+        <!-- Generated Safe Configuration Summary (SRV-004, user-flows.md §5 step 4) -->
+        <div class="panel panel--flush">
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">Generated Safe Server Configuration (<code data-ui>SRV-004</code>)</h3>
+              <span class="panel__sub">Loopback bound (<code data-ui>127.0.0.1</code>); RCON and Query disabled by default for Java Edition</span>
+            </div>
+            <span class="pill pill--ok">server.properties</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>Generated Value</th>
+                  <th>Security Rationale</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code data-ui>server-ip</code></td>
+                  <td><code data-ui>${ms.generatedConfig.serverIp}</code></td>
+                  <td>Loopback only; never exposed on LAN without explicit host action (INV-1, SRV-004)</td>
+                </tr>
+                <tr>
+                  <td><code data-ui>server-port</code></td>
+                  <td><code data-ui>${ms.generatedConfig.serverPort}</code></td>
+                  <td>Matches profile default TCP mapping</td>
+                </tr>
+                <tr>
+                  <td><code data-ui>enable-rcon</code></td>
+                  <td><code data-ui>${String(ms.generatedConfig.enableRcon)}</code></td>
+                  <td>Remote admin console disabled by default (GAME-002, GAME-008)</td>
+                </tr>
+                <tr>
+                  <td><code data-ui>enable-query</code></td>
+                  <td><code data-ui>${String(ms.generatedConfig.enableQuery)}</code></td>
+                  <td>UT3 status query disabled by default (GAME-008)</td>
+                </tr>
+                <tr>
+                  <td><code data-ui>online-mode</code></td>
+                  <td><code data-ui>${String(ms.generatedConfig.onlineMode)}</code></td>
+                  <td>Mojang session authentication stays enabled</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right 5 Columns: World Backups, Restore & Version Update (SRV-009) -->
+      <div class="col-5" style="display: flex; flex-direction: column; gap: 16px;">
+        <div class="panel">
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">Server Version &amp; Update (<code data-ui>SRV-009</code>)</h3>
+              <span class="panel__sub">Installed: <code data-ui>v${ms.currentVersion}</code> · Available: <code data-ui>v${ms.availableUpdateVersion}</code></span>
+            </div>
+            <button type="button" id="btn-update-managed-server" class="gtt-btn gtt-btn-primary gtt-btn-sm">
+              Update to v${ms.availableUpdateVersion}
+            </button>
+          </div>
+          <p style="font-size: 13px; color: var(--muted);">
+            Updating while a tunnel is active asks for confirmation first because restarting the local game server disconnects active players. An automatic world backup is created before every update.
+          </p>
+        </div>
+
+        <div class="panel panel--flush">
+          <div class="panel__head">
+            <div>
+              <h3 class="panel__title">World Backups &amp; Restore (<code data-ui>SRV-009</code>)</h3>
+              <span class="panel__sub">${ms.backups.length} snapshots saved locally</span>
+            </div>
+            <button type="button" id="btn-create-world-backup" class="gtt-btn gtt-btn-secondary gtt-btn-sm">
+              Create Backup Now
+            </button>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="managed-backups-table">
+              <thead>
+                <tr>
+                  <th>Backup ID</th>
+                  <th>Label &amp; Version</th>
+                  <th class="num">Size</th>
+                  <th class="num">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${ms.backups
+                  .map(
+                    (b) => `
+                  <tr data-backup-id="${b.id}">
+                    <td><code data-ui>${b.id}</code></td>
+                    <td>
+                      <div style="font-weight: 600;">${b.label}</div>
+                      <div style="font-size: 12px; color: var(--muted);">v${b.version} · ${b.createdAt}</div>
+                    </td>
+                    <td class="num">${b.sizeMb.toFixed(1)} MB</td>
+                    <td class="num">
+                      <button type="button" class="gtt-btn gtt-btn-secondary gtt-btn-sm btn-restore-backup" data-backup-id="${b.id}">
+                        Restore
+                      </button>
+                    </td>
+                  </tr>
+                `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirmation Modal when updating managed server while tunnel is active (SRV-009, DESIGN.md §7) -->
+    <div id="managed-update-confirmation-modal" class="modal-overlay ${state.isManagedUpdateModalOpen ? "active" : ""}">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="managed-update-modal-title">
+        <h3 id="managed-update-modal-title" class="gtt-card-title">Update Server While Tunnel Is Active?</h3>
+        <p style="color: var(--muted); line-height: 1.5;">
+          Your tunnel is currently <strong>${state.tunnelState}</strong>. Updating the managed server to <strong>v${state.pendingManagedUpdateVersion || ms.availableUpdateVersion}</strong> will restart the server process and disconnect connected players. A world backup will be created automatically before updating.
+        </p>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-managed-update" class="gtt-btn gtt-btn-secondary">
+            Cancel Update
+          </button>
+          <button type="button" id="btn-confirm-managed-update" class="gtt-btn gtt-btn-destructive">
+            Backup, Restart &amp; Update
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindManagedServerEvents() {
+  document.getElementById("btn-back-to-local-config")?.addEventListener("click", () => {
+    navigateTo("local-config");
+  });
+
+  document.getElementById("btn-back-to-dash-from-managed")?.addEventListener("click", () => {
+    navigateTo("dashboard");
+  });
+
+  document.getElementById("checkbox-accept-eula")?.addEventListener("change", (e) => {
+    acceptManagedServerTerms(e.target.checked);
+  });
+
+  document.getElementById("btn-start-provisioning")?.addEventListener("click", () => {
+    startManagedServerProvisioning();
+  });
+
+  document.getElementById("btn-advance-provisioning")?.addEventListener("click", () => {
+    advanceManagedServerProvisioningStep();
+  });
+
+  document.getElementById("btn-cancel-provisioning")?.addEventListener("click", () => {
+    cancelManagedServerProvisioning();
+  });
+
+  document.getElementById("btn-stop-managed-server")?.addEventListener("click", () => {
+    stopManagedServer();
+  });
+
+  document.getElementById("btn-create-world-backup")?.addEventListener("click", () => {
+    createManagedWorldBackup("Manual host snapshot");
+  });
+
+  document.querySelectorAll(".btn-restore-backup").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const bkpId = btn.getAttribute("data-backup-id");
+      if (bkpId) restoreManagedWorldBackup(bkpId);
+    });
+  });
+
+  document.getElementById("btn-update-managed-server")?.addEventListener("click", () => {
+    requestManagedServerUpdate(state.managedServer.availableUpdateVersion);
+  });
+
+  document.getElementById("btn-cancel-managed-update")?.addEventListener("click", () => {
+    cancelManagedServerUpdate();
+  });
+
+  document.getElementById("btn-confirm-managed-update")?.addEventListener("click", () => {
+    confirmManagedServerUpdate();
+  });
+}
+
+// ============================================================================
+// T-086: Keyboard Navigation, Escape Dismissal & Focus Trap (UX-004, DESIGN.md §§7, 9)
+// ============================================================================
+function handleGlobalKeyDown(event) {
+  const key = event?.key;
+  if (!key) return false;
+
+  if (key === "Escape") {
+    if (state.isStopModalOpen) {
+      event.preventDefault?.();
+      cancelStopTunnel();
+      return true;
+    }
+    if (state.isManagedUpdateModalOpen) {
+      event.preventDefault?.();
+      cancelManagedServerUpdate();
+      return true;
+    }
+    closeMobileDrawer();
+    return true;
+  }
+
+  // Trap Tab focus inside active modal dialog (DESIGN.md §7)
+  if (key === "Tab" && (state.isStopModalOpen || state.isManagedUpdateModalOpen)) {
+    const pair = state.isStopModalOpen
+      ? ["btn-cancel-stop", "btn-confirm-stop"]
+      : ["btn-cancel-managed-update", "btn-confirm-managed-update"];
+    event.preventDefault?.();
+    const currentIdx = pair.indexOf(state.activeFocusedElementId);
+    const nextIdx = currentIdx === 0 ? 1 : 0;
+    state.activeFocusedElementId = pair[nextIdx];
+    document.getElementById(state.activeFocusedElementId)?.focus?.();
+    return true;
+  }
+
+  return false;
+}
+
+// Keyboard-only control dispatcher for accessibility testing and keyboard activation (UX-004)
+function dispatchKeyAction(targetId, key = "Enter") {
+  if (key === "Escape" || key === "Tab") {
+    return handleGlobalKeyDown({ key, preventDefault: () => {} });
+  }
+  if (key !== "Enter" && key !== " ") {
+    return false;
+  }
+
+  state.activeFocusedElementId = targetId;
+
+  // Sidebar navigation via keyboard
+  if (targetId.startsWith("nav:")) {
+    const view = targetId.slice(4);
+    navigateTo(view);
+    return true;
+  }
+
+  // Profile selection on S4 Choose Game via Enter or Space
+  if (targetId.startsWith("profile-card:")) {
+    const profileId = targetId.slice("profile-card:".length);
+    const found = SHIPPED_PROFILES.find((p) => p.id === profileId);
+    if (found) {
+      state.selectedProfile = found;
+      state.mappingConfigs = createInitialMappingConfigs(found);
+      state.validationErrors = {};
+      state.probeResults = {};
+      state.publicAddress = `fra1.relay.gtt.gg:${found.mappings[0].defaultPort}`;
+      navigateTo("local-config");
+      return true;
+    }
+  }
+
+  switch (targetId) {
+    // S1 Onboarding -> S2 Sign-In Handoff -> S4 Choose Game
+    case "btn-start-signin":
+      navigateTo("signin-handoff");
+      return true;
+    case "btn-choose-game":
+      navigateTo("choose-game");
+      return true;
+    case "btn-simulate-auth-success":
+      state.isSignedIn = true;
+      navigateTo("choose-game");
+      return true;
+    case "btn-cancel-auth":
+      navigateTo("onboarding");
+      return true;
+
+    // S4 Choose Game -> S5 Local Config
+    case "btn-proceed-to-config":
+      navigateTo("local-config");
+      return true;
+
+    // S5 Local Config -> S7 Dashboard or S12 Managed Server
+    case "btn-save-and-proceed":
+      if (validateAllMappings(state.selectedProfile)) {
+        const primaryPort =
+          state.mappingConfigs[state.selectedProfile.mappings[0].key]?.port ||
+          state.selectedProfile.mappings[0].defaultPort;
+        state.publicAddress = `fra1.relay.gtt.gg:${primaryPort}`;
+        navigateTo("dashboard");
+        return true;
+      }
+      render();
+      return false;
+    case "btn-setup-managed-server":
+      if (isProfileProvisionable(state.selectedProfile.id)) {
+        navigateTo("managed-server");
+        return true;
+      }
+      return false;
+
+    // S7 Dashboard: Start, Copy Address, Stop with confirmation
+    case "btn-start-tunnel":
+      setTunnelState("Connected");
+      setLocalServerState("Reachable");
+      setPlayersSeen(ACTIVE_GUEST_FLOWS.length);
+      return true;
+    case "btn-copy-address":
+      showToast("Public address copied to clipboard!");
+      return true;
+    case "btn-stop-tunnel":
+      requestStopTunnel();
+      return true;
+    case "btn-cancel-stop":
+      cancelStopTunnel();
+      return true;
+    case "btn-confirm-stop":
+      confirmStopTunnel();
+      return true;
+
+    // S8 Invitations: Create, Copy Secret, Dismiss
+    case "btn-create-invitation":
+      createInvitation({ expiresInSeconds: 3600, maxClaims: 4 });
+      return true;
+    case "btn-copy-secret":
+      showToast("One-time invitation secret copied to clipboard");
+      return true;
+    case "btn-dismiss-secret":
+      dismissOneTimeSecret();
+      return true;
+
+    // S12 Managed Server
+    case "checkbox-accept-eula":
+      acceptManagedServerTerms(!state.managedServer.termsAccepted);
+      return true;
+    case "btn-start-provisioning":
+      startManagedServerProvisioning();
+      return true;
+    case "btn-update-managed-server":
+      requestManagedServerUpdate();
+      return true;
+    case "btn-cancel-managed-update":
+      cancelManagedServerUpdate();
+      return true;
+    case "btn-confirm-managed-update":
+      confirmManagedServerUpdate();
+      return true;
+    case "btn-stop-managed-server":
+      stopManagedServer();
+      return true;
+    default:
+      return false;
+  }
+}
+
+window.addEventListener("keydown", handleGlobalKeyDown);
 
 // Global initialization
 window.addEventListener("DOMContentLoaded", () => {
@@ -1560,15 +3825,69 @@ window.addEventListener("DOMContentLoaded", () => {
   render();
 });
 
-// Export symbols onto globalThis for Node VM unit testing (tests/game_selection_and_config_test.js)
+// Export symbols onto globalThis for Node VM unit testing (T-080, T-082, T-083, T-084, T-085, T-086, T-088)
 Object.assign(globalThis, {
   SHIPPED_PROFILES,
   SENSITIVE_LOCAL_PORTS,
+  OBSERVED_TRAFFIC_LABEL,
+  TUNNEL_STATE_SPEC,
+  LOCAL_SERVER_STATE_SPEC,
+  PROVISIONABLE_PROFILE_IDS,
+  MANAGED_SERVER_STATE_SPEC,
+  MANAGED_SERVER_STATE_MESSAGES,
+  MANAGED_SERVER_FAILURE_CODES,
+  GAME_JOIN_INSTRUCTIONS,
+  REQUIRED_CONTRACT_ERROR_CODES,
+  REQUIRED_ENGINE_FAILURE_CLASSES,
+  ERROR_MESSAGE_CATALOG,
   createInitialMappingConfigs,
   isLoopbackHost,
   classifyProhibitedCategory,
   isValidHostString,
   validateSingleMapping,
   validateAllMappings,
+  mapEngineTunnelState,
+  setTunnelState,
+  setLocalServerState,
+  setPlayersSeen,
+  formatPlayersSeenText,
+  requestStopTunnel,
+  cancelStopTunnel,
+  confirmStopTunnel,
+  isProfileProvisionable,
+  setManagedServerState,
+  acceptManagedServerTerms,
+  startManagedServerProvisioning,
+  advanceManagedServerProvisioningStep,
+  cancelManagedServerProvisioning,
+  stopManagedServer,
+  createManagedWorldBackup,
+  restoreManagedWorldBackup,
+  requestManagedServerUpdate,
+  cancelManagedServerUpdate,
+  confirmManagedServerUpdate,
+  setConfirmedInGamePresence,
+  generateInvitationSecret,
+  createInvitation,
+  listInvitations,
+  dismissOneTimeSecret,
+  revokeInvitation,
+  revokeAdmission,
+  claimInvitation,
+  lookupErrorGuidance,
+  evaluateTroubleshooterChecks,
+  exportRedactedDiagnostics,
+  handleGlobalKeyDown,
+  dispatchKeyAction,
+  navigateTo,
+  render,
+  renderOnboardingView,
+  renderSignInHandoffView,
+  renderChooseGameView,
+  renderLocalConfigView,
+  renderDashboardView,
+  renderInvitationsView,
+  renderTroubleshooterView,
+  renderManagedServerView,
   state,
 });
