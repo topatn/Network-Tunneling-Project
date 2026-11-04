@@ -1,0 +1,213 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Relay Health & Capacity Overview (OPS-002)",
+      "type": "row"
+    },
+    {
+      "id": 1,
+      "title": "Relay Operational Status",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "gtt_control_plane_relay_status{status=\"healthy\"}",
+          "legendFormat": "{{relay_id}} ({{region}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "UNHEALTHY" }, "1": { "color": "green", "text": "HEALTHY" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Relay Heartbeat Age",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "time() - gtt_control_plane_relay_heartbeat_timestamp_seconds",
+          "legendFormat": "{{relay_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 15 }, { "color": "red", "value": 30 }]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Port Pool Utilization (Saturation >= 90%)",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "expr": "gtt_control_plane_relay_port_pool_utilization_ratio",
+          "legendFormat": "{{relay_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.75 }, { "color": "red", "value": 0.90 }]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Global Memory Budget Utilization",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        {
+          "expr": "gtt_relay_global_memory_utilization_ratio",
+          "legendFormat": "{{relay_id}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.70 }, { "color": "red", "value": 0.85 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 101,
+      "title": "Flows & Traffic Throughput",
+      "type": "row"
+    },
+    {
+      "id": 5,
+      "title": "Active TCP & UDP Flows",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "expr": "gtt_relay_tcp_flows_active",
+          "legendFormat": "{{relay_id}} TCP Flows",
+          "refId": "A"
+        },
+        {
+          "expr": "gtt_relay_udp_flows_active",
+          "legendFormat": "{{relay_id}} UDP Flows",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Network Bandwidth Throughput (Ingress & Egress)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        {
+          "expr": "sum by (relay_id) (rate(gtt_relay_ingress_bytes_total[1m])) * 8",
+          "legendFormat": "{{relay_id}} Ingress (bps)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (relay_id) (rate(gtt_relay_egress_bytes_total[1m])) * 8",
+          "legendFormat": "{{relay_id}} Egress (bps)",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 102,
+      "title": "Saturation & Backpressure Drop Reasons (OPS-002, OPS-004)",
+      "type": "row"
+    },
+    {
+      "id": 7,
+      "title": "Dropped Frames Rate by Reason",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(gtt_relay_frames_dropped_total[2m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "fps",
+          "custom": {
+            "drawStyle": "bars",
+            "stacking": { "mode": "normal" }
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Guest Admission Enforcement",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(gtt_relay_admissions_checks_total[2m]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["gtt", "relay", "observability", "ops-002"],
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "title": "GTT Relay Health & Saturation Dashboard",
+  "version": 1
+}

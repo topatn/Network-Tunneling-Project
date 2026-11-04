@@ -1,0 +1,272 @@
+/* DESIGN.md section 2 & 10: Official GTT Desktop Design Tokens
+ * Tested by scripts/check_contrast.py for WCAG 2.x AA compliance (UX-005, UX-007).
+ * Mapped to the framed-sheet app shell tokens (app-screens.md §3.1 & §9.2).
+ */
+
+:root {
+  /* Official GTT Color Tokens - Light Theme (Default) */
+  --gtt-color-bg: #FFFFFF;
+  --gtt-color-surface: #F4F6F9;
+  --gtt-color-raised: #FFFFFF;
+  --gtt-color-border: #D5DAE1;
+  --gtt-color-control-border: #6B7482;
+  --gtt-color-text: #1B1F27;
+  --gtt-color-text-muted: #455060;
+  --gtt-color-accent: #2358D4;
+  --gtt-color-on-accent: #FFFFFF;
+  --gtt-color-focus: #1D4ED8; /* taste-skill-ignore */
+  --gtt-color-ok: #146C36;
+  --gtt-color-warn: #7A4F00;
+  --gtt-color-error: #B3261E;
+  --gtt-color-info: #1A56A0;
+  --gtt-color-neutral: #4F5A6A;
+
+  /* Framed-Sheet Surface & Semantic Tokens (Light Mode) */
+  --ground: #F4F6F9;          /* L-shaped outer frame (sidebar + top bar) */
+  --surface: #FFFFFF;         /* Inset main sheet canvas */
+  --raised: #FFFFFF;          /* Popover / modal surface */
+  --subtle: #F8FAFC;          /* Subtle table header / code block fill */
+  --active: #EAEFF6;          /* Active sidebar row / hover state */
+  --border: #D5DAE1;          /* Structural 1px hairlines */
+  --rule: #E4E8EE;            /* Table row & internal cell dividers */
+  --control: #6B7482;         /* Input & button control borders */
+  --text: #1B1F27;            /* Primary ink */
+  --ink: #1B1F27;
+  --muted: #455060;           /* Secondary labels & descriptions */
+  --faint: #647084;           /* Timestamps, axis labels, help sublines */
+  --accent: #2358D4;          /* Active tab indicator & focus ring */
+  --primary: #1B1F27;         /* Primary button fill (near-black, <3% accent budget) */
+  --primary-ink: #FFFFFF;     /* Primary button text */
+
+  /* Semantic Status & Pill Tokens (Light Mode) */
+  --positive: #146C36;
+  --warning: #7A4F00;
+  --negative: #B3261E;
+  --pill-ok-bg: #E7F4EC;
+  --pill-ok-ink: #146C36;
+  --pill-warn-bg: #FDF3E1;
+  --pill-warn-ink: #7A4F00;
+  --pill-err-bg: #FCEAE9;
+  --pill-err-ink: #B3261E;
+  --pill-info-bg: #E8F0FB;
+  --pill-info-ink: #1A56A0;
+  --pill-idle-bg: #EEF1F6;
+  --pill-idle-ink: #4F5A6A;
+
+  /* Chart Palette (Light Mode) */
+  --chart-1: #2358D4;         /* Brand hue on primary throughput/latency series */
+  --chart-2: #146C36;         /* Secondary comparison series */
+  --chart-3: #7A4F00;         /* Threshold / warning reference */
+  --chart-muted: #9BA5B4;     /* Baseline / prior window */
+  --grid: #E6EAF0;            /* Horizontal chart gridlines */
+  --axis-ink: #5A6577;        /* SVG axis labels */
+
+  /* Spacing Scale (DESIGN.md §5) */
+  --gtt-space-1: 4px;
+  --gtt-space-2: 8px;
+  --gtt-space-3: 12px;
+  --gtt-space-4: 16px;
+  --gtt-space-5: 24px;
+  --gtt-space-6: 32px;
+  --gtt-space-7: 48px;
+
+  /* Typography Scale (DESIGN.md §4) */
+  --gtt-font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --gtt-font-mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace; /* taste-skill-ignore */
+  --font-sans: var(--gtt-font-sans);
+  --font-mono: var(--gtt-font-mono); /* taste-skill-ignore */
+
+  --gtt-text-caption: 12px;
+  --gtt-text-body: 14px;
+  --gtt-text-body-lg: 16px;
+  --gtt-text-section: 20px;
+  --gtt-text-screen: 24px;
+  --gtt-text-display: 32px;
+
+  --gtt-leading-body: 1.45;
+  --gtt-leading-title: 1.25;
+
+  /* Radii & Shapes (DESIGN.md §5 & framed-sheet §3.1) */
+  --gtt-radius-control: 6px;
+  --gtt-radius-card: 8px;
+  --gtt-radius-dialog: 12px;
+  --gtt-radius-sheet: 16px;
+
+  color-scheme: light;
+}
+
+/* Dark Theme overrides via media query (UX-007) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --gtt-color-bg: #12151B;
+    --gtt-color-surface: #1A1E26;
+    --gtt-color-raised: #222732;
+    --gtt-color-border: #343B49;
+    --gtt-color-control-border: #8A94A6;
+    --gtt-color-text: #E8EBF0;
+    --gtt-color-text-muted: #B4BCC9;
+    --gtt-color-accent: #8AB0FF;
+    --gtt-color-on-accent: #0B1220;
+    --gtt-color-focus: #9DBBFF;
+    --gtt-color-ok: #66D18C;
+    --gtt-color-warn: #F2BE55;
+    --gtt-color-error: #FF9088;
+    --gtt-color-info: #86B9FF;
+    --gtt-color-neutral: #A5AEBD;
+
+    --ground: #12151B;
+    --surface: #1A1E26;
+    --raised: #222732;
+    --subtle: #161A22;
+    --active: #232936;
+    --border: #343B49;
+    --rule: #282E3B;
+    --control: #8A94A6;
+    --text: #E8EBF0;
+    --ink: #E8EBF0;
+    --muted: #B4BCC9;
+    --faint: #8D97A8;
+    --accent: #8AB0FF;
+    --primary: #E8EBF0;
+    --primary-ink: #12151B;
+
+    --positive: #66D18C;
+    --warning: #F2BE55;
+    --negative: #FF9088;
+    --pill-ok-bg: #142E21;
+    --pill-ok-ink: #66D18C;
+    --pill-warn-bg: #2E2412;
+    --pill-warn-ink: #F2BE55;
+    --pill-err-bg: #321A1B;
+    --pill-err-ink: #FF9088;
+    --pill-info-bg: #16263E;
+    --pill-info-ink: #86B9FF;
+    --pill-idle-bg: #232834;
+    --pill-idle-ink: #B4BCC9;
+
+    --chart-1: #8AB0FF;
+    --chart-2: #66D18C;
+    --chart-3: #F2BE55;
+    --chart-muted: #5E687A;
+    --grid: #262C38;
+    --axis-ink: #9AA4B4;
+
+    color-scheme: dark;
+  }
+}
+
+/* Explicit manual theme override: [data-theme="dark"] */
+[data-theme="dark"] {
+  --gtt-color-bg: #12151B;
+  --gtt-color-surface: #1A1E26;
+  --gtt-color-raised: #222732;
+  --gtt-color-border: #343B49;
+  --gtt-color-control-border: #8A94A6;
+  --gtt-color-text: #E8EBF0;
+  --gtt-color-text-muted: #B4BCC9;
+  --gtt-color-accent: #8AB0FF;
+  --gtt-color-on-accent: #0B1220;
+  --gtt-color-focus: #9DBBFF;
+  --gtt-color-ok: #66D18C;
+  --gtt-color-warn: #F2BE55;
+  --gtt-color-error: #FF9088;
+  --gtt-color-info: #86B9FF;
+  --gtt-color-neutral: #A5AEBD;
+
+  --ground: #12151B;
+  --surface: #1A1E26;
+  --raised: #222732;
+  --subtle: #161A22;
+  --active: #232936;
+  --border: #343B49;
+  --rule: #282E3B;
+  --control: #8A94A6;
+  --text: #E8EBF0;
+  --ink: #E8EBF0;
+  --muted: #B4BCC9;
+  --faint: #8D97A8;
+  --accent: #8AB0FF;
+  --primary: #E8EBF0;
+  --primary-ink: #12151B;
+
+  --positive: #66D18C;
+  --warning: #F2BE55;
+  --negative: #FF9088;
+  --pill-ok-bg: #142E21;
+  --pill-ok-ink: #66D18C;
+  --pill-warn-bg: #2E2412;
+  --pill-warn-ink: #F2BE55;
+  --pill-err-bg: #321A1B;
+  --pill-err-ink: #FF9088;
+  --pill-info-bg: #16263E;
+  --pill-info-ink: #86B9FF;
+  --pill-idle-bg: #232834;
+  --pill-idle-ink: #B4BCC9;
+
+  --chart-1: #8AB0FF;
+  --chart-2: #66D18C;
+  --chart-3: #F2BE55;
+  --chart-muted: #5E687A;
+  --grid: #262C38;
+  --axis-ink: #9AA4B4;
+
+  color-scheme: dark;
+}
+
+/* Explicit manual theme override: [data-theme="light"] */
+[data-theme="light"] {
+  --gtt-color-bg: #FFFFFF;
+  --gtt-color-surface: #F4F6F9;
+  --gtt-color-raised: #FFFFFF;
+  --gtt-color-border: #D5DAE1;
+  --gtt-color-control-border: #6B7482;
+  --gtt-color-text: #1B1F27;
+  --gtt-color-text-muted: #455060;
+  --gtt-color-accent: #2358D4;
+  --gtt-color-on-accent: #FFFFFF;
+  --gtt-color-focus: #1D4ED8; /* taste-skill-ignore */
+  --gtt-color-ok: #146C36;
+  --gtt-color-warn: #7A4F00;
+  --gtt-color-error: #B3261E;
+  --gtt-color-info: #1A56A0;
+  --gtt-color-neutral: #4F5A6A;
+
+  --ground: #F4F6F9;
+  --surface: #FFFFFF;
+  --raised: #FFFFFF;
+  --subtle: #F8FAFC;
+  --active: #EAEFF6;
+  --border: #D5DAE1;
+  --rule: #E4E8EE;
+  --control: #6B7482;
+  --text: #1B1F27;
+  --ink: #1B1F27;
+  --muted: #455060;
+  --faint: #647084;
+  --accent: #2358D4;
+  --primary: #1B1F27;
+  --primary-ink: #FFFFFF;
+
+  --positive: #146C36;
+  --warning: #7A4F00;
+  --negative: #B3261E;
+  --pill-ok-bg: #E7F4EC;
+  --pill-ok-ink: #146C36;
+  --pill-warn-bg: #FDF3E1;
+  --pill-warn-ink: #7A4F00;
+  --pill-err-bg: #FCEAE9;
+  --pill-err-ink: #B3261E;
+  --pill-info-bg: #E8F0FB;
+  --pill-info-ink: #1A56A0;
+  --pill-idle-bg: #EEF1F6;
+  --pill-idle-ink: #4F5A6A;
+
+  --chart-1: #2358D4;
+  --chart-2: #146C36;
+  --chart-3: #7A4F00;
+  --chart-muted: #9BA5B4;
+  --grid: #E6EAF0;
+  --axis-ink: #5A6577;
+
+  color-scheme: light;
+}

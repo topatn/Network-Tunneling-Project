@@ -1,0 +1,1242 @@
+/* GTT Desktop App Styles - Framed-Sheet Direction (T-080, T-081, T-082)
+ * Governed by DESIGN.md and references/app-screens.md (framed-sheet, seed 1177939851).
+ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--gtt-font-sans);
+  font-size: var(--gtt-text-body);
+  line-height: var(--gtt-leading-body);
+  color: var(--text);
+  background-color: var(--ground);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Monospace is reserved strictly for code, pre, and explicit [data-ui] tokens */
+code, pre, [data-ui] {
+  font-family: var(--gtt-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Accessibility: Visible Focus Ring on every interactive control (DESIGN.md §9) */
+*:focus-visible {
+  outline: 2px solid var(--gtt-color-focus);
+  outline-offset: 2px;
+}
+
+/* ============================================================================
+ * 1. FRAMED-SHEET APP SHELL (app-screens.md §3.1)
+ * One tinted L-shaped frame (--ground) holds the 228px sidebar and 48px topbar
+ * with no rule between them; the workspace is an inset sheet (--surface) with
+ * 1px border and 16px corners.
+ * ============================================================================ */
+.app[data-shell="framed-sheet"] {
+  display: grid;
+  grid-template-columns: 228px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
+  min-height: 100vh;
+  background-color: var(--ground);
+}
+
+/* Sidebar */
+.sidebar {
+  grid-row: 1 / -1;
+  grid-column: 1;
+  background-color: var(--ground);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px 12px;
+  gap: 16px;
+  user-select: none;
+}
+
+.sidebar__top {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px 12px;
+}
+
+.brand-mark {
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.brand-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.brand-sub {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar__section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 10px 10px 4px;
+  letter-spacing: 0.01em;
+}
+
+.nav-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: var(--gtt-radius-control);
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.nav-item:hover {
+  background-color: var(--active);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background-color: var(--active);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.nav-icon {
+  flex-shrink: 0;
+  color: currentColor;
+  opacity: 0.85;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.sidebar-policy-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--rule);
+  margin-top: 4px;
+}
+
+.sidebar-policy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-policy-row code {
+  font-size: 12px;
+  color: var(--text);
+  background-color: var(--active);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.sidebar-footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-account {
+  padding: 0 6px;
+}
+
+.sidebar-account__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-account__name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.sidebar-account__quota {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 6px;
+}
+
+.sidebar-theme-label {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.gtt-select-compact {
+  height: 30px;
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-control);
+  cursor: pointer;
+}
+
+.sidebar-scrim {
+  display: none;
+}
+
+/* Top Bar (48px on --ground, no bottom border) */
+.top-bar {
+  grid-column: 2;
+  grid-row: 1;
+  height: 48px;
+  background-color: var(--ground);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 16px 0 8px;
+  min-width: 0;
+}
+
+.top-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-control);
+  background-color: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.view-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.top-bar__sep {
+  color: var(--faint);
+  font-size: 14px;
+}
+
+.top-bar__scope {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.top-bar__search {
+  height: 32px;
+  width: 220px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-control);
+}
+
+.top-bar__search::placeholder {
+  color: var(--faint);
+}
+
+.top-bar__fresh {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Inset Sheet Canvas */
+.sheet {
+  grid-column: 2;
+  grid-row: 2;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-sheet);
+  margin: 0 8px 8px 0;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* ============================================================================
+ * 2. WORKSPACE HEADER, TABS & CONTROLS
+ * ============================================================================ */
+.sheet-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sheet-header__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sheet-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.sheet-subtitle {
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.sheet-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Buttons (DESIGN.md §7 & app-screens.md §4.3) */
+.gtt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--gtt-radius-control);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.gtt-btn-sm {
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.gtt-btn-primary {
+  background-color: var(--primary);
+  color: var(--primary-ink);
+  font-weight: 600;
+}
+
+.gtt-btn-primary:hover {
+  opacity: 0.92;
+}
+
+.gtt-btn-secondary {
+  background-color: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.gtt-btn-secondary:hover {
+  background-color: var(--ground);
+  border-color: var(--control);
+}
+
+.gtt-btn-destructive {
+  background-color: transparent;
+  border-color: var(--negative);
+  color: var(--negative);
+  font-weight: 600;
+}
+
+.gtt-btn-destructive:hover {
+  background-color: var(--pill-err-bg);
+}
+
+.gtt-btn-ghost {
+  background-color: transparent;
+  color: var(--muted);
+}
+
+.gtt-btn-ghost:hover {
+  color: var(--text);
+  background-color: var(--ground);
+}
+
+.gtt-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ============================================================================
+ * 3. DIVIDED 4-CELL KPI STRIP & 3-LAYER STATUS MACHINE (UX-002, FR-010)
+ * Single container with internal 1px dividers (app-screens.md §5.2)
+ * ============================================================================ */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-card);
+  background-color: var(--surface);
+  overflow: hidden;
+}
+
+.kpi {
+  padding: 16px 20px;
+  border-right: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.kpi:last-child {
+  border-right: 0;
+}
+
+.kpi__label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.kpi__value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.kpi__value {
+  font-size: clamp(20px, 1.8vw, 24px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi__sub {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.kpi__sub--ok {
+  color: var(--positive);
+}
+
+.kpi__sub--warn {
+  color: var(--warning);
+}
+
+.kpi__sub--err {
+  color: var(--negative);
+}
+
+/* Semantic Status Pills (app-screens.md §6.3) */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.pill--ok,
+.support-badge.verified,
+.probe-badge.reachable {
+  background-color: var(--pill-ok-bg);
+  color: var(--pill-ok-ink);
+}
+
+.pill--warn,
+.support-badge.experimental {
+  background-color: var(--pill-warn-bg);
+  color: var(--pill-warn-ink);
+}
+
+.pill--err,
+.probe-badge.not-reachable {
+  background-color: var(--pill-err-bg);
+  color: var(--pill-err-ink);
+}
+
+.pill--info,
+.probe-badge.probing {
+  background-color: var(--pill-info-bg);
+  color: var(--pill-info-ink);
+}
+
+.pill--idle {
+  background-color: var(--pill-idle-bg);
+  color: var(--pill-idle-ink);
+}
+
+.support-badge,
+.probe-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Status indicator compatibility classes for ui_shell_test.js */
+.indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.status-icon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.status-icon.ok { background-color: var(--positive); }
+.status-icon.warn { background-color: var(--warning); }
+.status-icon.error { background-color: var(--negative); }
+.status-icon.info { background-color: var(--accent); }
+.status-icon.neutral { background-color: var(--muted); }
+
+/* ============================================================================
+ * 4. END-TO-END PATH STRIP & ADDRESS SHARING BAR (INV-1, FR-007)
+ * ============================================================================ */
+.path-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 1fr);
+  gap: 16px;
+  padding: 12px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-card);
+  background-color: var(--subtle);
+  align-items: center;
+}
+
+.path-Hop-chain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.path-node {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-control);
+  font-size: 13px;
+}
+
+.path-edge {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.copy-field-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copy-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 500;
+  background-color: var(--surface);
+  border: 1px solid var(--control);
+  border-radius: var(--gtt-radius-control);
+  color: var(--text);
+}
+
+/* ============================================================================
+ * 5. 12-COLUMN WORKSPACE GRID, PANELS, CHARTS & DATA TABLES
+ * ============================================================================ */
+.workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.col-12 { grid-column: span 12; }
+.col-8  { grid-column: span 8; }
+.col-7  { grid-column: span 7; }
+.col-6  { grid-column: span 6; }
+.col-5  { grid-column: span 5; }
+.col-4  { grid-column: span 4; }
+
+.panel,
+.gtt-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-card);
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.panel--flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+.panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel--flush .panel__head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.panel__title,
+.gtt-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.panel__sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Metric switcher tabs inside chart panel */
+.tab-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tab-btn {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 6px 2px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab-btn.active {
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+/* Chart container (app-screens.md §7) */
+.chart-wrap {
+  width: 100%;
+  overflow: hidden;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.chart-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+  padding-top: 4px;
+  border-top: 1px solid var(--rule);
+}
+
+.legend-items {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+/* Real HTML Tables (app-screens.md §6) */
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-align: left;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--subtle);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 10px 16px;
+  height: 42px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--text);
+  vertical-align: middle;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.data-table tbody tr:hover {
+  background-color: var(--ground);
+}
+
+.data-table th.num,
+.data-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.data-table tfoot td {
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  background-color: var(--subtle);
+  border-top: 1px solid var(--border);
+}
+
+/* ============================================================================
+ * 6. S4 CHOOSE GAME GRID & COMPARISON TABLE (FR-002, GAME-006)
+ * ============================================================================ */
+.game-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.game-profile-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-card);
+  padding: 16px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.game-profile-card:hover {
+  border-color: var(--control);
+  background-color: var(--subtle);
+}
+
+.game-profile-card.selected {
+  border-color: var(--accent);
+  background-color: var(--subtle);
+}
+
+.game-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.game-card-title {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.game-card-ports {
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================================
+ * 7. S5 LOCAL SERVER CONFIGURATION (Two-Column Settings Layout, app-screens.md §8.2)
+ * ============================================================================ */
+.settings-split {
+  display: grid;
+  grid-template-columns: minmax(260px, 4fr) minmax(0, 8fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.settings-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mapping-config-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-card);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.mapping-config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mapping-key-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.protocol-pill {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 7px;
+  border-radius: 4px;
+  background-color: var(--ground);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.mapping-fields-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.field-input {
+  height: 36px;
+  background-color: var(--surface);
+  border: 1px solid var(--control);
+  border-radius: var(--gtt-radius-control);
+  padding: 0 10px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+}
+
+.field-input:focus {
+  border-color: var(--gtt-color-focus);
+  outline: 2px solid var(--gtt-color-focus);
+}
+
+.field-input.is-invalid {
+  border-color: var(--negative);
+  outline-color: var(--negative);
+}
+
+.field-error-message {
+  font-size: 13px;
+  color: var(--negative);
+  font-weight: 500;
+  min-height: 18px;
+}
+
+.risk-callout {
+  background-color: var(--pill-warn-bg);
+  border-left: 3px solid var(--warning);
+  padding: 8px 12px;
+  border-radius: 0 4px 4px 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.disclosure-callout {
+  background-color: var(--subtle);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  padding: 12px 16px;
+  border-radius: var(--gtt-radius-control);
+  font-size: 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.disclosure-callout strong {
+  color: var(--text);
+}
+
+.non-loopback-warning {
+  background-color: var(--pill-err-bg);
+  border: 1px solid var(--negative);
+  border-radius: var(--gtt-radius-control);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* ============================================================================
+ * 8. MODAL DIALOG & TOASTS (No resting card shadows; 1px border separation)
+ * ============================================================================ */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(11, 18, 32, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 150ms ease, visibility 150ms ease;
+}
+
+.modal-overlay.active {
+  visibility: visible;
+  opacity: 1;
+}
+
+.modal-card {
+  background-color: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-dialog);
+  width: 100%;
+  max-width: 460px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.toast {
+  background-color: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--control);
+  border-radius: var(--gtt-radius-control);
+  padding: 8px 14px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ============================================================================
+ * 9. RESPONSIVE BREAKPOINTS (1440px Desktop -> 768px Tablet -> 390px Mobile)
+ * Follows app-screens.md §12 so nothing overflows or leaves dead canvas.
+ * ============================================================================ */
+@media (max-width: 1100px) {
+  .col-8, .col-7, .col-6, .col-5, .col-4 {
+    grid-column: span 12;
+  }
+
+  .path-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 860px) {
+  .app[data-shell="framed-sheet"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 48px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 248px;
+    z-index: 950;
+    border-right: 1px solid var(--border);
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+  }
+
+  .sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-scrim.is-open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(11, 18, 32, 0.45);
+    z-index: 900;
+  }
+
+  .top-bar {
+    grid-column: 1;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .menu-toggle {
+    display: inline-flex;
+  }
+
+  .top-bar__sep,
+  .top-bar__scope,
+  .top-bar__fresh {
+    display: none;
+  }
+
+  .top-bar__search {
+    width: 150px;
+  }
+
+  .sheet {
+    grid-column: 1;
+    margin: 0;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+    padding: 16px;
+  }
+
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .kpi:nth-child(2) {
+    border-right: 0;
+  }
+
+  .kpi:nth-child(1),
+  .kpi:nth-child(2) {
+    border-bottom: 1px solid var(--rule);
+  }
+}
+
+@media (max-width: 520px) {
+  .top-bar__search-wrap {
+    display: none;
+  }
+
+  .kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .kpi {
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .kpi:last-child {
+    border-bottom: 0;
+  }
+
+  .mapping-fields-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .copy-field-container {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

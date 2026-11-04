@@ -1,0 +1,214 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 200,
+      "title": "Egress Volume & Spend KPI Summary (OPS-006)",
+      "type": "row"
+    },
+    {
+      "id": 21,
+      "title": "Egress Volume (Last 24 Hours)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(increase(gtt_relay_egress_bytes_total[24h])) / 1073741824",
+          "legendFormat": "Total Egress",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "decimals": 2
+        }
+      }
+    },
+    {
+      "id": 22,
+      "title": "Estimated Cost (Last 24 Hours)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "targets": [
+        {
+          "expr": "(sum(increase(gtt_relay_egress_bytes_total[24h])) / 1073741824) * $cost_per_gb",
+          "legendFormat": "Cost (24h)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 7.5 },
+              { "color": "red", "value": 10.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 23,
+      "title": "Cumulative Egress (Last 30 Days)",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "targets": [
+        {
+          "expr": "sum(increase(gtt_relay_egress_bytes_total[30d])) / 1073741824",
+          "legendFormat": "30-Day Egress",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes",
+          "decimals": 1
+        }
+      }
+    },
+    {
+      "id": 24,
+      "title": "Projected 30-Day Month-End Spend",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "targets": [
+        {
+          "expr": "((sum(increase(gtt_relay_egress_bytes_total[24h])) / 1073741824) * $cost_per_gb) * 30",
+          "legendFormat": "Projected Monthly Spend",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 150.0 },
+              { "color": "red", "value": 250.0 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 6 },
+      "id": 201,
+      "title": "Daily Egress & Spend Tracking Over Time",
+      "type": "row"
+    },
+    {
+      "id": 25,
+      "title": "Daily Egress Transfer per Relay (GB/day)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        {
+          "expr": "sum by (relay_id) (increase(gtt_relay_egress_bytes_total[1d])) / 1073741824",
+          "legendFormat": "{{relay_id}} (GB/day)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decgbytes"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "title": "Daily Egress Cost vs Operator Budget Threshold ($10/day)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        {
+          "expr": "(sum by (relay_id) (increase(gtt_relay_egress_bytes_total[1d])) / 1073741824) * $cost_per_gb",
+          "legendFormat": "{{relay_id}} Cost ($/day)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 10.0 }
+            ]
+          },
+          "custom": {
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 27,
+      "title": "Hourly Outbound Transfer Rate (MB/s)",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 15 },
+      "targets": [
+        {
+          "expr": "sum by (relay_id) (rate(gtt_relay_egress_bytes_total[5m])) / 1048576",
+          "legendFormat": "{{relay_id}} Egress Rate (MB/s)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "decmbytes"
+        }
+      }
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["gtt", "relay", "cost", "egress", "ops-006"],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "Vultr / DigitalOcean ($0.01/GB)",
+          "value": "0.01"
+        },
+        "description": "Provider outbound bandwidth overage cost per GB",
+        "name": "cost_per_gb",
+        "options": [
+          { "selected": false, "text": "Hetzner EU (€1/TB ≈ $0.001/GB)", "value": "0.001" },
+          { "selected": true, "text": "Vultr / DigitalOcean ($0.01/GB)", "value": "0.01" },
+          { "selected": false, "text": "AWS / GCP ($0.09/GB)", "value": "0.09" }
+        ],
+        "query": "0.001,0.01,0.09",
+        "type": "custom"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "title": "GTT Relay Egress & Cost Monitoring Dashboard",
+  "version": 1
+}

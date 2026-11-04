@@ -17,10 +17,15 @@ pub mod db;
 pub mod error;
 pub mod keys;
 pub mod limiter;
+pub mod observability;
 pub mod policy;
 pub mod redaction;
 pub mod routes;
 
 pub use db::Database;
 pub use error::{PersistenceError, Rejection, Result};
+pub use observability::{
+    format_control_plane_prometheus, format_structured_log, ControlPlaneTelemetrySnapshot,
+    RelayNodeTelemetry,
+};
 pub use policy::{Actor, Decision, ErrorCode, Operation, Target};

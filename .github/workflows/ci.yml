@@ -252,6 +252,44 @@ jobs:
       - name: Run Security Automated Test Suite
         run: python tests/security/run_security_tests.py
 
+  observability:
+    name: Observability, alerts, and cost monitoring (T-103)
+    # OPS-002, OPS-006: Verify alert rules, Grafana dashboards, and synthetic alert simulations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Verify Observability, Alerts, and Cost Monitoring
+        run: python scripts/verify_observability.py
+
+  deployment-rollback-rehearsal:
+    name: Deployment and rollback rehearsal (T-105 / OPS-003)
+    # OPS-003: Verify staging deployment definitions, runbook completeness,
+    # schema.md Rule 4 forward-only migration enforcement, and timed staged rollback.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Run Deployment and Rollback Rehearsal
+        run: python scripts/deployment_rollback_rehearsal.py
+
+  incident-response-tabletop:
+    name: Incident runbook and tabletop exercise (T-108 / OPS-008 / SEC-015)
+    # OPS-008, SEC-015: Verify incident response runbook, tabletop exercise notes,
+    # and execute automated tabletop drill (suspension, drain, key revocation, audit invariants).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Run Incident Response Tabletop Drill
+        run: python scripts/incident_tabletop_exercise.py
+
   dependency-scan:
     name: Dependency scan (SEC-017)
     runs-on: ubuntu-latest
@@ -605,7 +643,18 @@ jobs:
             "insert into users (idp_issuer,idp_subject) values ('a1','s')"
           must_accept "tunnels valid row" \
             "insert into tunnels (owner_id,name,game_profile_id,profile_version,expires_at) select id,'n1','p',1,now()+interval '1 day' from users where idp_issuer='seed'"
-          exit $fail
+          if [ "$fail" != "0" ]; then
+            exit "$fail"
+          fi
+
+      - name: Database backup and restore smoke test (T-106 / OPS-007)
+        run: |
+          python scripts/backup_restore_test.py \
+            --host "$PGHOST" \
+            --port "$PGPORT" \
+            --user "$PGUSER" \
+            --source-db "$PGDATABASE" \
+            --target-db "gtt_restored_smoke"
 
 # HISTORY -- verified locally on 2026-10-17 against rustc/clippy/rustfmt 1.99.1 and
 # cargo-deny 0.20.2 (official prebuilt Windows binary, checksum verified):

@@ -1,0 +1,111 @@
+# Prometheus Alerting Rules for Game Tunnel Tooling (GTT)
+# Governed by requirements: OPS-002 (Relay Health & Saturation) and OPS-006 (Egress Cost Monitoring).
+# Standard Prometheus syntax version 2.x
+
+groups:
+  - name: gtt_relay_health_and_saturation_alerts
+    rules:
+      # 1. Relay Unhealthy Alert (OPS-002, REL-002)
+      # Fires if a relay stops sending state/usage reports for >30s or its status is not healthy.
+      - alert: RelayUnhealthy
+        expr: >
+          (gtt_control_plane_relay_status{status="healthy"} != 1)
+          or
+          ((time() - gtt_control_plane_relay_heartbeat_timestamp_seconds) > 30)
+        for: 1m
+        labels:
+          severity: critical
+          tier: infrastructure
+        annotations:
+          summary: "Relay node {{ $labels.relay_id }} in region {{ $labels.region }} is unhealthy or unresponsive"
+          description: "Relay {{ $labels.relay_id }} has missed heartbeats for >30 seconds or has transitioned away from 'healthy'. New tunnel allocations will skip this node."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/deployment-and-rollback-runbook.md#relay-drain-and-failover"
+
+      # 2. Allocation Failure Spike Alert (OPS-002)
+      # Fires if tunnel start or relay allocation requests fail repeatedly across the control plane.
+      - alert: AllocationFailureSpike
+        expr: >
+          sum by (environment) (rate(gtt_control_plane_allocation_failures_total[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          tier: control-plane
+        annotations:
+          summary: "Spike in tunnel allocation failures in {{ $labels.environment }}"
+          description: "Control plane is experiencing > 0.05 allocation failures per second over the last 5 minutes (due to relay exhaustion, port exhaustion, or quota violations)."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/incident-response-runbook.md#allocation-failure-containment"
+
+      # 3. Port Pool Saturation Alert (OPS-002, GAME-008)
+      # Fires when a relay's public port allocation reaches or exceeds 90% of capacity.
+      - alert: RelayPortPoolSaturation
+        expr: >
+          (gtt_control_plane_relay_ports_allocated / gtt_control_plane_relay_ports_capacity) >= 0.90
+        for: 2m
+        labels:
+          severity: warning
+          tier: relay
+        annotations:
+          summary: "Relay {{ $labels.relay_id }} port pool is >= 90% saturated"
+          description: "Relay {{ $labels.relay_id }} in {{ $labels.region }} has allocated {{ $value | humanizePercentage }} of its public port range. Provision additional relays or expand port range."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/incident-response-runbook.md#port-pool-expansion"
+
+      # 4. Bandwidth Saturation Alert (OPS-002, OPS-004, NET-006)
+      # Fires when token-bucket bandwidth limiters throttle and drop frames.
+      - alert: RelayBandwidthSaturation
+        expr: >
+          sum by (relay_id, region) (rate(gtt_relay_frames_dropped_total{reason="bandwidth_exceeded"}[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          tier: relay
+        annotations:
+          summary: "Relay {{ $labels.relay_id }} is dropping frames due to bandwidth limit backpressure"
+          description: "Token-bucket rate limiters on relay {{ $labels.relay_id }} are actively shedding load (>5 frames/sec dropped) due to bandwidth overconsumption."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/ddos-and-abuse-mitigation-plan.md#application-level-rate-limiting"
+
+      # 5. Global Memory Queue Ceiling Alert (OPS-002, OPS-004)
+      # Fires if the relay global queue budget (16 MiB) is >= 85% full or packets are dropped by global memory cap.
+      - alert: RelayMemorySaturation
+        expr: >
+          (gtt_relay_global_memory_utilization_ratio >= 0.85)
+          or
+          (sum by (relay_id, region) (rate(gtt_relay_frames_dropped_total{reason="global_memory_cap"}[5m])) > 0)
+        for: 1m
+        labels:
+          severity: critical
+          tier: relay
+        annotations:
+          summary: "Relay {{ $labels.relay_id }} global queue memory budget is near exhaustion or dropping packets"
+          description: "Global queue memory utilization on relay {{ $labels.relay_id }} has reached {{ $value | humanizePercentage }} of the 16 MiB ceiling, risking backpressure drops."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/ddos-and-abuse-mitigation-plan.md#global-memory-ceiling"
+
+  - name: gtt_egress_cost_alerts
+    rules:
+      # 6. Daily Egress Cost Threshold Exceeded (OPS-006, PERF-006)
+      # Calculates 24h egress cost assuming baseline $0.01 per GB overage (Vultr/DO/Hetzner US tiers).
+      # Threshold default: $10.00 / day (~1,000 GB/day at $0.01/GB).
+      - alert: RelayDailyEgressCostThresholdExceeded
+        expr: >
+          ((sum by (relay_id) (increase(gtt_relay_egress_bytes_total[24h])) / 1073741824) * 0.01) > 10.0
+        for: 15m
+        labels:
+          severity: warning
+          tier: billing
+        annotations:
+          summary: "Relay {{ $labels.relay_id }} daily egress cost exceeds operator budget ($10/day)"
+          description: "Calculated 24-hour outbound egress cost on relay {{ $labels.relay_id }} is ${{ $value | humanize }} (exceeding the $10.00/day threshold)."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/observability-and-alerting-guide.md#egress-cost-monitoring"
+
+      # 7. Projected Monthly Egress Budget Exceeded (OPS-006)
+      # Projects 30-day monthly spend based on current 24h run-rate against a $250.00 monthly cap.
+      - alert: RelayProjectedMonthlyEgressBudgetExceeded
+        expr: >
+          (((sum by (relay_id) (increase(gtt_relay_egress_bytes_total[24h])) / 1073741824) * 0.01) * 30) > 250.0
+        for: 1h
+        labels:
+          severity: critical
+          tier: billing
+        annotations:
+          summary: "Relay {{ $labels.relay_id }} projected 30-day egress cost exceeds monthly budget ($250/mo)"
+          description: "Based on the 24-hour run-rate, projected monthly egress cost for relay {{ $labels.relay_id }} is ${{ $value | humanize }}."
+          runbook_url: "https://github.com/owner/network-tunneling-project/blob/main/docs/observability-and-alerting-guide.md#egress-cost-monitoring"

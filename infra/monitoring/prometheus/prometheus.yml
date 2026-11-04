@@ -1,0 +1,27 @@
+# Prometheus Configuration for Game Tunnel Tooling (GTT)
+# Scrapes Control Plane and Relay telemetry and evaluates alert rules (OPS-002, OPS-006).
+
+global:
+  scrape_interval: 10s
+  evaluation_interval: 10s
+  scrape_timeout: 5s
+
+rule_files:
+  - "alert_rules.yml"
+
+scrape_configs:
+  - job_name: "gtt-control-plane"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["control-plane:9090"]
+        labels:
+          environment: "staging"
+          service: "control-plane"
+
+  - job_name: "gtt-relay"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets: ["relay-01:9091", "relay-02:9091"]
+        labels:
+          environment: "staging"
+          service: "relay"

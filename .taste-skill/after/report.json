@@ -1,0 +1,1359 @@
+{
+ "url": "apps/desktop/index.html",
+ "at": "2026-11-04T14:28:43.041Z",
+ "allow": [],
+ "viewports": [
+  {
+   "width": 1440,
+   "height": 900,
+   "load": "load",
+   "screens": 2,
+   "filled": [
+    0.85,
+    0.87
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "page": {
+     "height": 1009,
+     "screens": 1.1,
+     "words": 309,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 7,
+     "sections": 2,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 27,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 0,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "chars": 16,
+     "lines": 1,
+     "size": 15,
+     "vw": 1,
+     "font": "Segoe UI Variable",
+     "weight": 600,
+     "tracking": -0.01,
+     "leading": 1.45,
+     "top": 13,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "lines": 1,
+     "size": 15,
+     "font": "Segoe UI Variable"
+    },
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "Segoe UI Variable",
+       "share": 0.84,
+       "mono": false
+      },
+      {
+       "family": "ui-monospace",
+       "share": 0.16,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      18,
+      24
+     ],
+     "sizeCount": 6,
+     "notLoaded": [],
+     "body": {
+      "font": "Segoe UI Variable",
+      "size": 13,
+      "leading": 1.45,
+      "weight": 400,
+      "tracking": 0,
+      "contrast": 8.7
+     },
+     "measureChars": 66,
+     "max": {
+      "size": 24,
+      "vw": 1.7,
+      "font": "Segoe UI Variable",
+      "text": "Connected"
+     },
+     "monoShare": 0.16,
+     "monoProseShare": 0,
+     "monoFamilies": [
+      "ui-monospace"
+     ],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.06,
+     "centerShare": 0.06,
+     "smallText": 12
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#12151b",
+     "bodyBgHsl": {
+      "h": 220,
+      "s": 0.2,
+      "l": 0.09
+     },
+     "dark": true,
+     "sectionBgs": [
+      {
+       "color": "#12151b",
+       "top": 0,
+       "hsl": {
+        "h": 220,
+        "s": 0.2,
+        "l": 0.09
+       }
+      },
+      {
+       "color": "#1a1e26",
+       "top": 48,
+       "hsl": {
+        "h": 220,
+        "s": 0.19,
+        "l": 0.13
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#b4bcc9",
+       "share": 0.53
+      },
+      {
+       "color": "#e8ebf0",
+       "share": 0.42
+      },
+      {
+       "color": "#66d18c",
+       "share": 0.05
+      },
+      {
+       "color": "#ff9088",
+       "share": 0.01
+      },
+      {
+       "color": "#8d97a8",
+       "share": 0
+      }
+     ],
+     "button": {
+      "bg": "#1a1e26",
+      "hsl": {
+       "h": 220,
+       "s": 0.19,
+       "l": 0.13
+      },
+      "fg": "#e8ebf0"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 12,
+     "inHero": 12,
+     "radius": 6,
+     "height": 34,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Tunnel Dashboard LIVE",
+      "Choose Game 5",
+      "Configure Server 1/3",
+      "Welcome & Privacy",
+      "Refresh"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 3,
+     "hairlineSamples": [
+      "div.chart-legend 625px",
+      "div.panel__head 470px",
+      "div.panel__head 1152px"
+     ],
+     "outlinedBoxes": 5,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 5,
+     "boxRadius": 8,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [
+     {
+      "type": "svg",
+      "ratio": 0.08
+     }
+    ],
+    "nav": {
+     "links": 0,
+     "fixed": false,
+     "height": 1009,
+     "floatingPill": false,
+     "blur": false
+    },
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "pageH": 1009,
+    "margins": {
+     "left": 12,
+     "right": 46
+    },
+    "sections": [],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "Tunnel Dashboard",
+      "size": 15,
+      "top": 13,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 272,
+      "n": 2
+     },
+     {
+      "x": 236,
+      "n": 1
+     },
+     {
+      "x": 253,
+      "n": 1
+     },
+     {
+      "x": 453,
+      "n": 1
+     },
+     {
+      "x": 955,
+      "n": 1
+     }
+    ],
+    "leftBlocks": 6,
+    "bodySize": 13,
+    "stage": false,
+    "explains": true,
+    "slivers": [],
+    "voidShare": 0.09,
+    "voidBox": {
+     "x": 0,
+     "y": 420,
+     "w": 240,
+     "h": 480
+    }
+   },
+   "app": {
+    "viewport": {
+     "w": 1440,
+     "h": 900
+    },
+    "dark": true,
+    "ground": "#12151b",
+    "sidebar": {
+     "w": 228,
+     "tag": "aside",
+     "links": 4,
+     "share": 0.16
+    },
+    "topbar": {
+     "h": 48
+    },
+    "canvas": {
+     "left": 25,
+     "right": 33
+    },
+    "hero": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "chars": 16,
+     "lines": 1,
+     "size": 15,
+     "vw": 1,
+     "font": "Segoe UI Variable",
+     "weight": 600,
+     "tracking": -0.01,
+     "leading": 1.45,
+     "top": 13,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 2,
+    "layout": {
+     "panels": 3,
+     "firstScreen": 2,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 7,
+     "radii": [
+      [
+       8,
+       4
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       16,
+       1
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 0,
+     "hues": 0,
+     "samples": []
+    },
+    "numbers": {
+     "cells": 8,
+     "leftAligned": 0,
+     "figures": 9,
+     "tabularShare": 1,
+     "kpiMax": 24
+    },
+    "rows": {
+     "count": 6,
+     "median": 61
+    },
+    "chartHues": 1,
+    "placeholders": [],
+    "type": {
+     "under13": 0.22,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      18,
+      24
+     ]
+    },
+    "title": {
+     "text": "Tunnel Dashboard",
+     "size": 15,
+     "top": 13
+    },
+    "colourShare": 0.001
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 768,
+   "height": 1024,
+   "load": "load",
+   "screens": 2,
+   "filled": [
+    0.97,
+    1
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "page": {
+     "height": 1523,
+     "screens": 1.5,
+     "words": 300,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 7,
+     "sections": 2,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 27,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 1,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "chars": 16,
+     "lines": 1,
+     "size": 15,
+     "vw": 2,
+     "font": "Segoe UI Variable",
+     "weight": 600,
+     "tracking": -0.01,
+     "leading": 1.45,
+     "top": 13,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "lines": 1,
+     "size": 15,
+     "font": "Segoe UI Variable"
+    },
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "Segoe UI Variable",
+       "share": 0.84,
+       "mono": false
+      },
+      {
+       "family": "ui-monospace",
+       "share": 0.16,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      18,
+      20
+     ],
+     "sizeCount": 6,
+     "notLoaded": [],
+     "body": {
+      "font": "Segoe UI Variable",
+      "size": 13,
+      "leading": 1.45,
+      "weight": 400,
+      "tracking": 0,
+      "contrast": 8.7
+     },
+     "measureChars": 66,
+     "max": {
+      "size": 20,
+      "vw": 2.6,
+      "font": "Segoe UI Variable",
+      "text": "Connected"
+     },
+     "monoShare": 0.16,
+     "monoProseShare": 0,
+     "monoFamilies": [
+      "ui-monospace"
+     ],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.06,
+     "centerShare": 0.06,
+     "smallText": 12
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#12151b",
+     "bodyBgHsl": {
+      "h": 220,
+      "s": 0.2,
+      "l": 0.09
+     },
+     "dark": true,
+     "sectionBgs": [
+      {
+       "color": "#12151b",
+       "top": 0,
+       "hsl": {
+        "h": 220,
+        "s": 0.2,
+        "l": 0.09
+       }
+      },
+      {
+       "color": "#1a1e26",
+       "top": 48,
+       "hsl": {
+        "h": 220,
+        "s": 0.19,
+        "l": 0.13
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#b4bcc9",
+       "share": 0.51
+      },
+      {
+       "color": "#e8ebf0",
+       "share": 0.44
+      },
+      {
+       "color": "#66d18c",
+       "share": 0.05
+      },
+      {
+       "color": "#ff9088",
+       "share": 0.01
+      }
+     ],
+     "button": {
+      "bg": "#1a1e26",
+      "hsl": {
+       "h": 220,
+       "s": 0.19,
+       "l": 0.13
+      },
+      "fg": "#e8ebf0"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 12,
+     "inHero": 12,
+     "radius": 6,
+     "height": 34,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Tunnel Dashboard LIVE",
+      "Choose Game 5",
+      "Configure Server 1/3",
+      "Welcome & Privacy",
+      "Refresh"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 8,
+     "hairlineSamples": [
+      "aside#app-sidebar.sidebar 248px",
+      "header.top-bar 768px",
+      "main#main-content.sheet 768px",
+      "div.kpi 367px",
+      "div.kpi 367px"
+     ],
+     "outlinedBoxes": 5,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 5,
+     "boxRadius": 8,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [
+     {
+      "type": "svg",
+      "ratio": 0.17
+     }
+    ],
+    "nav": {
+     "links": 0,
+     "fixed": true,
+     "height": 1024,
+     "floatingPill": false,
+     "blur": false
+    },
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "pageH": 1523,
+    "margins": {
+     "left": 16,
+     "right": 33
+    },
+    "sections": [
+     {
+      "sel": "section.kpis",
+      "tag": "section",
+      "top": 182,
+      "height": 214,
+      "words": 46,
+      "media": 0,
+      "middle": 210,
+      "heading": null,
+      "left": 37,
+      "right": 182,
+      "textLeft": 37,
+      "textRight": 182,
+      "fullBleed": false,
+      "footer": false,
+      "hero": true,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "div.workspace-grid",
+      "tag": "div",
+      "top": 541,
+      "height": 966,
+      "words": 133,
+      "media": 1,
+      "middle": 0,
+      "heading": {
+       "text": "Relay Throughput (Mbps)",
+       "size": 15,
+       "tag": "h3"
+      },
+      "left": 33,
+      "right": 33,
+      "textLeft": 33,
+      "textRight": 33,
+      "fullBleed": false,
+      "footer": true,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     }
+    ],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "Tunnel Dashboard",
+      "size": 15,
+      "top": 13,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 35,
+      "n": 3
+     },
+     {
+      "x": 16,
+      "n": 1
+     },
+     {
+      "x": 54,
+      "n": 1
+     },
+     {
+      "x": 216,
+      "n": 1
+     }
+    ],
+    "leftBlocks": 6,
+    "bodySize": 13,
+    "stage": false,
+    "explains": true,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 768,
+     "h": 1024
+    },
+    "dark": true,
+    "ground": "#12151b",
+    "sidebar": {
+     "w": 248,
+     "tag": "aside",
+     "links": 4,
+     "share": 0.32
+    },
+    "topbar": {
+     "h": 48
+    },
+    "canvas": {
+     "left": 23,
+     "right": -192
+    },
+    "hero": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "chars": 16,
+     "lines": 1,
+     "size": 15,
+     "vw": 2,
+     "font": "Segoe UI Variable",
+     "weight": 600,
+     "tracking": -0.01,
+     "leading": 1.45,
+     "top": 13,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 3,
+    "layout": {
+     "panels": 7,
+     "firstScreen": 6,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 7,
+     "radii": [
+      [
+       8,
+       5
+      ],
+      [
+       0,
+       2
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 1,
+     "hues": 1,
+     "samples": [
+      {
+       "hue": 220,
+       "size": 32,
+       "radius": "6px"
+      }
+     ]
+    },
+    "numbers": {
+     "cells": 8,
+     "leftAligned": 0,
+     "figures": 9,
+     "tabularShare": 1,
+     "kpiMax": 20
+    },
+    "rows": {
+     "count": 6,
+     "median": 62
+    },
+    "chartHues": 1,
+    "placeholders": [],
+    "type": {
+     "under13": 0.22,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      18,
+      20
+     ]
+    },
+    "title": {
+     "text": "Tunnel Dashboard",
+     "size": 15,
+     "top": 13
+    },
+    "colourShare": 0.002
+   },
+   "consoleErrors": []
+  },
+  {
+   "width": 390,
+   "height": 844,
+   "load": "load",
+   "screens": 3,
+   "filled": [
+    0.97,
+    1,
+    1
+   ],
+   "motion": {
+    "elements": 0,
+    "css": 0,
+    "transitions": 0,
+    "scripted": 0,
+    "videos": 0,
+    "playingVideos": 0
+   },
+   "metrics": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "page": {
+     "height": 1976,
+     "screens": 2.3,
+     "words": 300,
+     "img": 0,
+     "video": 0,
+     "canvas": 0,
+     "svg": 7,
+     "sections": 2,
+     "horizontalOverflow": 0,
+     "overflowCulprits": [],
+     "uiFragments": 27,
+     "uiAbuse": false,
+     "realPictures": 0,
+     "videoCount": 0,
+     "uiPictures": 0,
+     "pictureSamples": [],
+     "blendText": 0,
+     "sideScrollers": 2,
+     "brokenImages": [],
+     "emoji": [],
+     "videosNoPoster": 0
+    },
+    "hero": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "chars": 16,
+     "lines": 1,
+     "size": 15,
+     "vw": 3.8,
+     "font": "Segoe UI Variable",
+     "weight": 600,
+     "tracking": -0.01,
+     "leading": 1.45,
+     "top": 13,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "h1": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "lines": 1,
+     "size": 15,
+     "font": "Segoe UI Variable"
+    },
+    "headings": [],
+    "headingSummary": {
+     "count": 0,
+     "maxLines": 0,
+     "over2Lines": 0,
+     "statements": 0,
+     "centered": 0,
+     "medianWords": null,
+     "mixedFontHeadings": 0
+    },
+    "type": {
+     "families": [
+      {
+       "family": "Segoe UI Variable",
+       "share": 0.84,
+       "mono": false
+      },
+      {
+       "family": "ui-monospace",
+       "share": 0.16,
+       "mono": false
+      }
+     ],
+     "familyCount": 2,
+     "sizes": [
+      12,
+      13,
+      14,
+      15,
+      18,
+      20
+     ],
+     "sizeCount": 6,
+     "notLoaded": [],
+     "body": {
+      "font": "Segoe UI Variable",
+      "size": 13,
+      "leading": 1.45,
+      "weight": 400,
+      "tracking": 0,
+      "contrast": 8.7
+     },
+     "measureChars": 49,
+     "max": {
+      "size": 20,
+      "vw": 5.1,
+      "font": "Segoe UI Variable",
+      "text": "Connected"
+     },
+     "monoShare": 0.16,
+     "monoProseShare": 0,
+     "monoFamilies": [
+      "ui-monospace"
+     ],
+     "monoSamples": [],
+     "microLabels": 0,
+     "microLabelShare": 0,
+     "microSamples": [],
+     "upperShare": 0.06,
+     "centerShare": 0.06,
+     "smallText": 12
+    },
+    "eyebrows": [],
+    "numbered": [],
+    "color": {
+     "bodyBg": "#12151b",
+     "bodyBgHsl": {
+      "h": 220,
+      "s": 0.2,
+      "l": 0.09
+     },
+     "dark": true,
+     "sectionBgs": [
+      {
+       "color": "#12151b",
+       "top": 0,
+       "hsl": {
+        "h": 220,
+        "s": 0.2,
+        "l": 0.09
+       }
+      },
+      {
+       "color": "#1a1e26",
+       "top": 48,
+       "hsl": {
+        "h": 220,
+        "s": 0.19,
+        "l": 0.13
+       }
+      }
+     ],
+     "textColors": [
+      {
+       "color": "#b4bcc9",
+       "share": 0.51
+      },
+      {
+       "color": "#e8ebf0",
+       "share": 0.44
+      },
+      {
+       "color": "#66d18c",
+       "share": 0.05
+      },
+      {
+       "color": "#ff9088",
+       "share": 0.01
+      }
+     ],
+     "button": {
+      "bg": "#1a1e26",
+      "hsl": {
+       "h": 220,
+       "s": 0.19,
+       "l": 0.13
+      },
+      "fg": "#e8ebf0"
+     },
+     "lowContrast": []
+    },
+    "buttons": {
+     "count": 12,
+     "inHero": 11,
+     "radius": 6,
+     "height": 34,
+     "withShadow": 0,
+     "withGradient": 0,
+     "mono": 0,
+     "upper": 0,
+     "heroLabels": [
+      "Tunnel Dashboard LIVE",
+      "Choose Game 5",
+      "Configure Server 1/3",
+      "Welcome & Privacy",
+      "Refresh"
+     ]
+    },
+    "surfaces": {
+     "shadowStatic": 0,
+     "shadowOverlay": 0,
+     "shadowSamples": [],
+     "gradients": 0,
+     "scrims": 0,
+     "gradientSamples": [],
+     "gradientText": 0,
+     "hairlines": 9,
+     "hairlineSamples": [
+      "aside#app-sidebar.sidebar 248px",
+      "header.top-bar 390px",
+      "main#main-content.sheet 390px",
+      "div.kpi 356px",
+      "div.kpi 356px"
+     ],
+     "outlinedBoxes": 5,
+     "dashed": 0,
+     "blurred": 0,
+     "roundedBoxes": 5,
+     "boxRadius": 8,
+     "squareMedia": 0,
+     "roundedMedia": 0,
+     "mediaRadius": 0,
+     "textShadow": 0,
+     "cardRows": []
+    },
+    "heroMedia": [],
+    "nav": {
+     "links": 0,
+     "fixed": true,
+     "height": 844,
+     "floatingPill": false,
+     "blur": false
+    },
+    "fontsLoaded": []
+   },
+   "layout": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "pageH": 1976,
+    "margins": {
+     "left": 16,
+     "right": 17
+    },
+    "sections": [
+     {
+      "sel": "section.kpis",
+      "tag": "section",
+      "top": 202,
+      "height": 426,
+      "words": 46,
+      "media": 0,
+      "middle": 0,
+      "heading": null,
+      "left": 37,
+      "right": 171,
+      "textLeft": 37,
+      "textRight": 171,
+      "fullBleed": false,
+      "footer": false,
+      "hero": true,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "section.path-strip",
+      "tag": "section",
+      "top": 648,
+      "height": 208,
+      "words": 15,
+      "media": 0,
+      "middle": 0,
+      "heading": null,
+      "left": 35,
+      "right": 35,
+      "textLeft": 44,
+      "textRight": 131,
+      "fullBleed": false,
+      "footer": false,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     },
+     {
+      "sel": "div.workspace-grid",
+      "tag": "div",
+      "top": 875,
+      "height": 1085,
+      "words": 106,
+      "media": 1,
+      "middle": 2,
+      "heading": {
+       "text": "Relay Throughput (Mbps)",
+       "size": 15,
+       "tag": "h3"
+      },
+      "left": 33,
+      "right": 17,
+      "textLeft": 33,
+      "textRight": 17,
+      "fullBleed": false,
+      "footer": true,
+      "hero": false,
+      "continues": false,
+      "pinned": false
+     }
+    ],
+    "gaps": [],
+    "h1s": [
+     {
+      "text": "Tunnel Dashboard",
+      "size": 15,
+      "top": 13,
+      "firstScreen": true
+     }
+    ],
+    "edgeText": [],
+    "edges": [
+     {
+      "x": 35,
+      "n": 4
+     },
+     {
+      "x": 16,
+      "n": 1
+     },
+     {
+      "x": 54,
+      "n": 1
+     }
+    ],
+    "leftBlocks": 6,
+    "bodySize": 13,
+    "stage": false,
+    "explains": true,
+    "slivers": [],
+    "voidShare": 0,
+    "voidBox": null
+   },
+   "app": {
+    "viewport": {
+     "w": 390,
+     "h": 844
+    },
+    "dark": true,
+    "ground": "#12151b",
+    "sidebar": null,
+    "topbar": {
+     "h": 48
+    },
+    "canvas": {
+     "left": 16,
+     "right": -570
+    },
+    "hero": {
+     "text": "Tunnel Dashboard",
+     "words": 2,
+     "chars": 16,
+     "lines": 1,
+     "size": 15,
+     "vw": 3.8,
+     "font": "Segoe UI Variable",
+     "weight": 600,
+     "tracking": -0.01,
+     "leading": 1.45,
+     "top": 13,
+     "tag": "h1",
+     "kind": "heading",
+     "align": "left",
+     "position": "left"
+    },
+    "charts": 3,
+    "layout": {
+     "panels": 7,
+     "firstScreen": 4,
+     "ragged": [],
+     "voids": []
+    },
+    "tiles": 0,
+    "panels": {
+     "count": 7,
+     "radii": [
+      [
+       8,
+       5
+      ],
+      [
+       0,
+       2
+      ]
+     ],
+     "heavyBorders": 0,
+     "borderSamples": [],
+     "heavyShadows": 0,
+     "softShadows": 0,
+     "shadowSamples": [],
+     "glass": 0
+    },
+    "chips": {
+     "count": 1,
+     "hues": 1,
+     "samples": [
+      {
+       "hue": 220,
+       "size": 32,
+       "radius": "6px"
+      }
+     ]
+    },
+    "numbers": {
+     "cells": 8,
+     "leftAligned": 0,
+     "figures": 9,
+     "tabularShare": 1,
+     "kpiMax": 20
+    },
+    "rows": {
+     "count": 6,
+     "median": 62
+    },
+    "chartHues": 1,
+    "placeholders": [],
+    "type": {
+     "under13": 0.22,
+     "tiny": 0,
+     "tinySamples": [],
+     "sizes": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      18,
+      20
+     ]
+    },
+    "title": {
+     "text": "Tunnel Dashboard",
+     "size": 15,
+     "top": 13
+    },
+    "colourShare": 0.002
+   },
+   "consoleErrors": []
+  }
+ ],
+ "findings": [],
+ "images": [
+  {
+   "viewport": "desktop",
+   "width": 1440,
+   "fold": "C:\\Users\\chris\\Documents\\Network Tunneling Project\\.taste-skill\\after\\desktop-fold.jpg",
+   "pages": [
+    "C:\\Users\\chris\\Documents\\Network Tunneling Project\\.taste-skill\\after\\desktop-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "tablet",
+   "width": 768,
+   "fold": "C:\\Users\\chris\\Documents\\Network Tunneling Project\\.taste-skill\\after\\tablet-fold.jpg",
+   "pages": [
+    "C:\\Users\\chris\\Documents\\Network Tunneling Project\\.taste-skill\\after\\tablet-page-01.jpg"
+   ],
+   "film": []
+  },
+  {
+   "viewport": "mobile",
+   "width": 390,
+   "fold": "C:\\Users\\chris\\Documents\\Network Tunneling Project\\.taste-skill\\after\\mobile-fold.jpg",
+   "pages": [
+    "C:\\Users\\chris\\Documents\\Network Tunneling Project\\.taste-skill\\after\\mobile-page-01.jpg"
+   ],
+   "film": []
+  }
+ ]
+}

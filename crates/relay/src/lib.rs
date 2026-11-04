@@ -14,6 +14,7 @@
 
 pub mod admissions;
 pub mod limits;
+pub mod observability;
 pub mod session;
 pub mod shutdown;
 pub mod tcp;
@@ -34,6 +35,7 @@ pub use admissions::{
     RelayAdmissionSyncDelta, RevocationLatencySample, RevocationTimingStats,
     DEFAULT_MAX_RELAY_ADMISSIONS, MAX_RELAY_ADMISSIONS_CEILING, MAX_REVOCATION_SAMPLES,
 };
+pub use observability::{format_relay_prometheus, RelayTelemetrySnapshot};
 
 pub use limits::{
     BackpressureDropReason, BoundedSessionQueue, GlobalRelayMemoryBudget, RelayCapacityConfig,

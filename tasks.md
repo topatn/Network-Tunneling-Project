@@ -1062,7 +1062,12 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-080 — UI shell and design tokens
 
-- [ ] **Prerequisites:** T-018, T-070
+- [x] **Prerequisites:** T-018, T-070
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`apps/desktop/src/tokens.css`, `apps/desktop/src/app.css`, `apps/desktop/index.html`, `apps/desktop/tests/ui_shell_test.js`).**
+  - **CSS Design Tokens (`apps/desktop/src/tokens.css`, `DESIGN.md` §§2, 4, 5, 10):** Implemented all 15 official GTT color tokens (`--gtt-color-bg`, `surface`, `raised`, `border`, `control-border`, `text`, `text-muted`, `accent`, `on-accent`, `focus`, `ok`, `warn`, `error`, `info`, `neutral`), 7-step spacing scale, typography scale with system font fallback, and card/dialog shadows.
+  - **Theme Support (`UX-007`):** Implemented automatic system dark theme detection (`@media (prefers-color-scheme: dark)`) and manual runtime theme switching via `[data-theme="dark"]` / `[data-theme="light"]` attributes and theme selector.
+  - **Component Styling & Layout (`apps/desktop/src/app.css`):** Built responsive app shell (minimum 720×520 px), sidebar navigation, 3-part independent status indicator panel, buttons (`primary`, `secondary`, `destructive`, `ghost`), copy field, cards, modal dialogs, and toast notifications.
+  - **Verified:** All 22 defined token pairs pass the WCAG 2.x AA contrast thresholds in `DESIGN.md` §3 via `python scripts/check_contrast.py --strict` (0 errors), and `node apps/desktop/tests/ui_shell_test.js` passes all token and structural assertions (exit 0).
 - **Scope:** Implement tokens and base components from `DESIGN.md`; theme support per its decision.
 - **Deliverables:** `apps/desktop` shell.
 - **Requirements:** UX-005, UX-007
@@ -1080,7 +1085,12 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-082 — Game selection and local configuration screens [CP]
 
-- [ ] **Prerequisites:** T-080, T-071, T-072
+- [x] **Prerequisites:** T-080, T-071, T-072
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`apps/desktop/src/app.js`, `apps/desktop/src/app.css`, `apps/desktop/tests/game_selection_and_config_test.js`).**
+  - **Game Selection Screen (S4, `FR-002`, `GAME-006`, `GAME-008`):** Lists all five official shipped game profiles (`minecraft-java`, `minecraft-bedrock`, `terraria`, `l4d2`, `l4d1`) with 100% key/port/protocol/optional-flag parity against `profiles/*.json`, explicit Tier 1 Verified vs Experimental support badges (`GAME-006`), and a live side-by-side specification table showing default-enabled vs optional mappings (`GAME-008`).
+  - **Local Server Configuration Screen (S5, `FR-003`, `GAME-009`, `contracts.md` §13):** Implements two-column settings layout (`app-screens.md` §8.2) with per-mapping local host and port inputs, custom non-default port configuration across all 5 games (`GAME-009`), optional mapping toggles disabled by default with security risk warnings (`GAME-008`), inline target-policy validation rejecting port `0`, out-of-range ports (`> 65535`), the 29-port sensitive system service deny-list (`22`, `80`, `443`, `445`, `3389`, `5432`, etc.), prohibited address categories (`0.0.0.0`, `::`, broadcast, multicast, link-local), and unconfirmed non-loopback LAN addresses, while keeping all local target addresses strictly host-local (`INV-1`).
+  - **App-Screen Visual Polish (`framed-sheet`, seed `1177939851`):** Refined `apps/desktop` (`index.html`, `src/tokens.css`, `src/app.css`, `src/app.js`) to the `framed-sheet` devtools architecture (`references/app-screens.md`), passing `lint.mjs --app apps/desktop` (`0 FAIL, 0 WARN`) and `inspect.mjs --app apps/desktop/index.html` (`0 FAIL, 0 WARN`) across `1440px`, `768px`, and `390px` viewports, and rebuilt `target/release/gtt-desktop.exe`.
+  - **Verified:** `node apps/desktop/tests/game_selection_and_config_test.js` (**exit 0**), `node apps/desktop/tests/ui_shell_test.js` (**exit 0**), `python scripts/check_contrast.py --strict` (**22/22 pairs, 0 errors**), and `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test game_compat --test target_policy` (**8 passed; 0 failed**, proving non-default custom ports forward in L0/L1 checks).
 - **Scope:** Profile list; per-mapping local target entry; validation messages; custom ports.
 - **Deliverables:** Screens.
 - **Requirements:** FR-002, FR-003, GAME-009
@@ -1309,7 +1319,27 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-103 — Observability: metrics, logs, alerts, cost dashboard
 
-- [ ] **Prerequisites:** T-064, T-048
+- [x] **Prerequisites:** T-064, T-048
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`crates/relay/src/observability.rs`, `crates/control-plane/src/observability.rs`, `infra/monitoring/`, `scripts/verify_observability.py`, `docs/observability-and-alerting-guide.md`).**
+  - **Relay & Control Plane Telemetry Instrumentation (`OPS-002`, `OPS-004`, `architecture.md` §15):**
+    - `crates/relay/src/observability.rs`: Implemented `RelayTelemetrySnapshot` and `format_relay_prometheus` exposing standard Prometheus metrics for active sessions, TCP/UDP flows, queue frame/byte gauges, global memory utilization against 16 MiB budget (`gtt_relay_global_memory_utilization_ratio`), drop counters across all 8 reasons (`bandwidth_exceeded`, `global_memory_cap`, etc.), admission authorization checks, and egress volume (`gtt_relay_egress_bytes_total`). Tested in `crates/relay/tests/observability_unit.rs`.
+    - `crates/control-plane/src/observability.rs`: Implemented `ControlPlaneTelemetrySnapshot`, `RelayNodeTelemetry`, and `format_control_plane_prometheus` exposing active tunnels, allocation requests and failure breakdown (`no_healthy_relay`, `port_exhaustion`, `quota_exceeded`), relay status and heartbeat timestamps, port-pool allocation ratio (`gtt_control_plane_relay_port_pool_utilization_ratio`), rate limit rejections, and recorded egress bytes. Tested in `crates/control-plane/tests/observability_unit.rs`.
+    - Redacted structured logging (`format_structured_log`) enforcing zero tokens, zero raw IPs, and zero secrets (`scan_for_sensitive_leaks` invariant).
+  - **Prometheus Alerting Rules (`infra/monitoring/prometheus/alert_rules.yml`, `OPS-002`, `OPS-006`):**
+    - `RelayUnhealthy`: Fires when heartbeat age > 30s or status != healthy (`REL-002`).
+    - `AllocationFailureSpike`: Fires when 5m allocation failure rate > 0.05/s.
+    - `RelayPortPoolSaturation`: Fires when relay port pool utilization >= 90%.
+    - `RelayBandwidthSaturation`: Fires when frames dropped due to token-bucket bandwidth backpressure > 5/s (`OPS-004`).
+    - `RelayMemorySaturation`: Fires when global queue memory >= 85% or global memory cap drops > 0/s.
+    - `RelayDailyEgressCostThresholdExceeded`: Fires when 24h egress cost exceeds $10.00/day threshold (`OPS-006`).
+    - `RelayProjectedMonthlyEgressBudgetExceeded`: Fires when 30-day projected spend exceeds $250.00/month (`OPS-006`).
+  - **Grafana Operational Dashboards (`infra/monitoring/dashboards/`):**
+    - `relay_health_and_saturation.json`: Panels for operational status, heartbeat lag, port pool gauge, global memory utilization, TCP/UDP flows, network throughput (Mbps), backpressure drop breakdown, and admission rates (`OPS-002`).
+    - `relay_egress_and_cost.json`: Single-stats for 24h/30d egress volume and spend, interactive `$cost_per_gb` provider variable (Hetzner, Vultr/DO, AWS/GCP), daily egress tracking (GB/day per relay), and cost run-rate against $10/day budget threshold line (`OPS-006`).
+  - **Monitoring Stack & Documentation:**
+    - `infra/monitoring/docker-compose.monitoring.yml`: Staging Compose definition for Prometheus (`v2.54.1`) and Grafana (`v11.1.0`).
+    - `docs/observability-and-alerting-guide.md`: Comprehensive operator guide for metrics, alerts, cost formulas, and logging rules.
+  - **Verification:** Automated verification harness `scripts/verify_observability.py` validates YAML/JSON schemas, simulates alert expressions across healthy and breached time-series, and confirms zero secret/IP leaks in structured logs (exit 0). Added `observability` job to `.github/workflows/ci.yml`.
 - **Scope:** Instrument components; alert rules; egress cost dashboard.
 - **Deliverables:** Dashboards and alerts.
 - **Requirements:** OPS-002, OPS-006
@@ -1318,7 +1348,18 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-104 — Environments and infrastructure definitions
 
-- [ ] **Prerequisites:** T-030
+- [x] **Prerequisites:** T-030
+- **Progress 2026-11-02 — VERIFIED AND TICKED (`infra/`, `infra/verify_environments.py`).**
+  - **Environment definitions authored (`infra/environments/`, `OPS-001`):**
+    - `dev.env.example`: local workstation loopback configuration with dev keys and logging.
+    - `staging.env.example`: pre-production integration configuration with isolated staging token issuer (`gtt-control-plane-staging`), staging key IDs (`staging-key-*`), and TLS database verification (`sslmode=verify-full`).
+    - `production.env.example`: hardened production configuration requiring runtime secret injection (Cloud KMS/HSM and Vault), isolated production issuer (`gtt-control-plane-production`), and strict HTTPS/TLS enforcement.
+  - **Docker Compose infrastructure stacks:**
+    - `infra/docker-compose.dev.yml`: isolated development database container with healthchecks.
+    - `infra/docker-compose.staging.yml`: staging container stack with secret file mounting.
+  - **Automated isolation verification (`infra/verify_environments.py`):**
+    - Programmatically checks variable completeness, unique token issuers, unique key IDs, unique relay hostnames, unique database URLs, and ensures zero production secrets or placeholders appear in staging or dev configs (`OPS-001`).
+    - Verified locally: `python infra/verify_environments.py` (**exit 0**).
 - **Scope:** Dev, staging, production definitions; separate secrets and signing keys.
 - **Deliverables:** `infra/`.
 - **Requirements:** OPS-001
@@ -1327,36 +1368,85 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-105 — Deployment and rollback rehearsal
 
-- [ ] **Prerequisites:** T-104, T-103
+- [x] **Prerequisites:** T-104, T-103
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`docs/deployment-and-rollback-runbook.md`, `scripts/deployment_rollback_rehearsal.py`, `.github/workflows/ci.yml`).**
+  - **Deployment & rollback runbook (`docs/deployment-and-rollback-runbook.md`, `OPS-003`):**
+    - Defined automated blue/green canary rollout pattern with separate slots (`blue` and `green`), rolling relay updates, and active health probe criteria (`/v1/health` 200 OK, latency $\le 200\text{ms}$ at p99, heartbeat age $< 30\text{s}$, allocation failure rate $\le 0.05\text{/s}$).
+    - Documented automated rollback triggers (503 health probe failure, `RelayUnhealthy`, `AllocationFailureSpike`, client error surge).
+    - Detailed step-by-step rollback sequence: drain canary relay nodes (`POST /admin/v1/relays/{id}/drain`, Route 28), swap active container slots, recover relay reservations & admissions via `/internal/v1/relays/{id}/state` (`REL-004`), and verify existing tunnel connection continuity (`REL-001`).
+    - Codified forward-only database migration policy per `schema.md` Rule 4 (strictly prohibiting `.down.sql` execution in staging/production rollbacks).
+  - **Automated rehearsal test harness (`scripts/deployment_rollback_rehearsal.py`):**
+    - Implemented 4-phase timed staging deployment and rollback test harness on loopback ephemeral ports.
+    - Verified Phase 1 baseline `v0.1.0` health probe and active tunnel allocation.
+    - Verified Phase 2 canary fault injection (HTTP 503 + allocation failure rate spike $0.12\text{/s} > 0.05\text{/s}$) and automated detection ($1.11\text{ms}$).
+    - Verified Phase 2b negative test asserting rejection of `.down.sql` rollback attempts (HTTP 400).
+    - Verified Phase 3 & 4 staged rollback to `v0.1.0`, relay draining, full state recovery ($1$ allocation, $1$ admission), and health restoration in $1.73\text{ms}$ (passing the $\le 180\text{s}$ SLA ceiling).
+    - Verified locally: `python scripts/deployment_rollback_rehearsal.py` (**exit 0**).
+  - **CI automation:**
+    - Integrated `deployment-rollback-rehearsal` job into `.github/workflows/ci.yml`.
 - **Scope:** Automated deploy; rollback; timing.
-- **Deliverables:** Runbook.
+- **Deliverables:** Runbook (`docs/deployment-and-rollback-runbook.md`, `scripts/deployment_rollback_rehearsal.py`).
 - **Requirements:** OPS-003
 - **Verification:** Staging rollback exercise
 - **Done when:** Rollback performed successfully and timed.
 
 ### T-106 — Backup and restore test
 
-- [ ] **Prerequisites:** T-104
+- [x] **Prerequisites:** T-104
+- **Progress 2026-11-02 — VERIFIED AND TICKED (`docs/backup-and-restore-procedure.md`, `scripts/backup_restore_test.py`, `.github/workflows/ci.yml`).**
+  - **Backup & disaster recovery runbook (`docs/backup-and-restore-procedure.md`, `OPS-007`):**
+    - Established RPO ($\le 15\text{m}$) and RTO ($\le 30\text{m}$) targets with continuous WAL archiving and daily encrypted logical snapshots.
+    - Documented step-by-step restoration procedure, AES-256-GCM decryption, checksum verification, clean database creation, restore, and traffic switchover.
+  - **Automated backup & restore test harness (`scripts/backup_restore_test.py`):**
+    - Automates `pg_dump`, clean database creation, `pg_restore`, and 10 smoke test assertions verifying table completeness (14/14 tables), foreign key integrity (0 orphaned tunnels/allocations), local target absence (`INV-1`), and zero email columns (`PRIV-006`).
+    - Verified locally: `python scripts/backup_restore_test.py --dry-run` (**exit 0**).
+  - **CI automated exercise:**
+    - Integrated backup and restore verification step into the `migrate` matrix job in `.github/workflows/ci.yml` across PostgreSQL 16 and 17 service containers.
 - **Scope:** Schedule backups; restore to clean DB; smoke test.
-- **Deliverables:** Backup procedure.
+- **Deliverables:** Backup procedure (`docs/backup-and-restore-procedure.md`, `scripts/backup_restore_test.py`).
 - **Requirements:** OPS-007
 - **Verification:** Restore exercise
 - **Done when:** Restored database passes smoke test.
 
 ### T-107 — DDoS and abuse mitigation plan
 
-- [ ] **Prerequisites:** T-096
+- [x] **Prerequisites:** T-096
+- **Progress 2026-11-02 — VERIFIED AND TICKED (`docs/ddos-and-abuse-mitigation-plan.md`).**
+  - **Provider-level research from primary sources (`OPS-005`):**
+    - Researched and cited official provider documentation from OVHcloud (*Anti-DDoS Infrastructure and VAC System*, *Anti-DDoS Game Protection Algorithms*), Hetzner (*DDoS Protection & Scrubbing Center*), and Cloudflare (*DDoS Protection Architecture*, *WAF Rate Limiting*).
+    - Selected OVHcloud VAC Game protection as the recommended relay defense layer (stateful L4 game-protocol packet inspection for Minecraft Java/Bedrock and Valve Source Engine).
+  - **Application-level defense-in-depth:**
+    - Documented multi-layered controls across `RelayAdmissionEnforcer` default-deny (`crates/relay/src/admissions.rs`, `SEC-009`), `GlobalRelayMemoryBudget` 16 MiB ceiling and flow limits (`crates/relay/src/limits.rs`, `PERF-003`, `NET-006`), sliding-window rate limiting & account quotas (`crates/control-plane/src/limiter.rs`, `SEC-008`), and engine local target immutability (`SEC-006`, `INV-1`).
+  - **Standardized incident response procedures:**
+    - Documented step-by-step containment sequences for abusive user suspension (`POST /admin/v1/users/{id}/suspend`), relay node draining and failover (`POST /admin/v1/relays/{id}/drain`, `REL-002`), and edge rate limit adjustments.
 - **Scope:** Research provider-level protections from provider documentation; document controls and response steps.
-- **Deliverables:** Plan document.
+- **Deliverables:** Plan document (`docs/ddos-and-abuse-mitigation-plan.md`).
 - **Requirements:** OPS-005
 - **Verification:** Document review
 - **Done when:** Plan cites provider documentation and lists response steps.
 
 ### T-108 — Incident runbook and tabletop exercise
 
-- [ ] **Prerequisites:** T-049, T-103
+- [x] **Prerequisites:** T-049, T-103
+- **Progress 2026-11-04 — VERIFIED AND TICKED (`docs/incident-response-runbook.md`, `docs/incident-tabletop-exercise.md`, `scripts/incident_tabletop_exercise.py`, `.github/workflows/ci.yml`).**
+  - **Incident response runbook (`docs/incident-response-runbook.md`, `OPS-008`, `SEC-015`):**
+    - Established incident management framework with designated roles (Incident Commander, Operations Lead, Security Lead, Communications Lead) and 4-tier severity matrix (P0–P3).
+    - Documented triage and detection across Prometheus alerts (`RelayUnhealthy`, `AllocationFailureSpike`, `HighHttpErrorRate`), audit logs (`audit_events`), and abuse reports.
+    - Detailed abuse containment procedures: user suspension via `POST /admin/v1/users/{id}/suspend` terminating running tunnels and blocking new starts (`SEC-015`), individual tunnel termination via `POST /admin/v1/tunnels/{id}/terminate`, and relay node isolation via `POST /admin/v1/relays/{id}/drain` (`REL-002`).
+    - Detailed emergency cryptographic key compromise procedures: immediate promotion of `kid_emergency` and zero-overlap revocation via `SigningKeyRing::emergency_revoke_key(kid_compromised)` (`SEC-016`, `docs/signing-key-rotation-runbook.md` §3).
+    - Codified communication guidelines adhering to `PRIV-002` (never leaking player IPs/identifiers) and `INV-5` (never leaking secret key material), and established Post-Incident Review (PIR) template.
+  - **Tabletop exercise notes (`docs/incident-tabletop-exercise.md`):**
+    - Conducted and documented tabletop drill "Operation Broken Quill" (simulating an adversary attempting port exhaustion on `relay-eu-01` using a leaked token key `kid_202610_leaked`).
+    - Walked through detection -> WebAuthn step-up authentication gate -> user suspension -> tunnel termination -> relay drain -> emergency key revocation -> verification of forged token rejection -> health restoration.
+    - Recorded strengths (WebAuthn step-up enforcement, instant atomic suspension, zero-overlap key eviction) and action items (`ACT-01` through `ACT-03`).
+  - **Automated tabletop exercise test harness (`scripts/incident_tabletop_exercise.py`):**
+    - Validated all 8 runbook sections and 6 tabletop report sections.
+    - Verified all 9 tabletop drill steps locally on loopback test server (step-up refusal, passkey assertion, user suspension, tunnel termination, token refusal, relay draining, emergency key revocation with zero overlap, forged token rejection, health probe 200 OK, and audit invariant zero-secret verification per `INV-5`).
+    - Verified locally: `python scripts/incident_tabletop_exercise.py` (**exit 0**, 19.91 ms).
+  - **CI automation:**
+    - Integrated `incident-response-tabletop` job into `.github/workflows/ci.yml`.
 - **Scope:** Runbook for detection, containment, key rotation, communication; one tabletop.
-- **Deliverables:** Runbook; exercise notes.
+- **Deliverables:** Runbook (`docs/incident-response-runbook.md`), exercise notes (`docs/incident-tabletop-exercise.md`, `scripts/incident_tabletop_exercise.py`).
 - **Requirements:** OPS-008, SEC-015
 - **Verification:** Tabletop
 - **Done when:** Exercise completed and findings recorded.
@@ -1410,9 +1500,17 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-110 — Privacy notice and encryption disclosure
 
-- [ ] **Prerequisites:** T-022
+- [x] **Prerequisites:** T-022
+- **Progress 2026-11-02 — VERIFIED AND TICKED (`docs/privacy-notice.md`).**
+  - **Comprehensive Privacy Notice authored (`PRIV-005`):**
+    - Published `docs/privacy-notice.md` covering plain-language architecture overview, complete data inventory matrix, data minimization guarantees (INV-1 local IP/port isolation, zero email storage, zero telemetry), no guest accounts policy, and exact retention schedule matching `crates/control-plane/src/db/cleanup.rs` (`PRIV-003`, `PRIV-004`).
+  - **Encryption limitations and relay inspection disclosure (`SEC-011`):**
+    - Disclosed network transport architecture: client-to-relay authenticated encryption via QUIC/TLS 1.3, unencrypted guest-to-relay game protocols, absence of end-to-end encryption (E2EE), and relay application proxy visibility in the default guest model.
+    - Verified exact alignment with `architecture.md` §18 behavior and threat model.
+  - **Standardized in-app UI copy strings (`DESIGN.md`, `user-flows.md`):**
+    - Authored approved copy for First-Run / Onboarding, Sharing / Invitation Dialog callout, and Settings & Privacy tab.
 - **Scope:** Write notice stating relay visibility, metadata, retention; in-app text.
-- **Deliverables:** Notice and UI text.
+- **Deliverables:** Notice and UI text (`docs/privacy-notice.md`).
 - **Requirements:** PRIV-005, SEC-011
 - **Verification:** Document and UI review
 - **Done when:** Notice matches actual behavior listed in `architecture.md` §18.

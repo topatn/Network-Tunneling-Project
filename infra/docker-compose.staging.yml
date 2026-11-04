@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: gtt-staging-postgres
+    environment:
+      POSTGRES_USER: gtt_staging_app
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: gtt_staging
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - gtt_staging_pgdata:/var/lib/postgresql/data
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gtt_staging_app -d gtt_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+secrets:
+  db_password:
+    file: ./secrets/staging_db_password.txt
+
+volumes:
+  gtt_staging_pgdata:
