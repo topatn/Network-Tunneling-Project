@@ -327,6 +327,8 @@ const state = {
   pendingManagedUpdateVersion: null,
   managedServer: {
     profileId: "minecraft-java",
+    jarPath: "C:\\Users\\chris\\Downloads\\server.jar",
+    pollInterval: null,
     state: "Not set up", // "Not set up" | "Downloading" | "Verifying" | "Configuring" | "Starting" | "Running" | "Crashed" | "Updating" | "Failed"
     termsAccepted: false,
     eulaUrl: "https://aka.ms/MinecraftEULA",
@@ -2330,6 +2332,68 @@ const EngineClient = {
     } catch (_) {}
     return null;
   },
+
+  async provisionServer(options = {}) {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/server/provision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      const errJson = await res.json().catch(() => ({}));
+      return { ok: false, error: errJson.error || "Provisioning failed" };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  },
+
+  async startServer(options = {}) {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/server/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      const errJson = await res.json().catch(() => ({}));
+      return { ok: false, error: errJson.error || "Failed to start server" };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  },
+
+  async stopServer(options = {}) {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/server/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return null;
+  },
+
+  async getServerStatus() {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/server/status");
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return null;
+  },
 };
 
 // Maps engine state machine states (contracts.md §12) to UI labels (DESIGN.md §6)
@@ -2601,7 +2665,104 @@ function startManagedServerProvisioning() {
   state.managedServer.cancelSummary = null;
   state.managedServer.artifactDiscarded = false;
   setManagedServerState("Downloading", { progressPercent: 25 });
+
+  if (typeof window !== "undefined" && typeof window.fetch === "function") {
+    triggerLiveServerProvisioning();
+  }
+
   return { ok: true, state: state.managedServer.state };
+}
+
+async function triggerLiveServerProvisioning() {
+  if (typeof EngineClient === "undefined") return;
+  const isAvailable = await EngineClient.checkAvailable();
+  if (!isAvailable) return;
+
+  try {
+    setManagedServerState("Verifying", { progressPercent: 45 });
+    const provRes = await EngineClient.provisionServer({
+      profile_id: state.selectedProfile.id,
+      jar_path: state.managedServer.jarPath || "C:\\Users\\chris\\Downloads\\server.jar",
+      accept_eula: state.managedServer.termsAccepted,
+      version: "26.3",
+      max_players: 20,
+    });
+
+    if (!provRes || !provRes.ok) {
+      const errMsg = provRes?.error || "Artifact verification or provisioning failed";
+      state.managedServer.crashLogExcerpt = errMsg;
+      setManagedServerState("Failed", { failureCode: "srv_verification_failed" });
+      showToast("Provisioning failed: " + errMsg);
+      return;
+    }
+
+    setManagedServerState("Configuring", { progressPercent: 75 });
+    if (provRes.server_port) {
+      state.managedServer.generatedConfig.serverPort = provRes.server_port;
+      state.managedServer.currentVersion = provRes.version || "26.3";
+    }
+
+    setManagedServerState("Starting", { progressPercent: 90 });
+    const startRes = await EngineClient.startServer({
+      profile_id: state.selectedProfile.id,
+    });
+
+    if (!startRes || !startRes.ok) {
+      const errMsg = startRes?.error || "Failed to start Java server process";
+      state.managedServer.crashLogExcerpt = errMsg;
+      setManagedServerState("Failed", { failureCode: "srv_refused_before_ready" });
+      showToast("Start failed: " + errMsg);
+      return;
+    }
+
+    if (state.managedServer.pollInterval) {
+      clearInterval(state.managedServer.pollInterval);
+    }
+
+    state.managedServer.pollInterval = setInterval(async () => {
+      const s = await EngineClient.getServerStatus();
+      if (!s) return;
+
+      if (s.last_log_excerpt) {
+        state.managedServer.crashLogExcerpt = s.last_log_excerpt;
+        const consoleEl = document.getElementById("managed-console-output");
+        if (consoleEl) {
+          consoleEl.textContent = s.last_log_excerpt;
+          consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+      }
+
+      if (s.state === "running") {
+        if (state.managedServer.pollInterval) {
+          clearInterval(state.managedServer.pollInterval);
+          state.managedServer.pollInterval = null;
+        }
+        setManagedServerState("Running", { progressPercent: 100 });
+        state.localServerState = "Reachable";
+        showToast("Minecraft: Java Edition server is running on 127.0.0.1:25565!");
+        render();
+      } else if (s.state === "failed") {
+        if (state.managedServer.pollInterval) {
+          clearInterval(state.managedServer.pollInterval);
+          state.managedServer.pollInterval = null;
+        }
+        setManagedServerState("Failed", { failureCode: "srv_refused_before_ready" });
+        showToast("Server startup refused: " + (s.last_log_excerpt || "Process exited early"));
+        render();
+      } else if (s.state === "crashed") {
+        if (state.managedServer.pollInterval) {
+          clearInterval(state.managedServer.pollInterval);
+          state.managedServer.pollInterval = null;
+        }
+        setManagedServerState("Crashed", { failureCode: "srv_process_crashed", restartAttempt: s.crash_count || 1 });
+        render();
+      }
+    }, 1000);
+  } catch (err) {
+    state.managedServer.crashLogExcerpt = String(err);
+    setManagedServerState("Failed", { failureCode: "srv_process_io_error" });
+    showToast("Server provisioning error: " + err);
+  }
 }
 
 function advanceManagedServerProvisioningStep() {
@@ -2619,6 +2780,10 @@ function advanceManagedServerProvisioningStep() {
 }
 
 function cancelManagedServerProvisioning() {
+  if (state.managedServer.pollInterval) {
+    clearInterval(state.managedServer.pollInterval);
+    state.managedServer.pollInterval = null;
+  }
   const previousState = state.managedServer.state;
   const previousProgress = state.managedServer.progressPercent;
   state.managedServer.cancelSummary = `Cancelled during ${previousState} (${previousProgress}%). Temporary unverified files were removed; no server process was started.`;
@@ -2627,7 +2792,14 @@ function cancelManagedServerProvisioning() {
 }
 
 function stopManagedServer() {
+  if (state.managedServer.pollInterval) {
+    clearInterval(state.managedServer.pollInterval);
+    state.managedServer.pollInterval = null;
+  }
   state.managedServer.confirmedInGameCount = null;
+  if (typeof window !== "undefined" && typeof window.fetch === "function") {
+    EngineClient.stopServer().catch(() => {});
+  }
   setManagedServerState("Not set up", { progressPercent: 0 });
   showToast("Managed server stopped cleanly");
   return state.managedServer.state;
@@ -3802,6 +3974,18 @@ function renderManagedServerView() {
             </span>
           </label>
 
+          <div class="field-group" style="margin-top: 12px; margin-bottom: 12px;">
+            <label class="field-label" for="input-server-jar-path">Minecraft Server JAR File Path (SRV-001, SRV-002)</label>
+            <input type="text"
+                   id="input-server-jar-path"
+                   class="field-input"
+                   value="${ms.jarPath || 'C:\\Users\\chris\\Downloads\\server.jar'}"
+                   placeholder="e.g. C:\Users\chris\Downloads\server.jar" />
+            <span class="field-help" style="font-size: 12px; color: var(--muted); margin-top: 4px; display: block;">
+              Official Minecraft Java server artifact verified via SHA-256 before launch (<code data-ui>SRV-001</code>, <code data-ui>SRV-002</code>).
+            </span>
+          </div>
+
           <!-- Discrete 4-Step Progress (Download -> Verify -> Configure -> Start, DESIGN.md §8) -->
           <div class="provisioning-stepper" role="list" aria-label="Provisioning steps">
             ${stepMeta
@@ -3857,6 +4041,11 @@ function renderManagedServerView() {
               `
               }
             </div>
+          </div>
+
+          <div style="margin-top: 14px;">
+            <div style="font-size: 13px; font-weight: 600; margin-bottom: 4px; color: var(--text);">Server Console Output (<code data-ui>SRV-007</code>)</div>
+            <pre id="managed-console-output" style="max-height: 160px; overflow-y: auto; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 12px; font-family: monospace; line-height: 1.4; color: var(--text);">${ms.crashLogExcerpt || "No server logs yet. Agree to the EULA above and click 'Provision &amp; Start Server'."}</pre>
           </div>
         </div>
 
@@ -4005,6 +4194,10 @@ function bindManagedServerEvents() {
 
   document.getElementById("checkbox-accept-eula")?.addEventListener("change", (e) => {
     acceptManagedServerTerms(e.target.checked);
+  });
+
+  document.getElementById("input-server-jar-path")?.addEventListener("input", (e) => {
+    state.managedServer.jarPath = e.target.value.trim();
   });
 
   document.getElementById("btn-start-provisioning")?.addEventListener("click", () => {

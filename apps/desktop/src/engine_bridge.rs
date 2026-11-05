@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -291,6 +292,52 @@ pub struct ProvisionableProfileEntryDto {
     pub detail: String,
 }
 
+fn default_minecraft_profile_id() -> String {
+    "minecraft-java".to_owned()
+}
+
+/// Request payload to provision a managed server (`contracts.md` §13 `provision_server`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProvisionServerRequestDto {
+    #[serde(default = "default_minecraft_profile_id")]
+    pub profile_id: String,
+    pub jar_path: Option<String>,
+    #[serde(default)]
+    pub accept_eula: bool,
+    pub version: Option<String>,
+    pub max_players: Option<u16>,
+}
+
+/// Request payload to start a managed server (`contracts.md` §13 `start_managed_server`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartManagedServerRequestDto {
+    #[serde(default = "default_minecraft_profile_id")]
+    pub profile_id: String,
+}
+
+/// Request payload to stop a managed server (`contracts.md` §13 `stop_managed_server`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopManagedServerRequestDto {
+    pub timeout_secs: Option<u64>,
+}
+
+/// Response payload for managed server lifecycle actions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedServerActionResponseDto {
+    pub ok: bool,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_log_excerpt: Option<String>,
+}
+
 /// Event DTO pushed to the UI (`contracts.md` §13).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineEventDto {
@@ -414,8 +461,17 @@ impl EngineBridge {
             confirm_non_loopback: false,
         }];
 
-        let lifecycle = EngineLifecycle::configure(&profile, &default_inputs, "0.1.0")
+        let mut lifecycle = EngineLifecycle::configure(&profile, &default_inputs, "0.1.0")
             .map_err(|e| format!("initial engine configure failed: {e:?}"))?;
+
+        let local_app_data = std::env::var("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        if let Ok(paths) = gtt_engine::DataPaths::new(&local_app_data, "GTT") {
+            let provisionable = gtt_engine::provisionable_with_minecraft_java();
+            let supervisor = gtt_engine::ManagedServerSupervisor::new(paths, provisionable);
+            lifecycle.attach_server_supervisor(supervisor);
+        }
 
         Ok(Self {
             inner: Arc::new(Mutex::new(EngineBridgeInner {
@@ -429,10 +485,11 @@ impl EngineBridge {
 
     /// Retrieve the current 5-layer status snapshot (`contracts.md` §13 `get_status`).
     pub fn get_status(&self) -> Result<EngineStatusSnapshotDto, String> {
-        let inner = self
+        let mut inner = self
             .inner
             .lock()
             .map_err(|e| format!("mutex poisoned: {e}"))?;
+        let _ = inner.lifecycle.poll_managed_server();
         let snapshot = inner.lifecycle.get_status();
         let mode = inner.lifecycle.connectivity_mode();
         Ok(convert_snapshot_to_dto(&snapshot, mode))
@@ -469,8 +526,12 @@ impl EngineBridge {
 
         let inputs: Vec<MappingTargetInput> =
             req.mappings.iter().map(MappingTargetInput::from).collect();
+        let prev_sup = inner.lifecycle.take_server_supervisor();
         match EngineLifecycle::configure(&profile, &inputs, &inner.client_version) {
-            Ok(new_lifecycle) => {
+            Ok(mut new_lifecycle) => {
+                if let Some(sup) = prev_sup {
+                    new_lifecycle.attach_server_supervisor(sup);
+                }
                 inner.lifecycle = new_lifecycle;
                 inner.active_profile_id = req.profile_id.clone();
                 let snapshot = inner.lifecycle.get_status();
@@ -483,6 +544,9 @@ impl EngineBridge {
                 })
             }
             Err(failures) => {
+                if let Some(sup) = prev_sup {
+                    inner.lifecycle.attach_server_supervisor(sup);
+                }
                 let error_msgs: Vec<String> = failures
                     .iter()
                     .map(|f| format!("{}: {:?}", f.mapping_key, f.violation))
@@ -648,6 +712,189 @@ impl EngineBridge {
                 detail: e.detail,
             })
             .collect())
+    }
+
+    /// Provision a Minecraft: Java Edition server artifact (`contracts.md` §13 `provision_server`).
+    pub fn provision_server(
+        &self,
+        req: ProvisionServerRequestDto,
+    ) -> Result<ManagedServerActionResponseDto, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?;
+
+        let profile = match inner.registry.get(&req.profile_id) {
+            Some(p) => p.clone(),
+            None => {
+                let embedded = match req.profile_id.as_str() {
+                    "minecraft-java" => Some(BUNDLED_MINECRAFT_JAVA),
+                    _ => None,
+                };
+                match embedded {
+                    Some(src) => serde_json::from_str::<Profile>(src)
+                        .map_err(|e| format!("failed to parse profile {}: {e}", req.profile_id))?,
+                    None => return Err(format!("unknown game profile id: {}", req.profile_id)),
+                }
+            }
+        };
+
+        // Resolve candidate path for server.jar
+        let candidate_path =
+            if let Some(p) = req.jar_path.as_deref().filter(|s| !s.trim().is_empty()) {
+                PathBuf::from(p)
+            } else {
+                let downloads_candidate = std::env::var("USERPROFILE")
+                    .map(|u| Path::new(&u).join("Downloads").join("server.jar"))
+                    .unwrap_or_else(|_| PathBuf::from("server.jar"));
+                if downloads_candidate.exists() {
+                    downloads_candidate
+                } else {
+                    PathBuf::from(r"C:\Users\chris\Downloads\server.jar")
+                }
+            };
+
+        if !candidate_path.exists() {
+            return Err(format!(
+                "server.jar not found at {:?}; please provide a valid path",
+                candidate_path
+            ));
+        }
+
+        let expected_digest =
+            gtt_engine::Digest::parse_hex(gtt_engine::MINECRAFT_JAVA_OFFICIAL_SHA256)
+                .map_err(|e| format!("failed to parse official SHA-256: {e:?}"))?;
+
+        let artifact = gtt_engine::ArtifactSource {
+            path: candidate_path,
+            expected: expected_digest,
+        };
+
+        let version = req.version.as_deref().unwrap_or("26.3");
+        let max_players = req.max_players.unwrap_or(20);
+
+        let (_record, generated) = inner
+            .lifecycle
+            .provision_server(&profile, &artifact, version, max_players)
+            .map_err(|e| format!("provisioning failed: {e}"))?;
+
+        if req.accept_eula {
+            inner
+                .lifecycle
+                .set_managed_server_eula(&req.profile_id, true)
+                .map_err(|e| format!("failed to record EULA acceptance: {e}"))?;
+        }
+
+        // Reconfigure mapping 'game' -> 127.0.0.1:<generated.server_port>
+        let inputs = vec![MappingTargetInput {
+            mapping_key: "game".to_owned(),
+            local_host: "127.0.0.1".to_owned(),
+            local_port: generated.server_port,
+            enabled: true,
+            confirm_non_loopback: false,
+        }];
+        let prev_sup = inner.lifecycle.take_server_supervisor();
+        if let Ok(mut new_lc) = EngineLifecycle::configure(&profile, &inputs, &inner.client_version)
+        {
+            if let Some(sup) = prev_sup {
+                new_lc.attach_server_supervisor(sup);
+            }
+            inner.lifecycle = new_lc;
+        } else if let Some(sup) = prev_sup {
+            inner.lifecycle.attach_server_supervisor(sup);
+        }
+
+        let status = inner.lifecycle.get_managed_server_status();
+        Ok(ManagedServerActionResponseDto {
+            ok: true,
+            state: status.state.as_str().to_owned(),
+            profile_id: Some(req.profile_id),
+            version: status.version.clone(),
+            server_port: Some(generated.server_port),
+            message: Some(format!(
+                "Successfully provisioned Minecraft: Java Edition on local port {}",
+                generated.server_port
+            )),
+            last_log_excerpt: Some(status.last_log_excerpt.clone()),
+        })
+    }
+
+    /// Start a provisioned Minecraft: Java Edition server (`contracts.md` §13 `start_managed_server`).
+    pub fn start_managed_server(
+        &self,
+        req: StartManagedServerRequestDto,
+    ) -> Result<ManagedServerActionResponseDto, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?;
+
+        let launch_spec = gtt_engine::ServerLaunchSpec::detect_system_java(25)
+            .map_err(|e| format!("Java runtime validation failed: {e}"))?;
+
+        let state = inner
+            .lifecycle
+            .start_managed_server(&req.profile_id, launch_spec)
+            .map_err(|e| format!("failed to start managed server: {e}"))?;
+
+        let status = inner.lifecycle.get_managed_server_status();
+        Ok(ManagedServerActionResponseDto {
+            ok: true,
+            state: state.as_str().to_owned(),
+            profile_id: Some(req.profile_id),
+            version: status.version.clone(),
+            server_port: Some(25565),
+            message: Some("Managed Minecraft server process started".to_owned()),
+            last_log_excerpt: Some(status.last_log_excerpt.clone()),
+        })
+    }
+
+    /// Stop the managed server process (`contracts.md` §13 `stop_managed_server`).
+    pub fn stop_managed_server(
+        &self,
+        req: StopManagedServerRequestDto,
+    ) -> Result<ManagedServerActionResponseDto, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?;
+
+        let timeout = Duration::from_secs(req.timeout_secs.unwrap_or(10));
+        let state = inner
+            .lifecycle
+            .stop_managed_server(timeout)
+            .map_err(|e| format!("failed to stop managed server: {e}"))?;
+
+        let status = inner.lifecycle.get_managed_server_status();
+        Ok(ManagedServerActionResponseDto {
+            ok: true,
+            state: state.as_str().to_owned(),
+            profile_id: Some(status.profile_id.clone()),
+            version: status.version.clone(),
+            server_port: None,
+            message: Some("Managed server stopped".to_owned()),
+            last_log_excerpt: Some(status.last_log_excerpt.clone()),
+        })
+    }
+
+    /// Retrieve latest managed server status and poll child logs (`contracts.md` §13 `get_managed_server_status`).
+    pub fn get_managed_server_status(&self) -> Result<ManagedServerActionResponseDto, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?;
+
+        let _ = inner.lifecycle.poll_managed_server();
+        let status = inner.lifecycle.get_managed_server_status();
+        Ok(ManagedServerActionResponseDto {
+            ok: true,
+            state: status.state.as_str().to_owned(),
+            profile_id: Some(status.profile_id.clone()),
+            version: status.version.clone(),
+            server_port: Some(25565),
+            message: None,
+            last_log_excerpt: Some(status.last_log_excerpt.clone()),
+        })
     }
 
     /// Export a redacted diagnostics bundle (`FR-013`, `PRIV-002`, `T-075`).
@@ -823,6 +1070,89 @@ impl EngineBridge {
                     "application/json; charset=utf-8",
                     redacted.into_bytes(),
                 ),
+                Err(e) => (
+                    500,
+                    "application/json; charset=utf-8",
+                    format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                ),
+            },
+            ("POST", "/api/engine/server/provision") => {
+                let req: ProvisionServerRequestDto = match serde_json::from_slice(body_bytes) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return (
+                            400,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"invalid provision request: {e}\"}}")
+                                .into_bytes(),
+                        );
+                    }
+                };
+                match self.provision_server(req) {
+                    Ok(resp) => match serde_json::to_vec(&resp) {
+                        Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
+                        Err(e) => (
+                            500,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                        ),
+                    },
+                    Err(e) => (
+                        400,
+                        "application/json; charset=utf-8",
+                        format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                    ),
+                }
+            }
+            ("POST", "/api/engine/server/start") => {
+                let req: StartManagedServerRequestDto = serde_json::from_slice(body_bytes)
+                    .unwrap_or(StartManagedServerRequestDto {
+                        profile_id: "minecraft-java".to_owned(),
+                    });
+                match self.start_managed_server(req) {
+                    Ok(resp) => match serde_json::to_vec(&resp) {
+                        Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
+                        Err(e) => (
+                            500,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                        ),
+                    },
+                    Err(e) => (
+                        400,
+                        "application/json; charset=utf-8",
+                        format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                    ),
+                }
+            }
+            ("POST", "/api/engine/server/stop") => {
+                let req: StopManagedServerRequestDto =
+                    serde_json::from_slice(body_bytes).unwrap_or_default();
+                match self.stop_managed_server(req) {
+                    Ok(resp) => match serde_json::to_vec(&resp) {
+                        Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
+                        Err(e) => (
+                            500,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                        ),
+                    },
+                    Err(e) => (
+                        400,
+                        "application/json; charset=utf-8",
+                        format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                    ),
+                }
+            }
+            ("GET", "/api/engine/server/status") => match self.get_managed_server_status() {
+                Ok(resp) => match serde_json::to_vec(&resp) {
+                    Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
+                    Err(e) => (
+                        500,
+                        "application/json; charset=utf-8",
+                        format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                    ),
+                },
                 Err(e) => (
                     500,
                     "application/json; charset=utf-8",

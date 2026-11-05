@@ -34,12 +34,13 @@ pub use diagnostics::{
     REDACTED_IP_MARKER, REDACTED_PAYLOAD_MARKER, REDACTED_SECRET_MARKER, REDACTED_TOKEN_MARKER,
 };
 pub use gtt_server_manager::{
-    parse_java_major_version, parse_msmp_player_notification, validate_java_version_output,
-    AcquisitionRecord, ArtifactSource, ConfirmedPresenceSnapshot, DataPaths, Digest,
-    GeneratedConfig, ManagedServerError, ManagedServerState, ManagedServerStatusSnapshot,
-    ManagedServerSupervisor, MsmpPlayerNotification, ProvisionableSet, ServerConfigRequest,
-    ServerLaunchSpec, CONFIRMED_PRESENCE_LABEL, DEFAULT_MAX_CRASH_RESTARTS,
-    MINECRAFT_JAVA_EULA_MARKER, MINECRAFT_JAVA_PROFILE_ID, MINECRAFT_JAVA_READY_MARKER,
+    minecraft_java_acquisition_record, parse_java_major_version, parse_msmp_player_notification,
+    provisionable_with_minecraft_java, validate_java_version_output, AcquisitionRecord,
+    ArtifactSource, ConfirmedPresenceSnapshot, DataPaths, Digest, GeneratedConfig,
+    ManagedServerError, ManagedServerState, ManagedServerStatusSnapshot, ManagedServerSupervisor,
+    MsmpPlayerNotification, ProvisionableSet, ServerConfigRequest, ServerLaunchSpec,
+    CONFIRMED_PRESENCE_LABEL, DEFAULT_MAX_CRASH_RESTARTS, MINECRAFT_JAVA_EULA_MARKER,
+    MINECRAFT_JAVA_OFFICIAL_SHA256, MINECRAFT_JAVA_PROFILE_ID, MINECRAFT_JAVA_READY_MARKER,
 };
 pub use lifecycle::{
     EngineEvent, EngineLifecycle, EngineStatusSnapshot, PlayersSeenSnapshot,

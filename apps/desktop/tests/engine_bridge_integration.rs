@@ -286,3 +286,51 @@ fn t080_handle_http_request_dispatches_all_engine_routes() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn t076_engine_bridge_managed_server_routes_lifecycle() -> TestResult {
+    let bridge = EngineBridge::new().map_err(|e| format!("bridge new failed: {e}"))?;
+
+    // 1. Initial server status
+    let (status, _, body) = bridge.handle_http_request("GET", "/api/engine/server/status", &[]);
+    assert_eq!(status, 200);
+    let s_resp: serde_json::Value = serde_json::from_slice(&body)?;
+    assert_eq!(s_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        s_resp.get("state").and_then(|v| v.as_str()),
+        Some("not_installed")
+    );
+
+    // 2. Provision with official server.jar if present on host
+    let jar_path = r"C:\Users\chris\Downloads\server.jar";
+    if std::path::Path::new(jar_path).exists() {
+        let prov_payload = serde_json::json!({
+            "profile_id": "minecraft-java",
+            "jar_path": jar_path,
+            "accept_eula": true,
+            "version": "26.3",
+            "max_players": 20
+        });
+        let (status, _, body) = bridge.handle_http_request(
+            "POST",
+            "/api/engine/server/provision",
+            &serde_json::to_vec(&prov_payload)?,
+        );
+        assert_eq!(status, 200);
+        let prov_resp: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(prov_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            prov_resp.get("server_port").and_then(|v| v.as_u64()),
+            Some(25565)
+        );
+
+        // 3. Stop
+        let (status, _, body) =
+            bridge.handle_http_request("POST", "/api/engine/server/stop", b"{}");
+        assert_eq!(status, 200);
+        let stop_resp: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(stop_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
+    }
+
+    Ok(())
+}

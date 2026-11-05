@@ -229,8 +229,8 @@ fn main() -> ExitCode {
 }
 
 fn handle_connection(mut stream: TcpStream, bridge: &EngineBridge) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
 
     let mut buffer = [0u8; 8192];
     let bytes_read = match stream.read(&mut buffer) {

@@ -52,6 +52,25 @@ impl fmt::Display for AcquisitionRecord {
     }
 }
 
+/// Mojang official release SHA-256 for Minecraft: Java Edition server artifact (`SRV-002`, `E-15`).
+pub const MINECRAFT_JAVA_OFFICIAL_SHA256: &str =
+    "d052f14d7a173734fba553711e5b570162e2f2a313267ee31a21b975a679be64";
+
+/// Official acquisition record for Minecraft: Java Edition release 26.3 (`SRV-002`, `SRV-003`, `E-15`).
+pub fn minecraft_java_acquisition_record() -> AcquisitionRecord {
+    AcquisitionRecord {
+        profile_id: "minecraft-java".to_owned(),
+        experiment: "E-15".to_owned(),
+        source: "Mojang official release 26.3 server.jar".to_owned(),
+        verification: format!("SHA-256 {MINECRAFT_JAVA_OFFICIAL_SHA256} + Java 25 Runtime"),
+    }
+}
+
+/// A provisionable set containing the verified Minecraft: Java Edition acquisition record.
+pub fn provisionable_with_minecraft_java() -> ProvisionableSet {
+    ProvisionableSet::from_verified(vec![minecraft_java_acquisition_record()])
+}
+
 /// The set of games that may be provisioned.
 #[derive(Debug, Clone, Default)]
 pub struct ProvisionableSet {

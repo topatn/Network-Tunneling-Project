@@ -519,6 +519,19 @@ impl ServerLaunchSpec {
             selected_java_major,
         })
     }
+
+    /// Discover and validate the system Java runtime on `PATH` (`SRV-018`).
+    pub fn detect_system_java(required_java_major: u16) -> Result<Self, ManagedServerError> {
+        let output = Command::new("java").arg("-version").output().map_err(|e| {
+            ManagedServerError::JavaRuntimeRejected {
+                required_major: required_java_major,
+                found_major: None,
+                reason: format!("could not execute `java -version`: {e}"),
+            }
+        })?;
+        let version_str = String::from_utf8_lossy(&output.stderr);
+        Self::minecraft_java(PathBuf::from("java"), &version_str, required_java_major)
+    }
 }
 
 struct RunningServerProcess {
@@ -730,6 +743,24 @@ impl ManagedServerSupervisor {
             !trimmed.starts_with('#') && trimmed.eq_ignore_ascii_case("eula=true")
         });
         Ok(accepted)
+    }
+
+    /// Deliberately set or revoke EULA acceptance in `servers/<profile_id>/eula.txt` (`SRV-015`).
+    pub fn set_eula_accepted(
+        &mut self,
+        profile_id: &str,
+        accepted: bool,
+    ) -> Result<(), ManagedServerError> {
+        let eula_path = self.paths.resolve(&["servers", profile_id, "eula.txt"])?;
+        let s = if accepted {
+            "# By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\neula=true\n"
+        } else {
+            "# By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\neula=false\n"
+        };
+        fs::write(&eula_path, s).map_err(|e| ManagedServerError::DiskExhaustion {
+            reason: format!("failed to write eula.txt: {e}"),
+        })?;
+        Ok(())
     }
 
     /// Start the managed server process (`SRV-007`, `SRV-015`, `SRV-018`, `contracts.md` §13

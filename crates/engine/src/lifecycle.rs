@@ -296,6 +296,11 @@ impl EngineLifecycle {
         self.server_supervisor.as_ref()
     }
 
+    /// Take the attached [`ManagedServerSupervisor`], if any.
+    pub fn take_server_supervisor(&mut self) -> Option<ManagedServerSupervisor> {
+        self.server_supervisor.take()
+    }
+
     /// Borrow the validated local target table (`T-071`).
     pub fn target_table(&self) -> &ValidatedLocalTargetTable {
         &self.target_table
@@ -958,6 +963,24 @@ impl EngineLifecycle {
                 Err(err)
             }
         }
+    }
+
+    /// Deliberately accept or revoke Minecraft EULA terms (`SRV-015`).
+    pub fn set_managed_server_eula(
+        &mut self,
+        profile_id: &str,
+        accepted: bool,
+    ) -> Result<(), ManagedServerError> {
+        let Some(mut sup) = self.server_supervisor.take() else {
+            let err = ManagedServerError::ConfigurationInvalid {
+                reason: "no ManagedServerSupervisor attached to EngineLifecycle".to_owned(),
+            };
+            self.emit_managed_server_error(&err);
+            return Err(err);
+        };
+        let res = sup.set_eula_accepted(profile_id, accepted);
+        self.server_supervisor = Some(sup);
+        res
     }
 
     /// Start a provisioned Minecraft: Java Edition server (`contracts.md` §13

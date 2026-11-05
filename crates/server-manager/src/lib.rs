@@ -56,7 +56,10 @@ pub use config::{
     MAX_CONFIG_BYTES, MIN_SECRET_LEN,
 };
 pub use paths::{DataPaths, PathError};
-pub use provision::{AcquisitionRecord, ProvisionError, ProvisionableSet};
+pub use provision::{
+    minecraft_java_acquisition_record, provisionable_with_minecraft_java, AcquisitionRecord,
+    ProvisionError, ProvisionableSet, MINECRAFT_JAVA_OFFICIAL_SHA256,
+};
 pub use supervisor::{
     parse_java_major_version, parse_msmp_player_notification, validate_java_version_output,
     ConfirmedPresenceSnapshot, ManagedServerError, ManagedServerState, ManagedServerStatusSnapshot,

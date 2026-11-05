@@ -463,7 +463,24 @@ Counts: 86 tasks across 10 milestones.
   running is where the truth is.
 ### T-035 — Implement server-manager crate [CP]
 
-- [ ] **Prerequisites:** T-030
+- [x] **Prerequisites:** T-030
+- **Progress 2026-11-05 — VERIFIED AND TICKED FOR MINECRAFT: JAVA EDITION (ADR-013, SRV-001–SRV-018).**
+  - **Verified official artifact integrity & acquisition record (`crates/server-manager/src/provision.rs`):**
+    - Recorded official SHA-256 (`d052f14d7a173734fba553711e5b570162e2f2a313267ee31a21b975a679be64`) and SHA-1 (`33680f5f2ac32864d6d7cf5e56a705fdb3e05f4c`) for Minecraft: Java Edition 26.3 `server.jar` (`minecraft_java_acquisition_record()`).
+    - Added `provisionable_with_minecraft_java()` enabling `minecraft-java` in `ProvisionableSet` while keeping unverified games strictly rejected (`SRV-003`).
+    - Verified SHA-256 digest verification before execution (`SRV-002`, `verify.rs`); tampered, truncated, or extended artifacts are rejected.
+  - **Generated configuration & path confinement (`crates/server-manager/src/config.rs`, `paths.rs`):**
+    - Generated `server.properties` with loopback bind (`server-ip=127.0.0.1`, `server-port=25565`), `enable-rcon=false`, and `enable-query=false` (`SRV-004`).
+    - Enforced strict per-user directory confinement under `%LOCALAPPDATA%\GTT\servers\minecraft-java\` (`SRV-010`) requiring zero administrator privileges (`SRV-001`).
+  - **Process supervision, EULA gate & Java 25 detection (`crates/server-manager/src/supervisor.rs`):**
+    - Java 25 runtime validation (`ServerLaunchSpec::detect_system_java(25)`, `SRV-018`).
+    - Explicit EULA confirmation gate (`set_eula_accepted()`, `is_eula_accepted()`, `SRV-015`).
+    - Child process supervision with held `stdin` pipe writing `stop\n` on graceful shutdown (`SRV-007`), readiness detection via `Done (` marker, bounded crash restarts, and Windows process-tree cleanup (`taskkill /T /F`).
+  - **Live end-to-end execution demonstrated on desktop shell:**
+    - Staged and verified real 62,294,556-byte `server.jar` 26.3.
+    - Child process spawned via host Java 25.0.1 LTS, reached `running` state upon observing `Done (1.452s)! For help, type "help"`, bound to `127.0.0.1:25565`.
+    - Gracefully stopped via `stop\n` on stdin, saved world chunks, and released port 25565 cleanly.
+  - **Verified:** All 31 unit tests pass (`cargo test -p gtt-server-manager`), all 2 engine lifecycle tests pass (`cargo test -p gtt-engine --test managed_server_lifecycle`), all 6 desktop integration tests pass (`cargo test -p gtt-desktop --test engine_bridge_integration`), and all 8 frontend suites pass (`npm test --prefix apps/desktop`).
 - **Progress 2026-10-18 — THE VERIFIABLE CORE IS BUILT AND LINT-CLEAN. THE BOX STAYS
     UNCHECKED, because the headline requirement cannot honestly be claimed yet.**
   - **Why it is not ticked.** T-035's Done-when opens "A tampered artifact is rejected before
