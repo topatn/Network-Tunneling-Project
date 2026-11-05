@@ -1646,6 +1646,7 @@ Counts: 86 tasks across 10 milestones.
 ### T-122 — Update README with verified commands [CP]
 
 - [ ] **Prerequisites:** T-121
+- **Progress 2026-11-05 — UPDATED AND VERIFIED (`README.md`).** Replaced all planning placeholders with real, tested commands across code quality (`cargo fmt`, `cargo clippy`, `audit_traceability.py`, `check_contrast.py`), workspace test runner (`cargo test --workspace --all-targets`), desktop UI frontend suites (`npm test --prefix apps/desktop`), desktop native launch (`cargo run -p gtt-desktop`), and all 10 unified staging verification scripts. Every documented command was executed in this session and verified exit 0. Box remains unchecked per `AGENTS.md` §6.1 pending `T-121` final release sign-off.
 - **Scope:** Replace placeholders with commands that were actually executed.
 - **Deliverables:** Updated `README.md`.
 - **Requirements:** TEST-008

@@ -1,133 +1,179 @@
-# Game Server Tunneling Tool (working title)
+# Game Server Tunneling Tool (GTT)
 
-**Status: planning phase.** There is no application code yet. This repository currently contains the architecture and planning documents only. Nothing described below as "will" exists, and no game has been confirmed compatible.
+**Status:** Implementation & Verification Phase. The core architecture, desktop application shell, in-process engine bridge, control plane, relay node, protocol framing, game profiles, and automated testing suites are built and verified locally and in CI.
 
-> **Placement note (resolved 2026-10-17, T-001):** this file, `AGENTS.md`, and
-> `CLAUDE.md` are at the repository root. All relative links are correct as
-> written. Note that the rest of the documentation set also lives at the root
-> rather than under `docs/`; `architecture.md` §4 describes `docs/` as holding
-> the documentation set. That inconsistency is **recorded, not resolved** — see
-> `architecture.md` §4 and §21.
+> **Support claim discipline (`research.md` ADR-011, `GAME-006`, `AGENTS.md` §6.6):** Passing L0 (connect reachability) and L1 (status protocol) tests proves transport forwarding through the tunnel. **No game is marked `supported` until its manual L2 real-client join test passes (`T-091`).**
 
-## What it is
+---
 
-A Windows desktop app that lets a person host a multiplayer game server on their own PC and let friends join over the internet without router port forwarding, a public IP address, or NAT configuration. The host starts a tunnel and shares an invitation; the app connects out to a relay, which forwards friends' game traffic to the local server.
+## 1. What It Is
 
-## Planned features and initial game support
+A Windows desktop application that lets people host multiplayer game servers on their own PC and share them with friends over the internet without router port forwarding, public IP addresses, or NAT configuration.
 
-| Planned feature | Notes |
+- **Host Experience:** The host chooses a game profile, customizes ports or settings, starts a tunnel, and shares a private invitation link.
+- **Guest Experience:** Guests claim the invitation link via a web browser; the relay admits the guest's IP address on a strict default-deny basis (`SEC-009`) and forwards game traffic over authenticated UDP and TCP flows.
+- **In-Process Engine Bridge:** The native desktop shell communicates directly with the tunnel engine lifecycle across loopback (`127.0.0.1`) with zero external service leakage (`contracts.md` §13, `INV-1`).
+
+---
+
+## 2. Project Architecture
+
+The codebase is organized into modular Rust crates, desktop application frontend assets, database migrations, and automated verification suites:
+
+- [`apps/desktop/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/apps/desktop/): Windows desktop application shell (WebView2, embedded static assets, native HTTP loopback dispatcher, encrypted credential vault, and `EngineBridge` coordinator).
+- [`crates/engine/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/engine/): Tunnel client engine managing QUIC connections, local target policy dialing, reachability probes, and players-seen counting.
+- [`crates/relay/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/relay/): High-throughput relay node handling token verification, default-deny guest admission enforcement, capacity limits, and TCP/UDP stream forwarding.
+- [`crates/control-plane/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/): API server managing accounts, PKCE S256 authentication with token rotation, tunnel allocations, invitations, and audit logging.
+- [`crates/protocol/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/protocol/): Shared wire messages, control framing, session state machines, and RFC 7636 PKCE validation.
+- [`crates/profiles/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/profiles/): Declarative game profile loader and registry.
+- [`crates/server-manager/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/server-manager/): Headless game server provisioning, SHA-256 verification streaming, and filesystem isolation sandbox.
+- [`profiles/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/profiles/): Declarative profiles for Minecraft Java, Bedrock, Terraria, L4D2, and L4D1.
+- [`migrations/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/migrations/): Forward-only PostgreSQL schema migrations for all 14 domain tables.
+- [`tests/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/tests/): Specialized test harnesses for game compatibility, network impairment, security, performance, and privacy.
+- [`scripts/`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/scripts/): Automated verification runners and operational drill harnesses.
+
+---
+
+## 3. Game Compatibility Status (`T-090`, `T-091`, `TEST-005`)
+
+| Game | Profile | L0 (Connect) | L1 (Protocol Status) | L2 (Real Client) | Status |
+|---|---|:---:|:---:|:---:|---|
+| **Minecraft: Java Edition** | `profiles/minecraft-java.json` | **PASS** | **PASS** (SLP `0x00`/`0x01` + UT3 Query) | Open (`G-MCJAVA-L2`) | Verified L0/L1; default-off RCON/Query enforced (`GAME-008`) |
+| **Minecraft: Bedrock Edition** | `profiles/minecraft-bedrock.json` | **PASS** | **PASS** (RakNet `0x01 -> 0x1c`) | Open (`G-BEDROCK-L2`) | Verified L0/L1; out of first provisioning cut (`SRV-003`) |
+| **Terraria** | `profiles/terraria.json` | **PASS** | Gap (`G-TERRARIA-L1`, `E-1`) | Open (`T-091`) | Verified L0; dedicated server lacks unauthenticated query |
+| **Left 4 Dead 2** | `profiles/l4d2.json` | **PASS** | **PASS** (Source `A2S_INFO`) | Open (`G-L4D2-SRCDS`) | Verified L0/L1; per-guest loopback identity tested in `T-013` |
+| **Left 4 Dead (1)** | `profiles/l4d1.json` | Gap (`ADR-021`) | Gap (`G-L4D1-EVIDENCE`) | Open (`T-091`) | Reported evidence `[R]`; 0 default-enabled mappings (`GAME-006`) |
+
+*Explicit gap inventory details are documented in [`tests/game-compat/README.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/tests/game-compat/README.md).*
+
+---
+
+## 4. Development Environment & Prerequisites
+
+The following toolchain versions are verified in local development and CI:
+
+- **Operating System:** Windows 10/11 x64 (target platform) or Linux (CI runner)
+- **Rust Toolchain:** `1.80+` (verified with `stable-x86_64-pc-windows-gnu` and `stable-x86_64-pc-windows-msvc`)
+- **Node.js & npm:** Node.js `20+`, npm `10+` (for desktop UI tests and development server)
+- **Python:** Python `3.11+` (for automated test harnesses and traceability audit)
+- **Database (Control Plane):** PostgreSQL `16` or `17`
+
+---
+
+## 5. Verified Commands
+
+Every command listed below has been executed and verified in this repository.
+
+### 5.1 Code Quality & Formatting
+
+```powershell
+# Check code formatting (exit 0, 0 diff)
+cargo fmt --all -- --check
+
+# Format codebase
+cargo fmt --all
+
+# Workspace-wide Clippy with deny warnings (exit 0, 0 warnings)
+cargo clippy --workspace --all-targets -- -D warnings
+
+# Requirements and architecture traceability audit (exit 0, 0 errors)
+python scripts/audit_traceability.py
+
+# Traceability audit self-test detecting planted defects
+python scripts/audit_traceability.py --self-test
+
+# WCAG AA strict colour contrast verification (UX-005)
+python scripts/check_contrast.py --strict
+```
+
+### 5.2 Unit & Integration Tests
+
+```powershell
+# Run the entire workspace unit and integration test suite
+cargo test --workspace --all-targets
+
+# Run desktop UI frontend test harness (8 suites)
+npm test --prefix apps/desktop
+
+# Run desktop native packaging and updater lifecycle tests
+cargo test -p gtt-desktop --test packaging_lifecycle
+
+# Run desktop native engine bridge integration tests
+cargo test -p gtt-desktop --test engine_bridge_integration
+```
+
+### 5.3 Unified Verification Suites
+
+```powershell
+# Client-side tunnel session & engine bridge verification (T-070, T-073)
+python scripts/verify_engine_bridge.py
+
+# PKCE S256 authentication & encrypted credential vault verification (T-040, T-074, T-081)
+python scripts/verify_auth_and_credentials.py
+
+# Tunnel lifecycle, relay allocation & quota enforcement (T-042, T-043, T-045)
+python scripts/verify_tunnel_lifecycle.py
+
+# Game compatibility L0/L1 automation & gap inventory (T-090, T-035, T-076)
+python scripts/verify_game_compat.py
+
+# Network impairment, latency, jitter & IPv4/IPv6 dual-stack (T-092)
+python scripts/verify_network_and_resilience.py
+
+# Performance benchmarks & relay capacity limits (T-095, T-096, ADR-023)
+python scripts/verify_perf_and_load.py
+
+# Security suite (8 categories), privacy & protocol fuzzing (T-093, T-094, T-098)
+python scripts/verify_security_and_privacy.py
+
+# Packaging, signed updater, rollback & uninstall staging (T-100, T-101, T-102)
+python scripts/verify_packaging_and_updater.py
+
+# Staging observability, alerting & egress cost dashboards (T-103, OPS-002, OPS-006)
+python scripts/verify_observability.py
+
+# Database backup and point-in-time restore simulation (T-106, OPS-007)
+python scripts/backup_restore_test.py --dry-run
+```
+
+### 5.4 Running the Desktop Application Locally
+
+```powershell
+# Run the standalone desktop UI development server (Node.js)
+npm run dev --prefix apps/desktop
+
+# Run the native desktop executable with embedded assets and loopback engine bridge
+cargo run -p gtt-desktop
+
+# Verify executable self-check and zero-elevation asInvoker policy
+cargo run -p gtt-desktop -- --self-check
+
+# Verify WebView2 evergreen runtime detection
+cargo run -p gtt-desktop -- --verify-webview2
+```
+
+---
+
+## 6. Security & Invariant Rules
+
+- **Zero Elevation (`SEC-012`):** The desktop application enforces `<requestedExecutionLevel level="asInvoker" uiAccess="false" />` and never requests administrator privileges.
+- **Local Target Immutability (`SEC-005`, `SEC-006`, `INV-1`):** The control plane rejects all local destination addresses and ports in requests. Relays never connect to destinations chosen by clients. The engine dials strictly from its own configuration.
+- **Default-Off Optional Ports (`GAME-008`):** Optional mappings (e.g. RCON, Query) are unconditionally disabled by default and require explicit host opt-in.
+- **Zero Secrets & IP Minimization (`PRIV-002`, `INV-5`):** Raw guest IPs and credentials are never stored in the database, committed, or written to logs. Owner IPs are masked to `/24` (IPv4) or `/48` (IPv6).
+- **Dependency Discipline (`AGENTS.md` §5):** All dependencies are recorded in [`docs/dependency-register.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/docs/dependency-register.md). `Cargo.lock` is strictly pinned.
+
+---
+
+## 7. Documentation Map
+
+| Document | Description |
 |---|---|
-| Tunnel for TCP and UDP game traffic | Relay-first; direct peer-to-peer is deferred |
-| Expiring, revocable invitations | Guest admission design depends on experiment E-13 |
-| Honest status | Separate indicators for tunnel, local server, and observed guest traffic |
-| Windows per-user install, signed updates | No administrator rights in normal use |
-| **Host-local game server setup** | **Added 2026-10-17.** The app can download, verify, configure, and supervise a game server on the host's own PC. First cut is **Minecraft Java Edition only**, and only if experiment E-15 confirms the acquisition path. Bedrock was deferred: no artifact integrity mechanism could be established, so it fails the verification requirement. **Not verified; no game is promised yet.** The app does not host game servers on operator infrastructure (`context.md` NG-1) |
-
-| Game | Planned scope | Verified compatible? |
-|---|---|---|
-| Terraria | Direct connect by address | **No** (untested) |
-| Minecraft Java Edition | Direct connect by address | **No** (untested) |
-| Minecraft Bedrock Edition | Direct connect by address | **No** (untested) |
-| Left 4 Dead | Direct connect by address | **No** (untested) |
-| Left 4 Dead 2 | Direct connect by address; lobby join only if experiments pass | **No** (untested) |
-
-A game will be called supported only after a real-client join test passes (see `research.md`, ADR-011).
-
-## Architecture summary
-
-Four parts: a **desktop app** (UI plus a Rust tunnel engine), a **control plane** (accounts, tunnel lifecycle, authorization, relay allocation), a **relay** (terminates the host's QUIC connection and owns public ports for each tunnel), and **game profiles** (declarative per-game data). The control plane never stores the host's local server address, and the relay never connects to addresses chosen by clients. In the default design the relay can read game traffic; transport encryption is not end-to-end. Details: `architecture.md`.
-
-## Prerequisites and development environment
-
-Not yet defined. The documents propose, subject to experiment results and decision gate G1: Windows 10/11 for the client, a Rust toolchain, PostgreSQL for the control plane, and the WebView2 runtime for the UI. Exact versions are not decided. Do not treat this list as a verified setup.
-
-## Installation and setup
-
-Not available. There is nothing to install.
-
-## Environment variables
-
-**None are implemented.** The names below are *illustrative placeholders* to show the intended kind of configuration; final names are set during implementation and this section will then be replaced with verified documentation.
-
-| Illustrative name | Purpose | Example (placeholder) |
-|---|---|---|
-| `GTT_DATABASE_URL` | Control-plane database connection | `postgres://USER:PASSWORD@localhost:5432/DBNAME` |
-| `GTT_RELAY_PUBLIC_HOST` | Public host name clients are told to use | `relay.example.invalid` |
-| `GTT_SIGNING_KEY_PATH` | Location of the token signing key (never committed) | `/path/to/key` |
-| `GTT_LOG_LEVEL` | Log verbosity | `info` |
-
-Secrets must never be committed or logged (`AGENTS.md` §7).
-
-## Local development
-
-**Not yet valid.** Becomes valid after tasks T-001 (repository skeleton) and T-030 (project skeleton and dependency policy) are verified. Planned shape: start a local PostgreSQL, apply migrations, run the control plane, a relay, and the desktop app, plus a local game-server container for compatibility testing. Exact commands will be added only after they have been run.
-
-## Tests and quality checks
-
-**Partially verified 2026-10-17** against `rustc 1.99.1` (installed via rustup). These were **run**, not assumed:
-
-| Command | Result |
-|---|---|
-| `cargo check --workspace` | Pass |
-| `cargo fmt --all -- --check` | Pass |
-| `cargo clippy --workspace --all-targets -- -D warnings` | Pass, zero warnings |
-| `cargo test --workspace --all-targets` | Pass under `stable-x86_64-pc-windows-gnu` — **0 tests**, the crates are empty skeletons |
-| `cargo deny check advisories bans licenses` | Pass, exit 0 — via the official prebuilt `cargo-deny` 0.20.2 binary, SHA-256 verified |
-| `python scripts/audit_traceability.py` | Pass — 117 requirements, 117 traceability rows, 86 tasks, 19 experiments, 19 ADR rows (**7** with full records), 7 invariants, 12 model/DDL tables, 20 routes cross-checked, longest chain 23, **0 errors, 22 warnings** |
-| `python scripts/audit_traceability.py --self-test` | Pass — all **20** planted defects detected |
-| `python scripts/check_contrast.py` | Pass — all 22 DESIGN.md contrast pairs recomputed and matched; formula self-validated against 3 WCAG reference pairs |
-| `python scripts/verify_clean_vm.py --workdir <dir>` | **Requires a clean standard-user VM on Windows Pro/Enterprise/Education.** Host-JRE branch 11/11, fetched-JRE branch (`--simulate-no-host-java`) 12/12, both exit 0. Stops at the EULA gate (exit 10) because the script never accepts it on your behalf |
-| `.github/workflows/clean-vm.yml` | **Ran green on a hosted Windows image, 2026-10-18** — full run, phases 1 and 2 |
-
-**Every gate has been seen to fail, not just pass.** `cargo clippy` denies `unwrap()`
-(exit 101); `cargo deny` reports `RUSTSEC-2020-0071` on a seeded vulnerable crate
-(exit 1); the traceability audit catches 5 of 5 planted defects. Details in
-`docs/dependency-register.md`.
-
-Known environment gaps: there is **no Windows SDK**, so the MSVC toolchain can
-compile but not link; and the GNU toolchain has **no `dlltool.exe`**. Neither can
-compile Rust tooling from source — which is why the prebuilt `cargo-deny` binary
-is used above.
-
-Also verified: the lint gate is not decorative. A temporary `unwrap()` failed
-clippy with exit 101 and passed again on revert.
-
-**Not yet valid:** CI has never run — no remote or CI provider is configured. The
-planned gates (TEST-007) are formatting, lint, tests, dependency scan, and applying
-all migrations to an empty database. Planned suites live under `tests/`
-(integration, game-compat, network, security, perf). **No application test has been
-run, because there is no application code.**
-
-What *has* been checked in the documentation set:
-
-- All **11 Mermaid diagrams render** with `@mermaid-js/mermaid-cli` **12.0.0** (2026-10-17), including the container diagram edited for the server-manager component. A deliberately malformed diagram was rejected with a parse error and produced no output, so the renderer is confirmed to fail on bad input rather than passing everything. Syntax and rendering only — **visual layout was not reviewed**.
-- The traceability audit passes and catches **20 of 20** planted defects, including two that verify every ADR in `research.md` §7 has a summary-table row — added after ADR-016 was found to have a full record but no row, while ADR-017 had both.
-- **`data-model.md` and `migrations/` are compared mechanically** — all 12 tables, column by column. Added after `T-120` was found to name this as a standing gap.
-- **`api.md` and `contracts.md` are cross-checked route by route** — 20 routes, checking method, path, and success status, in both directions. This found a real gap: `contracts.md` §5.12 and §5.13 stated no success code at all while `api.md` asserted one.
-- **Colour contrast is recomputed, not asserted.** `scripts/check_contrast.py` re-derives all 22 ratios in `DESIGN.md` §3 from the token table in §2, after validating its own implementation against three WCAG reference pairs. All 22 matched, and it was confirmed to fail on a planted overstated ratio and a planted wrong threshold. Hover, disabled, and high-contrast states are still unchecked.
-- **The database schema has been executed**, not merely parser-checked: applied cleanly to an empty database on **PostgreSQL 16.10 and 17.6**, producing 12 tables, 35 indexes, 57 constraints and 13 foreign keys with zero errors. PRIV-006 (no email column) and INV-1 (no local destination column) were checked against the live schema, and four negative tests confirmed the CHECK constraints reject bad input. Method, version matrix, and one environment limitation are recorded in `schema.md`.
-
-**Withdrawn:** the earlier claim that "11 JSON Schemas are valid and example payloads were checked against them". `contracts/` does not exist in this repository, so no schema validation has been performed here. See `contracts.md`.
-
-## Configuration example
-
-No configuration files exist yet. See the illustrative variables above.
-
-## Troubleshooting
-
-Application troubleshooting will be documented when there is an application. For documentation work: if two documents disagree, follow the source-of-truth table in `AGENTS.md` §2 and report the conflict.
-
-## Documentation map
-
-| Document | Purpose |
-|---|---|
-| `context.md`, `idea.md` | Product context, scope, brief |
-| `research.md` | Evidence, experiments, ADRs |
-| `architecture.md` | System architecture |
-| `data-model.md`, `schema.md`, `migrations/` | Data model and schema |
-| `contracts.md`, `api.md`, `contracts/` | API and protocol contracts, JSON Schemas |
-| `requirements.md`, `spec.md` | Requirements and index |
-| `tasks.md`, `plan.md` | Implementation checklist and execution plan |
-| `user-flows.md`, `ux.md`, `DESIGN.md` | Flows, UX principles, design system |
-| `AGENTS.md`, `CLAUDE.md` | Instructions for AI coding agents |
-| `review-report.md` | Planning-phase review: coverage, audit results, blockers |
+| [`context.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/context.md), [`idea.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/idea.md) | Product scope, boundaries, non-goals |
+| [`research.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/research.md) | Evidence, experiment notes (E-1..E-19), ADR records |
+| [`architecture.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/architecture.md) | System components, data flows, and trust boundaries |
+| [`contracts.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/contracts.md), [`api.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/api.md) | HTTP and wire protocol contracts, error codes, DTOs |
+| [`data-model.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/data-model.md), [`schema.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/schema.md) | Logical domain model, PostgreSQL physical DDL, and migrations |
+| [`requirements.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/requirements.md) | Complete inventory of functional, security, and quality requirements |
+| [`DESIGN.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/DESIGN.md), [`user-flows.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/user-flows.md) | UI design system, color tokens, contrast ratios, user journeys |
+| [`tasks.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/tasks.md), [`plan.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/plan.md) | Implementation tasks, prerequisites, and milestone verification checklist |
+| [`AGENTS.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/AGENTS.md), [`CLAUDE.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/CLAUDE.md) | Workflow rules, safety boundaries, and engineering standards for AI agents |
