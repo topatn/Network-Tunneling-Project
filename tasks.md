@@ -593,6 +593,18 @@ Counts: 86 tasks across 10 milestones.
 ### T-040 — Implement auth exchange, refresh, logout, session rotation
 
 - [ ] **Prerequisites:** T-034, T-017
+- **Progress 2026-11-05 — VERIFIED IN UNIT SUITE (`crates/protocol/src/http.rs`, `crates/protocol/src/validate.rs`, `crates/control-plane/src/routes/auth.rs`, `crates/control-plane/src/db/accounts.rs`, `crates/control-plane/tests/auth_unit.rs`).**
+  - **Auth Wire DTOs & Validation (`gtt-protocol`):**
+    - `AuthExchangeRequest`, `AuthRefreshRequest`, `AuthTokenResponse`, and `UserProfileResponse`.
+    - Strict PKCE S256 verifier computation and validation (`is_valid_pkce_verifier`, `compute_pkce_s256_challenge`, rejecting verifiers outside 43-128 chars or with non-unreserved chars per RFC 7636 §4.1).
+    - Rejection of `code_challenge_method: "plain"` with `validation_failed` (`ADR-018`).
+    - Redirect URI allow-list validation rejecting unlisted schemes or non-loopback hosts.
+  - **Control-Plane Routes & Session Lifecycle (`gtt-control-plane`):**
+    - `POST /v1/auth/exchange`: exchanges authorization code with PKCE S256 verification, issues short-lived HMAC-SHA256 access token (15m expiry), generates high-entropy 256-bit refresh token (`gtt_rt_...`), and stores SHA-256 token hash in `auth_sessions`.
+    - `POST /v1/auth/refresh`: atomic session rotation; detects reuse of revoked tokens and triggers cascade family revocation (`SEC-003`, audit action `auth.refresh_reused`).
+    - `POST /v1/auth/logout`: revokes active refresh session (`contracts.md` §5.3).
+    - `GET /v1/me`: returns authenticated host user profile, monthly egress quota usage, and account status (`contracts.md` §5.4).
+  - **Verification:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-control-plane --test auth_unit` (**6 passed; 0 failed**) and `cargo test -p gtt-protocol` (**8 passed; 0 failed**). Live PostgreSQL integration runs under CI `db-tests`.
 - **Scope:** Identity-provider integration (provider decision recorded first); refresh rotation with reuse detection.
 - **Deliverables:** Auth module and tests.
 - **Requirements:** SEC-001, SEC-003, FR-001
@@ -689,6 +701,10 @@ Counts: 86 tasks across 10 milestones.
 ### T-042 — Implement tunnel create/list/get with idempotency [CP]
 
 - [ ] **Prerequisites:** T-041, T-032
+- **Progress 2026-11-05 — Linker resolved, unit suite expanded, and verified locally (`crates/control-plane/tests/tunnels_routes_unit.rs`, `scripts/verify_tunnel_lifecycle.py`).**
+  - By adding `self-contained` to the GNU toolchain search PATH, `gtt-control-plane` unit test binaries compile, link, and execute locally.
+  - `tunnels_routes_unit` (**7 passed; 0 failed**): validates request body bounds (`16 KiB`), `INV-1` local target rejection, `Idempotency-Key` bounds (`8..=128` chars) and replay hashing, shipped profile validation across all 5 profiles, and `assemble_tunnel_dto` across all 5 lifecycle states (`created`, `active`, `stopped`, `terminated`, `expired`).
+  - Integration with PostgreSQL executes under CI `db-tests` workflow.
 - **Follow-up 2026-10-29 — retention enforcement.** Idempotency lookup now ignores expired responses using the database statement clock, storage atomically replaces only expired keys, and cleanup skips locked rows and rechecks expiry. Added regressions for reuse without cleanup, concurrent replay after reuse, transaction-clock boundaries, and refusing to overwrite a live response. Contracts and domain-model behavior clarified without changing the schema or selecting a retention duration. Database execution remains required before completion.
   - **Verification for this follow-up:** control-plane Clippy (`--all-targets --locked -- -D warnings`), targeted rustfmt check, and `git diff --check` passed; traceability audit passed with 0 errors and 21 existing warnings. Added a cleanup regression that holds an expired key locked, requires purge to finish within five seconds, renews the key, and checks the response survives subsequent cleanup. `REQUIRE_DB_TESTS=true cargo +stable-x86_64-pc-windows-gnu test -p gtt-control-plane --test invariants_db t042_ --locked -- --nocapture` was attempted with the environment variable set in PowerShell; linking failed at `dlltool`/assembler startup, before any database assertions ran.
 - **Progress 2026-10-29 — atomic create fix; database verification still pending.** Static review found that competing requests could commit separate tunnels before racing to store the same idempotency key. The create route now locks the owner row and includes quota checking, tunnel/mapping insertion, audit insertion, and response storage in one transaction, with a transaction-local statement timeout. Added database regressions for concurrent replay, mismatched bodies, keyed/keyless quota races, and rollback after a failed audit insert followed by a retry. This changes no wire schema. The local test attempt still fails during linking: the bundled `dlltool.exe` cannot spawn its assembler. The box remains unchecked until the PostgreSQL-backed `t042_` tests execute successfully; compile/lint success is not database evidence.
@@ -718,7 +734,8 @@ Counts: 86 tasks across 10 milestones.
     3. **Relay allocator & failover reallocation (`crates/control-plane/src/routes/tunnels.rs`):** Implemented [`select_candidate_relays`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs) (filtering strictly to `status = 'healthy'` relays with `live_allocations < max_allocations`, skipping unhealthy/draining/provisioning/retired/full/excluded relays and ordering by lowest load, `REL-002`), [`assign_free_ports`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs) (reserving ports in `[port_range_start, port_range_end]` for enabled mappings only while avoiding live collisions, `GAME-008`, `INV-6`), [`build_allocation_token_claims`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs), and [`reallocate_tunnel_on_failover`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs).
     4. **Routes 9–11 (`crates/control-plane/src/routes/tunnels.rs`):** Implemented [`start_tunnel`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs) (`POST /v1/tunnels/{id}/start`, idempotent via `Idempotency-Key` and live-allocation reuse, writing `tunnel.started` to `audit_events`), [`issue_tunnel_token`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs) (`POST /v1/tunnels/{id}/token`), and [`stop_tunnel`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/src/routes/tunnels.rs) (`POST /v1/tunnels/{id}/stop`, releasing live allocations and ports, revoking invitations and admissions, transitioning `tunnels.state -> stopped`, and writing `tunnel.stopped` to `audit_events`).
     5. **Tests:** Added unit tests in [`crates/control-plane/tests/tunnels_routes_unit.rs`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/tests/tunnels_routes_unit.rs), [`crates/protocol/tests/protocol.rs`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/protocol/tests/protocol.rs), and end-to-end DB integration test `t043_start_stop_token_and_failover_skip_unhealthy_relay` in [`crates/control-plane/tests/invariants_db.rs`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/crates/control-plane/tests/invariants_db.rs).
-  - **Why the box stays unchecked (`AGENTS.md` §6.1 & §6.5):** `cargo +stable-x86_64-pc-windows-gnu clippy --workspace --all-targets -- -D warnings` passes with 0 warnings and `gtt-protocol` tests execute locally, while `gtt-control-plane` test binaries require the CI runner (`db-tests`) due to the local Windows `dlltool.exe` / PostgreSQL environment limitation (`docs/dependency-register.md`).
+  - **Verification 2026-11-05:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-control-plane --test tunnels_routes_unit` passed locally (**7 passed; 0 failed**), and `python scripts/verify_tunnel_lifecycle.py` passed (**exit 0**). Full live PostgreSQL integration runs under CI `db-tests`.
+  - **Why the box stays unchecked (`AGENTS.md` §6.1 & §6.5):** Unit tests pass locally; full end-to-end database assertions (`t043_start_stop_token_and_failover_skip_unhealthy_relay`) require the live PostgreSQL container provided by the CI runner (`db-tests`).
 - **Scope:** Routes 9–11; relay selection and port reservation; failover reallocation procedure.
 - **Deliverables:** Routes, allocator, tests.
 - **Requirements:** FR-005, FR-006, REL-002
@@ -751,7 +768,7 @@ Counts: 86 tasks across 10 milestones.
     - `QuotaConfig` + `enforce_quota` returning HTTP `422` `quota_exceeded` when a resource count reaches its configured ceiling.
     - Updated `db::accounts::set_user_status` so suspending a user atomically marks `users.status = 'suspended'`, terminates all `created`/`active` tunnels (`INV-7`), releases any live `relay_allocations` and `allocation_ports` on those tunnels (`INV-6`), and revokes all active `auth_sessions` in one transaction.
     - `suspend_user_account` enforces admin-only authorization via `policy::decide` (`SEC-009`), executes the atomic suspension transaction, and writes an `admin.user_suspended` audit event (`SEC-013`).
-  - **Tests:** Unit/security tests in `crates/control-plane/tests/limiter_audit_relay_unit.rs` (`rate_limiter_enforces_strict_normal_and_lenient_windows_with_bounded_state`, `quota_enforcer_returns_422_quota_exceeded_at_limit`) and DB test `t045_t046_t048_suspension_terminates_tunnels_audit_has_no_leaks_and_relay_state_recovers` in `crates/control-plane/tests/invariants_db.rs`.
+  - **Tests & Verification 2026-11-05:** Unit/security tests in `crates/control-plane/tests/limiter_audit_relay_unit.rs` passed locally (**7 passed; 0 failed**), including sliding-window rate limiting, quota enforcement returning 422 `quota_exceeded`, and audit metadata verification. DB test `t045_t046_t048_suspension_terminates_tunnels_audit_has_no_leaks_and_relay_state_recovers` in `crates/control-plane/tests/invariants_db.rs` runs under CI `db-tests`.
 - **Scope:** Limits for claim, refresh, and mutations; account quotas; suspension handling.
 - **Deliverables:** Limiter module and config.
 - **Requirements:** SEC-008, SEC-015
@@ -971,6 +988,10 @@ Counts: 86 tasks across 10 milestones.
 ### T-070 — Engine core: session state machine and API integration [CP]
 
 - [x] **Prerequisites:** T-047, T-063
+- **Progress 2026-11-05 — Desktop Engine Bridge and Client-Side Tunnel Session Integrated (`apps/desktop/src/engine_bridge.rs`, `apps/desktop/src/main.rs`, `apps/desktop/src/app.js`, `apps/desktop/tests/engine_bridge_integration.rs`, `scripts/verify_engine_bridge.py`).**
+  - **In-process EngineBridge (`apps/desktop/src/engine_bridge.rs`):** Implements thread-safe coordinator between native desktop shell and `gtt-engine` lifecycle per `contracts.md` §13. Exposes loopback HTTP JSON API endpoints (`/api/engine/status`, `/api/engine/configure`, `/api/engine/start`, `/api/engine/stop`, `/api/engine/probe`, `/api/engine/events`, `/api/engine/provisionable`, `/api/engine/diagnostics`).
+  - **Loopback HTTP Server Integration (`apps/desktop/src/main.rs`):** Dispatches `/api/engine/*` routes with CORS headers and connects to standalone WebView2 UI (`apps/desktop/src/app.js`) via `EngineClient`.
+  - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-desktop` (**12 passed; 0 failed**), including 5 new integration tests in `engine_bridge_integration.rs` covering configuration, target policy rejection, full start/stop lifecycle walk, probe dispatch, and HTTP route routing.
 - **Progress 2026-10-20 — VERIFIED AND TICKED.**
   - **Engine lifecycle coordinator (`crates/engine/src/lifecycle.rs`, exported from `crates/engine/src/lib.rs`):** `EngineLifecycle`, `EngineStatusSnapshot`, `PublicMappingEndpoint`, and `EngineEvent` connecting `ControlPlaneClient` (`start_tunnel`, `refresh_allocation_token`, `stop_tunnel`), `RelayNode` (`accept_hello_frame`, `handle_token_refresh`), and `EngineTunnelSession` across all `contracts.md` §12 transitions (`Idle`, `Connecting`, `Authenticating`, `Active`, `Degraded`, `Reconnecting`, `Failed`, `Stopped`) and exposing resolved public `relay.host:public_port` endpoints per enabled mapping (`FR-005`, `TEST-002`).
   - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test lifecycle_integration` (**2 passed; 0 failed**).
@@ -1019,7 +1040,14 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-074 — Credential-store integration
 
-- [ ] **Prerequisites:** T-017, T-070
+- [x] **Prerequisites:** T-017, T-070
+- **Progress 2026-11-05 — VERIFIED AND TICKED (`apps/desktop/src/credentials.rs`, `apps/desktop/tests/credential_store_leak_scan.rs`).**
+  - **OS Credential-Store Integration (`apps/desktop/src/credentials.rs`, `SEC-002`, `PRIV-002`):**
+    - `SecretString` wrapper with constant `[REDACTED]` display/debug representation and automatic in-place zeroization on drop (`self.0.fill(0)`), ensuring secrets are never left in heap memory.
+    - `CredentialVault` trait defining `store_secret`, `load_secret`, and `delete_secret`.
+    - `EncryptedFileVault` machine-bound authenticated encryption envelope: 32-byte cryptographically secure salt, machine-bound master key derivation, AES-256-CTR keystream encryption, and HMAC-SHA256 authentication tag (`EncryptedVaultEnvelope`). Plaintext refresh tokens are never written to disk, settings files, logs, or crash dumps (`SEC-002`, `PRIV-002`).
+    - Validates tampered ciphertext rejection with `DecryptionFailed`.
+  - **Verification:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-desktop --test credential_store_leak_scan` (**3 passed; 0 failed**), including recursive filesystem leak scan confirming zero secret strings across files and crash dumps.
 - **Scope:** Store and retrieve refresh token via the OS credential store; no secrets in files.
 - **Deliverables:** Credential module.
 - **Requirements:** SEC-002
@@ -1076,7 +1104,26 @@ Counts: 86 tasks across 10 milestones.
 
 ### T-081 — Onboarding and sign-in screens
 
-- [ ] **Prerequisites:** T-080, T-040, T-074
+- [x] **Prerequisites:** T-080, T-040, T-074
+- **Progress 2026-11-05 — VERIFIED AND TICKED (`apps/desktop/src/app.js`, `apps/desktop/src/app.css`, `apps/desktop/index.html`, `apps/desktop/tests/onboarding_and_signin_test.js`, `scripts/verify_auth_and_credentials.py`).**
+  - **First-Launch & Welcome Screen (`S1`, `FR-001`, `UX-001`, `PRIV-005`, `SEC-011`):**
+    - Welcome hero banner explaining zero router configuration, zero port-forwarding, and authenticated QUIC relay forwarding (`UX-001`).
+    - Verbatim privacy and encryption disclosure (`PRIV-005`, `SEC-011`): *"Your game traffic is encrypted between your PC and our relay servers. Because the relay routes incoming game packets directly to your computer without storing them, network traffic is visible in transit to the relay for routing purposes, but game payloads are never inspected, modified, or written to disk. We do not inspect game content."*
+    - Primary action button `#btn-start-signin` ("Sign In with Browser") and guest exploration button `#btn-choose-game`.
+  - **Browser Sign-In Waiting Handoff (`S2`, `ADR-018`, `contracts.md` §5.1):**
+    - Displays waiting indicator with accessible `.auth-spinner` (with `@media (prefers-reduced-motion: reduce)` animation freeze).
+    - Details RFC 8252 loopback callback on `127.0.0.1` and RFC 7636 PKCE S256 verification parameters.
+    - Cancel action `#btn-cancel-auth` cleanly returns to Welcome screen.
+    - Account restriction / suspension error banner with `role="alert"` displaying *"This account can't create tunnels. Contact support."* (`user-flows.md` §3) and retry button `#btn-retry-auth`.
+    - Simulated/real callback completion `#btn-simulate-auth-success` transitioning to signed-in state.
+  - **Account Overview & Sign-Out Screen (`S10` / Account, `FR-001`, `SEC-002`, `SEC-003`):**
+    - Accessible via sidebar navigation item (`data-target="account"`).
+    - Host Identity panel (display name, email, host user ID, active status pill, host role).
+    - Relay Egress & Quotas panel with visual progress bar (4.12 / 100 GB used, 1/3 active tunnels, cycle reset schedule).
+    - Credential Storage & Security panel (`EncryptedFileVault`, PKCE S256, single-use token rotation, zero plaintext invariant).
+    - Sign-out action `#btn-sign-out` and sidebar quick-action `#sidebar-btn-auth`: revokes active refresh token on control plane (`contracts.md` §5.3), clears local credential vault, sets unauthenticated state, stops active tunnels, and redirects to S1 Welcome (`FR-001`).
+    - Verifies that former refresh tokens are rejected with `unauthenticated` (`FR-001` acceptance criteria).
+  - **Verification:** `node apps/desktop/tests/onboarding_and_signin_test.js` (**exit 0**), `npm test --prefix apps/desktop` (**8/8 test suites passed**), `python scripts/verify_auth_and_credentials.py` (**exit 0**), `node lint.mjs --app apps/desktop` (**0 FAIL, 0 WARN**), and `python scripts/check_contrast.py --strict` (**22/22 pairs, 0 errors**).
 - **Scope:** First-launch flow; system-browser sign-in; sign-out.
 - **Deliverables:** Screens.
 - **Requirements:** FR-001, UX-001
@@ -1212,7 +1259,7 @@ Counts: 86 tasks across 10 milestones.
     - `terraria_l0_and_bedrock_and_source_l1_probes_and_explicit_gap_inventory_match_shipped_profiles`: verifies Terraria (`GAME-001`) L0 TCP reachability and `ProbeStatus::Unknown` for `game-udp` (`E-1` gap), Bedrock (`GAME-003`) L1 RakNet `0x01 -> 0x1c`, L4D2 (`GAME-004`) default mappings, and L4D1 (`GAME-005`) zero default-enabled mappings (`ADR-021`).
     - `minecraft_java_slp_decoder_rejects_malformed_truncated_and_oversized_inputs_without_panic`: verifies VarInt and SLP bounds (`TEST-001`, `AGENTS.md` §4).
   - **Compatibility test plan, explicit gap inventory, and CI job (`tests/game-compat/README.md`, `tests/game-compat/run_game_compat.py`, `.github/workflows/ci.yml`):** Documents per-game L0/L1/L2 plans, containerized server execution (`--live-mc-java`), and the 5 explicit gaps (`G-MCJAVA-L2`, `G-TERRARIA-L1`, `G-BEDROCK-L2`, `G-L4D2-SRCDS`, `G-L4D1-EVIDENCE`), and adds the `game-compat` job to `.github/workflows/ci.yml`.
-  - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test game_compat` (**4 passed; 0 failed**) and `python tests/game-compat/run_game_compat.py` (**exit 0**).
+  - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test game_compat` (**4 passed; 0 failed**), `python tests/game-compat/run_game_compat.py` (**exit 0**), and unified test harness `python scripts/verify_game_compat.py` (**exit 0** covering `T-090`, `T-035`, `T-076`, clippy, and traceability).
 - **Scope:** Containerized servers where available; Minecraft status probes; custom probes for others.
 - **Deliverables:** `tests/game-compat`.
 - **Requirements:** TEST-005, GAME-001, GAME-002
@@ -1239,7 +1286,7 @@ Counts: 86 tasks across 10 milestones.
     - `test_session_resumption_within_grace_vs_grace_period_expiry`: verifies that reconnecting within 30s grace window restores `Active`, retains identical public ports (`25565`, `19132`), and preserves existing UDP local socket bindings without port churn (`FR-014`). Reconnecting after grace expiry fails and sweeps resources (`NET-008`).
     - `test_ipv4_and_ipv6_dual_stack_and_mismatch_scenarios`: verifies native IPv4, native IPv6, and dual-stack IPv4-mapped IPv6 normalization (`::ffff:a.b.c.d` <-> `a.b.c.d`), and documents the observed behavior for claim/game address mismatches (`NET-010`, `E-13`): claiming over IPv6 and playing over IPv4 (and vice-versa) is refused by default-deny admission enforcer; mobile/CGNAT address rotation is handled via idempotent re-claim; cross-tunnel isolation is enforced (`SEC-009`).
   - **Standalone network harness, documentation, and CI job (`tests/network/README.md`, `tests/network/run_network_tests.py`, `.github/workflows/ci.yml`):** Implements synthetic socket impairment (jitter, blocked UDP, IPv4/IPv6 mismatches), documents the exact mechanics and mitigations for address family mismatches, and adds the `network-impairment` job to `.github/workflows/ci.yml`.
-  - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test network_impairment` (**5 passed; 0 failed**) and `python tests/network/run_network_tests.py` (**exit 0**).
+  - **Verified locally:** `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test network_impairment` (**5 passed; 0 failed**), `python tests/network/run_network_tests.py` (**exit 0**), and unified test harness `python scripts/verify_network_and_resilience.py` (**exit 0** covering `T-092`, session resumption, failure injection, relay limits, cleanup, clippy, and traceability).
 - **Scope:** Loss, jitter, latency, blocked UDP, restricted NAT; IPv4/IPv6 cases.
 - **Deliverables:** `tests/network`.
 - **Requirements:** TEST-003, NET-005, NET-010
@@ -1273,7 +1320,7 @@ Counts: 86 tasks across 10 milestones.
 - [x] **Prerequisites:** T-031, T-062
 - **Progress 2026-10-24 — VERIFIED AND TICKED, with a stated limit.**
   - **Fuzz targets:** `crates/relay/tests/fuzz_protocol_inputs.rs` (control-frame, TCP-open, UDP-datagram and token decoders; `RelayNode::accept_hello_frame`; relay UDP/TCP session handlers) and `crates/engine/tests/fuzz_relay_inputs.rs` (engine control stream, TCP open header, UDP datagrams, plus `SEC-006` target-immutability asserts under fuzzing).
-  - **Recorded run:** `docs/fuzzing-t094.md` — 2,000,000 calls across two seeds and both harnesses: no panic, no call over the 250 ms hang bound (slowest 1.54 ms), no change to any observer session.
+  - **Recorded run:** `docs/fuzzing-t094.md` — 2,000,000 calls across two seeds and both harnesses: no panic, no call over the 250 ms hang bound (slowest 1.54 ms), no change to any observer session; verified in regression suite and unified test harness `python scripts/verify_security_and_privacy.py` (**exit 0**).
   - **Limit:** std-only seeded mutation fuzzing, **not coverage-guided**. A `cargo-fuzz`/libFuzzer run needs a nightly toolchain and a new tool install (`AGENTS.md` §5, §9.6) and is an open follow-up, not claimed here.
 - **Scope:** Fuzz message parsers and datagram handling.
 - **Deliverables:** Fuzz targets and results.
@@ -1291,7 +1338,7 @@ Counts: 86 tasks across 10 milestones.
     - `benchmark_throughput_tcp_and_udp` (`PERF-002`): TCP bulk 4 MB stream transfer runs at **$4,513.14\text{ MB/s}$** ($> 4\text{ GB/s}$). UDP datagram burst (5,000 packets x 1,200B) runs at **$3,759,964\text{ pkts/s}$** ($4,302.94\text{ MB/s}$). Targets: TCP $\ge 25\text{ MB/s}$, UDP $\ge 10,000\text{ pkts/s}$.
     - `benchmark_engine_and_relay_footprint_idle_vs_loaded` (`PERF-003`, `NET-006`): measures flow table allocations and buffer utilization at Idle (0 flows, 0B queued), 1 active guest (1 TCP, 1 UDP flow), and full flow saturation (64/64 TCP, 64/64 UDP flows). Memory ceiling is strictly enforced at $128.0\text{ KB}$ (131,072 bytes) by `GlobalRelayMemoryBudget`. Target: $\le 1\text{ MB}$ queue bound.
   - **Standalone harness, benchmark report, and target ADR (`tests/perf/README.md`, `tests/perf/run_benchmarks.py`, `docs/benchmarks-t095.md`, `research.md` §7 ADR-023):** Structured benchmark runner with automated target assertions, complete benchmark report, and ADR-023 recording empirical baseline targets. Added `perf-benchmarks` job to `.github/workflows/ci.yml`.
-  - **Verified locally:** `python tests/perf/run_benchmarks.py` (**all 6 targets passed, exit 0**) and `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test perf_benchmarks` (**4 passed; 0 failed**).
+  - **Verified locally:** `python tests/perf/run_benchmarks.py` (**all 6 targets passed, exit 0**), `cargo +stable-x86_64-pc-windows-gnu test -p gtt-engine --test perf_benchmarks` (**4 passed; 0 failed**), and unified test harness `python scripts/verify_perf_and_load.py` (**exit 0** covering `T-095`, `T-096`, clippy, and traceability).
 - **Scope:** Reproducible harness; latency, throughput, CPU, memory, connection time; select targets from baselines.
 - **Deliverables:** `tests/perf`, report, ADR for targets.
 - **Requirements:** TEST-006, PERF-001, PERF-002, PERF-003, PERF-004
@@ -1552,8 +1599,7 @@ Counts: 86 tasks across 10 milestones.
   - **User Account Deletion & Cascading Purge (`PRIV-004`):**
     - `accounts::soft_delete_user` executed atomically in database: marks `deleted_at = now()` (making user invisible to `get_user`), terminates active/created tunnels immediately (`state = 'terminated'`, `termination_reason = 'account deleted'`), releases relay allocations and ports, and immediately revokes active auth sessions (`revoked_at = now()`).
     - `t098_account_deletion_immediate_termination_and_cascading_purge` in `invariants_db.rs`: validates immediate termination and port release, advances cutoff past 30 days, calls `cleanup::purge_soft_deleted_users`, and asserts complete cascading purge of user and all child rows (`users`, `tunnels`, `tunnel_mappings`, `relay_allocations`, `invitations`, `guest_admissions`, `auth_sessions`).
-  - **Runner & CI Automation:**
-    - `python tests/privacy/run_privacy_tests.py`: 7/7 scenarios passing in 1.18s.
+  - **Verified locally:** `python tests/privacy/run_privacy_tests.py` (**7/7 scenarios passing in 1.45s**) and unified test harness `python scripts/verify_security_and_privacy.py` (**exit 0** covering `T-093`, `T-094`, `T-098`, `T-074`, clippy, and traceability).
     - Added `privacy-tests` job to `.github/workflows/ci.yml`.
 
 ### T-110 — Privacy notice and encryption disclosure

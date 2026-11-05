@@ -120,10 +120,11 @@ jobs:
         run: node apps/desktop/tests/managed_server_screens_test.js
 
   game-compat:
-    name: Game compatibility L0/L1 automation (T-090)
-    # TEST-005, GAME-001, GAME-002. Runs the Rust L0/L1 tunnel compatibility suite
-    # (`crates/engine/tests/game_compat.rs`) and the standalone Python L0/L1 +
-    # gap-inventory verifier (`tests/game-compat/run_game_compat.py`).
+    name: Game compatibility L0/L1 automation & Server Manager (T-090, T-035, T-076)
+    # TEST-005, GAME-001, GAME-002, SRV-001..SRV-008. Runs the Rust L0/L1 tunnel compatibility suite
+    # (`crates/engine/tests/game_compat.rs`), server-manager unit tests (`crates/server-manager`),
+    # managed server lifecycle tests (`crates/engine/tests/managed_server_lifecycle.rs`), and the
+    # standalone Python L0/L1 + gap-inventory verifier (`tests/game-compat/run_game_compat.py`).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -140,6 +141,10 @@ jobs:
             ~/.cargo/git
             target
           key: game-compat-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run server-manager unit and isolation tests
+        run: cargo test -p gtt-server-manager
+      - name: Run managed server lifecycle integration tests
+        run: cargo test -p gtt-engine --test managed_server_lifecycle
       - name: Run Rust L0/L1 tunnel compatibility integration tests
         run: cargo test -p gtt-engine --test game_compat
       - name: Run L0/L1 protocol and explicit gap inventory verifier
@@ -167,7 +172,7 @@ jobs:
             target
           key: network-impairment-${{ hashFiles('**/Cargo.lock') }}
       - name: Run Rust network impairment and session resilience tests
-        run: cargo test -p gtt-engine --test network_impairment
+        run: cargo test -p gtt-engine --test network_impairment --test session_resumption --test failure_injection
       - name: Run network impairment test harness
         run: python tests/network/run_network_tests.py
 
@@ -330,6 +335,83 @@ jobs:
           key: packaging-and-updater-${{ hashFiles('**/Cargo.lock') }}
       - name: Run Packaging, Signed Updater, Rollback, and Uninstall Staging Exercise
         run: python scripts/verify_packaging_and_updater.py
+
+  auth-and-credentials:
+    name: Auth exchange, credential store & desktop onboarding (T-040 / T-074 / T-081)
+    # SEC-001, SEC-002, SEC-003, FR-001, UX-001, ADR-018:
+    # Verify PKCE S256 auth routes, AES-256-CTR/HMAC credential vault zero-leak scan,
+    # and desktop onboarding / browser sign-in / sign-out test suite.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install toolchain
+        run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: auth-and-credentials-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Authentication, Credential Store & Desktop Onboarding Verification
+        run: python scripts/verify_auth_and_credentials.py
+
+  tunnel-lifecycle:
+    name: Tunnel lifecycle, relay allocation & quotas (T-042 / T-043 / T-045)
+    # FR-004, FR-005, FR-006, REL-002, SEC-008, SEC-009, SEC-015, INV-1..INV-7:
+    # Verify tunnel creation, idempotency replay, healthy relay selection,
+    # collision-free port allocation, token claims signing, rate limiting, and quotas.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install toolchain
+        run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: tunnel-lifecycle-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Tunnel Lifecycle, Relay Allocation & Quota Verification
+        run: python scripts/verify_tunnel_lifecycle.py
+
+  engine-bridge:
+    name: Client-Side Tunnel Session & Engine Integration (T-070, T-073)
+    # T-070, T-073, T-080, T-083, contracts.md §12, §13. Runs the desktop-to-engine
+    # integration suite, protocol state machine verification, and frontend harness.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+      - name: Install toolchain
+        run: rustup toolchain install "$env:RUST_TOOLCHAIN" --profile minimal
+      - name: Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: engine-bridge-${{ hashFiles('**/Cargo.lock') }}
+      - name: Run Client-Side Tunnel Session & Engine Integration Verification
+        run: python scripts/verify_engine_bridge.py
 
   dependency-scan:
     name: Dependency scan (SEC-017)
