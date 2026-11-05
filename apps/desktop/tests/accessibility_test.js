@@ -135,18 +135,22 @@ const {
   renderInvitationsView,
   renderTroubleshooterView,
   renderManagedServerView,
+  renderSignInHandoffView,
+  renderAccountView,
   state,
 } = sandbox;
 
 // 4. Verify Screen-Reader Semantics Across All Rendered Views (DESIGN.md §§6, 9)
 const viewHtmlChecks = [
   ['onboarding', renderOnboardingView(), ['role="note"', 'aria-label="Privacy and encryption disclosure"']],
+  ['signin-handoff', renderSignInHandoffView(), ['role="status"', 'aria-live="polite"']],
   ['choose-game', renderChooseGameView(), ['role="list"', 'role="listitem"', 'tabindex="0"']],
   ['local-config', renderLocalConfigView(), ['for="host-game"', 'for="port-game"', 'aria-invalid="false"', 'aria-describedby="err-port-game"']],
   ['dashboard', renderDashboardView(), ['id="indicator-tunnel"', 'id="indicator-local-server"', 'id="indicator-players-seen"', 'id="indicator-managed-server"', 'role="dialog"', 'aria-modal="true"']],
   ['invitations', renderInvitationsView(), ['for="inv-expiry-select"', 'for="inv-max-claims"', 'for="sim-claim-secret"']],
   ['troubleshooter', renderTroubleshooterView(), ['for="select-error-code"', 'aria-label="Reviewed error guidance"']],
   ['managed-server', renderManagedServerView(), ['for="checkbox-accept-eula"', 'role="progressbar"', 'aria-valuenow=']],
+  ['account', renderAccountView(), ['role="progressbar"', 'aria-valuenow=']],
 ];
 
 for (const [viewName, html, requiredSnippets] of viewHtmlChecks) {
@@ -157,7 +161,7 @@ for (const [viewName, html, requiredSnippets] of viewHtmlChecks) {
     );
   }
 }
-console.log('[OK] Screen-reader labels, form label associations, and ARIA attributes verified across all 7 views.');
+console.log(`[OK] Screen-reader labels, form label associations, and ARIA attributes verified across all ${viewHtmlChecks.length} views.`);
 
 // 5. Complete End-to-End Keyboard-Only Journey: Onboarding -> Choose Game -> Configure -> Start -> Share -> Stop (UX-004, T-086 Done-when)
 // Step 5a: Start at Welcome/Onboarding (S1) and activate Sign-In via Enter

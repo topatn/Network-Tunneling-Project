@@ -434,6 +434,10 @@ dependencies = [
 name = "gtt-desktop"
 version = "0.0.0"
 dependencies = [
+ "chrono",
+ "gtt-engine",
+ "gtt-profiles",
+ "gtt-protocol",
  "serde",
  "serde_json",
  "sha2 0.11.1",

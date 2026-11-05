@@ -1,10 +1,10 @@
 //! Standalone native Windows desktop application executable for Game Tunnel Tooling (GTT)
-//! (`T-080`, `T-081`, `T-100`, `T-101`, `T-102`, `ADR-005`, `DESIGN.md`).
+//! (`T-070`, `T-073`, `T-080`, `T-081`, `T-100`, `T-101`, `T-102`, `ADR-005`, `DESIGN.md`).
 //!
 //! Embeds all frontend assets (HTML, tokens.css, app.css, app.js) and the Windows `asInvoker`
 //! application manifest into the binary, provides CLI entrypoints for per-user installation,
 //! WebView2 runtime detection, startup self-checks, and clean uninstallation, and hosts an
-//! in-memory loopback HTTP server on `127.0.0.1` for the standalone WebView2/Edge window.
+//! in-memory loopback HTTP server and Engine bridge on `127.0.0.1` for the standalone WebView2/Edge window.
 
 use std::env;
 use std::fs;
@@ -12,9 +12,11 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Command, ExitCode};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use gtt_desktop::engine_bridge::EngineBridge;
 use gtt_desktop::packaging::{
     verify_manifest_as_invoker, PerUserInstaller, PerUserPaths, UninstallOptions, Uninstaller,
     WebView2Probe, APPLICATION_MANIFEST_XML,
@@ -30,6 +32,13 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         .find(|w| w.first().map(String::as_str) == Some(flag))
         .and_then(|w| w.get(1))
         .map(String::as_str)
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|p| p + 4)
 }
 
 fn main() -> ExitCode {
@@ -133,6 +142,15 @@ fn main() -> ExitCode {
         }
     }
 
+    // 5. Initialize EngineBridge coordinator (`T-070`, `T-073`, `contracts.md` §13)
+    let bridge = match EngineBridge::new() {
+        Ok(b) => Arc::new(b),
+        Err(e) => {
+            eprintln!("[ERROR] Could not initialize EngineBridge: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
     let no_open = args.iter().any(|a| a == "--no-open");
     let target_port: Option<u16> = flag_value(&args, "--port").and_then(|p| p.parse().ok());
 
@@ -180,6 +198,7 @@ fn main() -> ExitCode {
     println!("\n======================================================");
     println!(" Game Tunnel Tooling (GTT) Desktop Shell Running!     ");
     println!(" Web UI URL: {url}                                    ");
+    println!(" Engine API: {url}/api/engine/status                  ");
     println!(" Keep this console window open while using GTT.       ");
     println!(" Press Ctrl+C to stop.                                ");
     println!("======================================================\n");
@@ -195,8 +214,9 @@ fn main() -> ExitCode {
     for stream_res in listener.incoming() {
         match stream_res {
             Ok(stream) => {
-                thread::spawn(|| {
-                    handle_connection(stream);
+                let bridge_clone = Arc::clone(&bridge);
+                thread::spawn(move || {
+                    handle_connection(stream, &bridge_clone);
                 });
             }
             Err(e) => {
@@ -208,11 +228,11 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, bridge: &EngineBridge) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
 
-    let mut buffer = [0u8; 4096];
+    let mut buffer = [0u8; 8192];
     let bytes_read = match stream.read(&mut buffer) {
         Ok(n) => n,
         Err(_) => return,
@@ -229,12 +249,41 @@ fn handle_connection(mut stream: TcpStream) {
     let full_path = parts.next().unwrap_or("");
     let clean_path = full_path.split('?').next().unwrap_or(full_path);
 
+    // 1. Dispatch Engine API endpoints (`/api/engine/*`, `contracts.md` §13)
+    if clean_path.starts_with("/api/engine") {
+        let body_bytes = if let Some(pos) = buffer.get(..bytes_read).and_then(find_header_end) {
+            buffer.get(pos..bytes_read).unwrap_or(&[])
+        } else {
+            &[]
+        };
+
+        let (status, content_type, body) =
+            bridge.handle_http_request(method, clean_path, body_bytes);
+        let status_text = match status {
+            200 => "OK",
+            204 => "No Content",
+            400 => "Bad Request",
+            404 => "Not Found",
+            _ => "Internal Server Error",
+        };
+        let content_len = body.len();
+        let header = format!(
+            "HTTP/1.1 {status} {status_text}\r\nContent-Type: {content_type}\r\nContent-Length: {content_len}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.write_all(header.as_bytes());
+        if method != "HEAD" {
+            let _ = stream.write_all(&body);
+        }
+        return;
+    }
+
     if method != "GET" && method != "HEAD" {
         let response = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n";
         let _ = stream.write_all(response.as_bytes());
         return;
     }
 
+    // 2. Dispatch embedded static frontend assets
     let (content_type, body) = match clean_path {
         "/" | "/index.html" => ("text/html; charset=utf-8", INDEX_HTML),
         "/src/tokens.css" => ("text/css; charset=utf-8", TOKENS_CSS),

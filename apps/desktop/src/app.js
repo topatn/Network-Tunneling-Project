@@ -231,9 +231,28 @@ function createInitialMappingConfigs(profile) {
 
 // App State - defaults to "dashboard" so the landing screen is the working tool
 const state = {
-  currentView: "dashboard", // "dashboard" | "choose-game" | "local-config" | "invitations" | "troubleshooter" | "onboarding" | "signin-handoff"
+  currentView: "dashboard", // "dashboard" | "choose-game" | "local-config" | "invitations" | "troubleshooter" | "onboarding" | "signin-handoff" | "account"
   theme: localStorage.getItem("gtt-theme") || "system",
   isSignedIn: true,
+  user: {
+    id: "usr_01HXYZ00000000000000000001",
+    displayName: "chris@desktop-win11",
+    email: "chris@host.gtt.gg",
+    role: "host",
+    status: "active",
+    monthlyEgressBytes: 4423680000,
+    monthlyEgressLimitBytes: 107374182400,
+    sessionCreated: "2026-11-05 10:00:00 UTC",
+  },
+  authFlow: {
+    status: "idle", // "idle" | "waiting" | "error"
+    codeVerifier: null,
+    codeChallenge: null,
+    redirectUri: "http://127.0.0.1:45123/callback",
+    errorMessage: null,
+    errorCode: null,
+  },
+  revokedTokens: [], // tracks revoked refresh tokens for test verification (FR-001)
   selectedProfile: SHIPPED_PROFILES[0],
   mappingConfigs: createInitialMappingConfigs(SHIPPED_PROFILES[0]),
   validationErrors: {},
@@ -1245,6 +1264,10 @@ function render() {
     if (viewTitle) viewTitle.textContent = "Browser Sign-In Handoff";
     mainContent.innerHTML = renderSignInHandoffView();
     bindSignInHandoffEvents();
+  } else if (state.currentView === "account") {
+    if (viewTitle) viewTitle.textContent = "Account & Session";
+    mainContent.innerHTML = renderAccountView();
+    bindAccountEvents();
   } else if (state.currentView === "choose-game") {
     if (viewTitle) viewTitle.textContent = "Choose Game Profile";
     mainContent.innerHTML = renderChooseGameView();
@@ -1294,6 +1317,133 @@ function updateSidebarNav() {
       el.classList.remove("active");
     }
   });
+
+  const navAccountBadge = document.getElementById("nav-badge-account");
+  if (navAccountBadge) {
+    navAccountBadge.textContent = state.isSignedIn ? "Active" : "Off";
+  }
+
+  const sidebarName = document.getElementById("sidebar-account-name");
+  const sidebarQuota = document.getElementById("sidebar-account-quota");
+  const sidebarBtn = document.getElementById("sidebar-btn-auth");
+
+  if (sidebarName) {
+    sidebarName.textContent = state.isSignedIn && state.user
+      ? state.user.displayName
+      : "Not Signed In";
+  }
+  if (sidebarQuota) {
+    sidebarQuota.textContent = state.isSignedIn && state.user
+      ? `Monthly egress: ${(state.user.monthlyEgressBytes / (1024 * 1024 * 1024)).toFixed(2)} / 100 GB`
+      : "Sign in to host tunnels";
+  }
+  if (sidebarBtn) {
+    sidebarBtn.textContent = state.isSignedIn ? "Sign Out" : "Sign In";
+    sidebarBtn.setAttribute?.("aria-label", state.isSignedIn ? "Sign out of account" : "Sign in with browser");
+  }
+}
+
+// ============================================================================
+// Auth Lifecycle Methods (T-040, T-074, T-081, FR-001, UX-001, SEC-001, SEC-003)
+// ============================================================================
+function startBrowserAuth() {
+  const verifier = "gtt_pkce_v_0123456789abcdef0123456789abcdef0123456789a";
+  const challenge = "gtt_pkce_c_challenge_sha256_mock_valid_base64url";
+  state.authFlow = {
+    status: "waiting",
+    codeVerifier: verifier,
+    codeChallenge: challenge,
+    redirectUri: "http://127.0.0.1:45123/callback",
+    errorMessage: null,
+    errorCode: null,
+  };
+  navigateTo("signin-handoff");
+}
+
+function cancelSignIn() {
+  state.authFlow = {
+    status: "idle",
+    codeVerifier: null,
+    codeChallenge: null,
+    redirectUri: "http://127.0.0.1:45123/callback",
+    errorMessage: null,
+    errorCode: null,
+  };
+  navigateTo("onboarding");
+}
+
+function failSignIn(code = "forbidden", message = "This account can't create tunnels. Contact support.") {
+  state.authFlow = {
+    status: "error",
+    codeVerifier: null,
+    codeChallenge: null,
+    redirectUri: "http://127.0.0.1:45123/callback",
+    errorCode: code,
+    errorMessage: message,
+  };
+  render();
+}
+
+function completeSignIn(code = "auth_code_sim_01") {
+  state.isSignedIn = true;
+  state.user = {
+    id: "usr_01HXYZ00000000000000000001",
+    displayName: "chris@desktop-win11",
+    email: "chris@host.gtt.gg",
+    role: "host",
+    status: "active",
+    monthlyEgressBytes: 4423680000,
+    monthlyEgressLimitBytes: 107374182400,
+    sessionCreated: "2026-11-05 10:00:00 UTC",
+  };
+  state.authFlow = {
+    status: "idle",
+    codeVerifier: null,
+    codeChallenge: null,
+    redirectUri: "http://127.0.0.1:45123/callback",
+    errorMessage: null,
+    errorCode: null,
+  };
+  showToast("Authentication successful");
+  navigateTo("choose-game");
+}
+
+function signOut() {
+  if (state.user) {
+    state.revokedTokens.push("gtt_rt_session_current");
+  }
+  state.isSignedIn = false;
+  state.user = null;
+  state.authFlow = {
+    status: "idle",
+    codeVerifier: null,
+    codeChallenge: null,
+    redirectUri: "http://127.0.0.1:45123/callback",
+    errorMessage: null,
+    errorCode: null,
+  };
+  if (state.tunnelState === "Connected" || state.tunnelState === "Connecting") {
+    setTunnelState("Not running");
+  }
+  showToast("Signed out successfully. Session credentials revoked.");
+  navigateTo("onboarding");
+}
+
+function attemptTokenRefresh(refreshToken) {
+  if (state.revokedTokens.includes(refreshToken) || !state.isSignedIn) {
+    return {
+      ok: false,
+      error: {
+        code: "unauthenticated",
+        message: "Your sign-in session has expired or was signed out on another device.",
+      },
+    };
+  }
+  return {
+    ok: true,
+    token: "gtt_at_fresh_session_token",
+    expiresIn: 900,
+  };
 }
 
 // S1: Welcome & Onboarding View (FR-001, UX-001, PRIV-005, SEC-011)
@@ -1379,15 +1529,52 @@ function renderOnboardingView() {
 
 function bindOnboardingEvents() {
   document.getElementById("btn-start-signin")?.addEventListener("click", () => {
-    navigateTo("signin-handoff");
+    startBrowserAuth();
   });
   document.getElementById("btn-choose-game")?.addEventListener("click", () => {
     navigateTo("choose-game");
   });
 }
 
-// S2: Sign-In Handoff View (FR-001)
+// S2: Sign-In Handoff View (FR-001, UX-001, ADR-018)
 function renderSignInHandoffView() {
+  const isError = state.authFlow && state.authFlow.status === "error";
+
+  if (isError) {
+    return `
+    <div class="sheet-header">
+      <div class="sheet-header__titles">
+        <h2 class="sheet-title">Sign-In Required</h2>
+        <p class="sheet-subtitle">
+          Authentication was not completed or your account status prevents hosting.
+        </p>
+      </div>
+      <div class="sheet-header__actions">
+        <button id="btn-cancel-auth" class="gtt-btn gtt-btn-secondary">
+          Back to Welcome
+        </button>
+        <button id="btn-retry-auth" class="gtt-btn gtt-btn-primary">
+          Try Again
+        </button>
+      </div>
+    </div>
+
+    <div class="panel col-12" role="alert" aria-live="assertive">
+      <div class="panel__head">
+        <h3 class="panel__title">Sign-In Error · ${state.authFlow.errorCode || "failed"}</h3>
+        <span class="pill pill--err">Action Required</span>
+      </div>
+      <div class="disclosure-callout" role="note" style="border-left-color: var(--negative);">
+        <strong>${state.authFlow.errorCode === "forbidden" ? "This account can't create tunnels. Contact support." : state.authFlow.errorMessage || "Browser sign-in could not be completed."}</strong><br>
+        Error code: <code data-ui>${state.authFlow.errorCode || "auth_error"}</code>
+      </div>
+      <p style="color: var(--muted); margin-top: 12px;">
+        Click <strong>Try Again</strong> to restart browser authorization with a fresh PKCE challenge, or return to Welcome.
+      </p>
+    </div>
+    `;
+  }
+
   return `
     <div class="sheet-header">
       <div class="sheet-header__titles">
@@ -1411,20 +1598,162 @@ function renderSignInHandoffView() {
         <h3 class="panel__title">Browser Authorization Session</h3>
         <span class="pill pill--info">Awaiting Callback</span>
       </div>
+
+      <div class="auth-waiting-box" role="status" aria-live="polite">
+        <span class="auth-spinner" aria-hidden="true"></span>
+        <div>
+          <strong style="color: var(--text);">Finish signing in in your system browser</strong>
+          <div style="color: var(--muted); font-size: 13px; margin-top: 2px;">
+            The browser opened automatically. After you confirm your identity, this console updates instantly.
+          </div>
+        </div>
+      </div>
+
       <p style="color: var(--muted);">
         We opened your system web browser to complete authentication. Once authorized, your short-lived session credential is stored in Windows Credential Manager (<code data-ui>CredWriteW</code>) and this console updates automatically.
       </p>
+
+      <div style="margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--rule);">
+        <button type="button" id="btn-simulate-auth-failure" class="gtt-btn gtt-btn-ghost gtt-btn-xs" style="color: var(--muted);">
+          Simulate Account Suspension (forbidden)
+        </button>
+      </div>
     </div>
   `;
 }
 
 function bindSignInHandoffEvents() {
   document.getElementById("btn-simulate-auth-success")?.addEventListener("click", () => {
-    showToast("Authentication successful");
-    navigateTo("choose-game");
+    completeSignIn();
+  });
+  document.getElementById("btn-simulate-auth-failure")?.addEventListener("click", () => {
+    failSignIn("forbidden", "This account can't create tunnels. Contact support.");
+  });
+  document.getElementById("btn-retry-auth")?.addEventListener("click", () => {
+    startBrowserAuth();
   });
   document.getElementById("btn-cancel-auth")?.addEventListener("click", () => {
-    navigateTo("onboarding");
+    cancelSignIn();
+  });
+}
+
+// S10: Account & Session View (FR-001, UX-001, SEC-001..SEC-003)
+function renderAccountView() {
+  const user = state.user || {
+    id: "usr_guest",
+    displayName: "Guest (Not signed in)",
+    email: "none",
+    role: "guest",
+    status: "unauthenticated",
+    monthlyEgressBytes: 0,
+    monthlyEgressLimitBytes: 107374182400,
+  };
+  const egressGb = (user.monthlyEgressBytes / (1024 * 1024 * 1024)).toFixed(2);
+  const limitGb = (user.monthlyEgressLimitBytes / (1024 * 1024 * 1024)).toFixed(0);
+  const percentUsed = Math.min(100, Math.round((user.monthlyEgressBytes / user.monthlyEgressLimitBytes) * 100));
+
+  return `
+    <div class="sheet-header">
+      <div class="sheet-header__titles">
+        <h2 class="sheet-title">Account &amp; Session</h2>
+        <p class="sheet-subtitle">
+          Host identity, authenticated session credentials, and monthly relay data quota.
+        </p>
+      </div>
+      <div class="sheet-header__actions">
+        ${state.isSignedIn
+          ? `<button id="btn-sign-out" class="gtt-btn gtt-btn-destructive">Sign Out</button>`
+          : `<button id="btn-start-signin" class="gtt-btn gtt-btn-primary">Sign In with Browser</button>`}
+      </div>
+    </div>
+
+    <div class="account-grid">
+      <!-- Identity Panel -->
+      <div class="panel col-6">
+        <div class="panel__head">
+          <h3 class="panel__title">Host Identity</h3>
+          <span class="pill ${state.isSignedIn ? "pill--ok" : "pill--err"}">
+            ${state.isSignedIn ? "Signed In" : "Unauthenticated"}
+          </span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Display Name</span>
+          <span class="account-detail-value">${user.displayName}</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Email</span>
+          <span class="account-detail-value">${user.email}</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Host User ID</span>
+          <span class="account-detail-value"><code data-ui>${user.id}</code></span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Account Status</span>
+          <span class="account-detail-value">
+            <span class="pill ${user.status === "active" ? "pill--ok" : "pill--warn"}">${user.status}</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- Quota & Egress Panel -->
+      <div class="panel col-6">
+        <div class="panel__head">
+          <h3 class="panel__title">Relay Egress &amp; Quotas</h3>
+          <span class="pill pill--info">Cycle Resets 1st of Month</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Monthly Egress Usage</span>
+          <span class="account-detail-value">${egressGb} / ${limitGb} GB (${percentUsed}%)</span>
+        </div>
+        <div style="margin: 8px 0 16px 0;">
+          <div class="progress-track" role="progressbar" aria-valuenow="${percentUsed}" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-fill" style="width: ${percentUsed}%;"></div>
+          </div>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Active Concurrency Limit</span>
+          <span class="account-detail-value">1 of 3 tunnels active</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Bandwidth Burst Cap</span>
+          <span class="account-detail-value">100 Mbit/s symmetric</span>
+        </div>
+      </div>
+
+      <!-- Credential Security & Invariants Panel -->
+      <div class="panel col-12">
+        <div class="panel__head">
+          <h3 class="panel__title">Session Security &amp; Credential Storage</h3>
+          <span class="pill pill--ok">Windows Credential Vault Active</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Credential Vault Engine</span>
+          <span class="account-detail-value">EncryptedFileVault · AES-256-CTR + HMAC-SHA256 (SEC-002)</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Browser Auth Protocol</span>
+          <span class="account-detail-value">RFC 8252 Loopback + RFC 7636 PKCE S256 (ADR-018)</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Refresh Token Rotation</span>
+          <span class="account-detail-value">Single-use token rotation with reuse family revocation (SEC-003)</span>
+        </div>
+        <div class="account-detail-row">
+          <span class="account-detail-label">Zero Plaintext Invariant</span>
+          <span class="account-detail-value"><code data-ui>PRIV-002</code> Tokens and secrets never written in plaintext</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindAccountEvents() {
+  document.getElementById("btn-sign-out")?.addEventListener("click", () => {
+    signOut();
+  });
+  document.getElementById("btn-start-signin")?.addEventListener("click", () => {
+    startBrowserAuth();
   });
 }
 
@@ -1924,6 +2253,83 @@ const LOCAL_SERVER_STATE_SPEC = {
   "Not reachable": { token: "error", pill: "pill--err", iconShape: "cross" },
   Checking: { token: "info", pill: "pill--info", iconShape: "spinner" },
   Unknown: { token: "neutral", pill: "pill--idle", iconShape: "question-mark" },
+};
+
+// Engine <-> UI Client for loopback HTTP IPC (`T-070`, `T-073`, `contracts.md` §13)
+const EngineClient = {
+  isAvailable: null,
+
+  async checkAvailable() {
+    if (this.isAvailable !== null) return this.isAvailable;
+    if (typeof window === "undefined" || typeof window.fetch !== "function") {
+      this.isAvailable = false;
+      return false;
+    }
+    try {
+      const res = await window.fetch("/api/engine/status");
+      this.isAvailable = res.ok;
+      return res.ok;
+    } catch (_) {
+      this.isAvailable = false;
+      return false;
+    }
+  },
+
+  async startTunnel(options = {}) {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return null;
+  },
+
+  async stopTunnel(reason = "user requested stop") {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return null;
+  },
+
+  async getStatus() {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/status");
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return null;
+  },
+
+  async configure(profileId, mappings) {
+    if (!(await this.checkAvailable())) return null;
+    try {
+      const res = await window.fetch("/api/engine/configure", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profile_id: profileId, mappings }),
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (_) {}
+    return null;
+  },
 };
 
 // Maps engine state machine states (contracts.md §12) to UI labels (DESIGN.md §6)
@@ -2727,12 +3133,33 @@ function bindDashboardEvents() {
   document.getElementById("btn-start-tunnel")?.addEventListener("click", () => {
     state.tunnelState = "Connecting";
     render();
+
+    EngineClient.startTunnel({
+      mode: "relay",
+      tunnel_id: state.activeTunnelId || "11111111-1111-4111-8111-111111111111",
+      relay_host: "relay.us-east.example.test",
+      public_port: 25565,
+    }).then((dto) => {
+      if (dto) {
+        state.tunnelState = dto.tunnel_state;
+        state.localServerState = dto.local_server_summary;
+        state.playersSeenCount = dto.players_seen.distinct_sources;
+        if (dto.public_endpoints && dto.public_endpoints.length > 0) {
+          state.publicAddress = dto.public_endpoints[0].display_address;
+        }
+        showToast("Tunnel started successfully");
+        render();
+      }
+    });
+
     setTimeout(() => {
-      state.tunnelState = "Connected";
-      state.localServerState = "Reachable";
-      state.playersSeenCount = ACTIVE_GUEST_FLOWS.length;
-      showToast("Tunnel started successfully");
-      render();
+      if (state.tunnelState === "Connecting") {
+        state.tunnelState = "Connected";
+        state.localServerState = "Reachable";
+        state.playersSeenCount = ACTIVE_GUEST_FLOWS.length;
+        showToast("Tunnel started successfully");
+        render();
+      }
     }, 600);
   });
 
@@ -2763,6 +3190,14 @@ function executeStopTunnel() {
   state.playersSeenCount = 0;
   showToast("Tunnel stopped");
   render();
+
+  EngineClient.stopTunnel("user stopped").then((dto) => {
+    if (dto) {
+      state.tunnelState = dto.tunnel_state;
+      state.playersSeenCount = dto.players_seen.distinct_sources;
+      render();
+    }
+  });
 }
 
 // S8 & G1: Invitations, One-Time Secret Banner, Revocation & Guest Claim View (T-084, FR-007, FR-008, FR-009, SEC-007)
@@ -3686,17 +4121,32 @@ function dispatchKeyAction(targetId, key = "Enter") {
   switch (targetId) {
     // S1 Onboarding -> S2 Sign-In Handoff -> S4 Choose Game
     case "btn-start-signin":
-      navigateTo("signin-handoff");
+      startBrowserAuth();
       return true;
     case "btn-choose-game":
       navigateTo("choose-game");
       return true;
     case "btn-simulate-auth-success":
-      state.isSignedIn = true;
-      navigateTo("choose-game");
+      completeSignIn();
+      return true;
+    case "btn-simulate-auth-failure":
+      failSignIn("forbidden", "This account can't create tunnels. Contact support.");
+      return true;
+    case "btn-retry-auth":
+      startBrowserAuth();
       return true;
     case "btn-cancel-auth":
-      navigateTo("onboarding");
+      cancelSignIn();
+      return true;
+    case "btn-sign-out":
+      signOut();
+      return true;
+    case "sidebar-btn-auth":
+      if (state.isSignedIn) {
+        signOut();
+      } else {
+        startBrowserAuth();
+      }
       return true;
 
     // S4 Choose Game -> S5 Local Config
@@ -3822,11 +4272,27 @@ window.addEventListener("DOMContentLoaded", () => {
     showToast("Telemetry refreshed");
   });
 
+  // Sidebar auth button
+  document.getElementById("sidebar-btn-auth")?.addEventListener("click", () => {
+    if (state.isSignedIn) {
+      signOut();
+    } else {
+      startBrowserAuth();
+    }
+  });
+
   render();
 });
 
-// Export symbols onto globalThis for Node VM unit testing (T-080, T-082, T-083, T-084, T-085, T-086, T-088)
+// Export symbols onto globalThis for Node VM unit testing (T-080, T-081, T-082, T-083, T-084, T-085, T-086, T-088)
 Object.assign(globalThis, {
+  startBrowserAuth,
+  cancelSignIn,
+  failSignIn,
+  completeSignIn,
+  signOut,
+  attemptTokenRefresh,
+  renderAccountView,
   SHIPPED_PROFILES,
   SENSITIVE_LOCAL_PORTS,
   OBSERVED_TRAFFIC_LABEL,
@@ -3889,5 +4355,6 @@ Object.assign(globalThis, {
   renderInvitationsView,
   renderTroubleshooterView,
   renderManagedServerView,
+  EngineClient,
   state,
 });
