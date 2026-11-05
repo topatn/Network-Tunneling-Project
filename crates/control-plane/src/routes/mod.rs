@@ -5,6 +5,7 @@
 //! idempotency (`contracts.md` §8), and persistence invariants (`crate::db`).
 
 pub mod admin;
+pub mod auth;
 pub mod invitations;
 pub mod relay_internal;
 pub mod tunnels;

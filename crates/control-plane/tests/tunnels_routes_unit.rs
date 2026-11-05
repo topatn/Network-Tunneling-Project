@@ -5,7 +5,8 @@ use std::path::Path;
 
 use chrono::{Duration, Utc};
 use gtt_control_plane::db::entities::{
-    AllocationPort, Protocol as DbProtocol, RelayNode, TunnelMapping, UserStatus,
+    AllocationPort, Protocol as DbProtocol, RelayNode, Tunnel as DbTunnel, TunnelMapping,
+    UserStatus,
 };
 use gtt_control_plane::db::profile::ProfileSpec;
 use gtt_control_plane::keys::{
@@ -13,15 +14,15 @@ use gtt_control_plane::keys::{
 };
 use gtt_control_plane::policy::Actor;
 use gtt_control_plane::routes::tunnels::{
-    assign_free_ports, build_allocation_token_claims, hash_create_tunnel_request,
-    hash_start_tunnel_request, parse_create_tunnel_request, select_candidate_relays,
-    validate_idempotency_key, TokenClaimsInput, MAX_IDEMPOTENCY_KEY_LEN, MAX_REQUEST_BODY_BYTES,
-    MIN_IDEMPOTENCY_KEY_LEN,
+    assemble_tunnel_dto, assign_free_ports, build_allocation_token_claims,
+    hash_create_tunnel_request, hash_start_tunnel_request, parse_create_tunnel_request,
+    select_candidate_relays, validate_idempotency_key, TokenClaimsInput, MAX_IDEMPOTENCY_KEY_LEN,
+    MAX_REQUEST_BODY_BYTES, MIN_IDEMPOTENCY_KEY_LEN,
 };
 use gtt_profiles::Registry;
 use gtt_protocol::http::{
     AllocatedPortDto, AllocationDto, ApiErrorCode, CreateTunnelRequest, IssueTunnelTokenResponse,
-    MappingRequest, Protocol, RelayEndpointDto, StartTunnelResponse,
+    MappingRequest, Protocol, RelayEndpointDto, StartTunnelResponse, TunnelState,
 };
 use uuid::Uuid;
 
@@ -390,6 +391,106 @@ fn build_allocation_token_claims_and_start_token_responses_validate() -> TestRes
         expires_at: exp.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
     };
     token_resp.validate()?;
+
+    Ok(())
+}
+
+#[test]
+fn assemble_tunnel_dto_validates_all_states_and_schema_constraints() -> TestResult {
+    let now = Utc::now();
+    let tunnel_id = Uuid::new_v4();
+    let owner_id = Uuid::new_v4();
+
+    let mapping = TunnelMapping {
+        id: Uuid::new_v4(),
+        tunnel_id,
+        mapping_key: "game".to_owned(),
+        protocol: "tcp".to_owned(),
+        position: 0,
+        enabled: true,
+        created_at: now,
+    };
+    let mappings = vec![mapping];
+
+    // 1. Created state
+    let mut db_tunnel = DbTunnel {
+        id: tunnel_id,
+        owner_id,
+        name: "Test Tunnel".to_owned(),
+        game_profile_id: "minecraft-java".to_owned(),
+        profile_version: 1,
+        state: "created".to_owned(),
+        created_at: now,
+        started_at: None,
+        stopped_at: None,
+        expires_at: now + Duration::hours(24),
+        termination_reason: None,
+    };
+    let dto = assemble_tunnel_dto(&db_tunnel, &mappings, "req_created")
+        .map_err(|e| format!("expected created dto: {:?}", e))?;
+    assert_eq!(dto.state, TunnelState::Created);
+    assert_eq!(dto.started_at, None);
+    assert_eq!(dto.stopped_at, None);
+    dto.validate()?;
+
+    // 2. Active state
+    db_tunnel.state = "active".to_owned();
+    db_tunnel.started_at = Some(now);
+    let dto = assemble_tunnel_dto(&db_tunnel, &mappings, "req_active")
+        .map_err(|e| format!("expected active dto: {:?}", e))?;
+    assert_eq!(dto.state, TunnelState::Active);
+    assert!(dto.started_at.is_some());
+    assert_eq!(dto.stopped_at, None);
+    dto.validate()?;
+
+    // 3. Stopped state
+    db_tunnel.state = "stopped".to_owned();
+    db_tunnel.stopped_at = Some(now + Duration::minutes(30));
+    let dto = assemble_tunnel_dto(&db_tunnel, &mappings, "req_stopped")
+        .map_err(|e| format!("expected stopped dto: {:?}", e))?;
+    assert_eq!(dto.state, TunnelState::Stopped);
+    assert!(dto.stopped_at.is_some());
+    dto.validate()?;
+
+    // 4. Terminated state with reason
+    db_tunnel.state = "terminated".to_owned();
+    db_tunnel.termination_reason = Some("quota_exceeded".to_owned());
+    let dto = assemble_tunnel_dto(&db_tunnel, &mappings, "req_term")
+        .map_err(|e| format!("expected terminated dto: {:?}", e))?;
+    assert_eq!(dto.state, TunnelState::Terminated);
+    assert_eq!(dto.termination_reason.as_deref(), Some("quota_exceeded"));
+    dto.validate()?;
+
+    // 5. Expired state
+    db_tunnel.state = "expired".to_owned();
+    db_tunnel.termination_reason = None;
+    let dto = assemble_tunnel_dto(&db_tunnel, &mappings, "req_expired")
+        .map_err(|e| format!("expected expired dto: {:?}", e))?;
+    assert_eq!(dto.state, TunnelState::Expired);
+    dto.validate()?;
+
+    // 6. Unknown / invalid database state returns Internal error
+    db_tunnel.state = "invalid_state".to_owned();
+    let err = assemble_tunnel_dto(&db_tunnel, &mappings, "req_inv_state")
+        .err()
+        .ok_or("expected rejection of invalid state")?;
+    assert_eq!(err.code(), ApiErrorCode::Internal);
+
+    // 7. Invalid mapping protocol returns Internal error
+    db_tunnel.state = "created".to_owned();
+    let bad_mapping = TunnelMapping {
+        id: Uuid::new_v4(),
+        tunnel_id,
+        mapping_key: "game".to_owned(),
+        protocol: "sctp".to_owned(),
+        position: 0,
+        enabled: true,
+        created_at: now,
+    };
+    let err = assemble_tunnel_dto(&db_tunnel, &[bad_mapping], "req_bad_proto")
+        .err()
+        .ok_or("expected rejection of invalid mapping protocol")?;
+    assert_eq!(err.code(), ApiErrorCode::Internal);
 
     Ok(())
 }

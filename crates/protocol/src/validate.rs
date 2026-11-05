@@ -238,6 +238,36 @@ pub fn is_valid_rfc3339_utc(s: &str) -> bool {
     frac.iter().all(u8::is_ascii_digit)
 }
 
+/// Verify that `verifier` is a valid RFC 7636 PKCE code verifier (43–128 unreserved ASCII characters).
+pub fn is_valid_pkce_verifier(verifier: &str) -> bool {
+    let bytes = verifier.as_bytes();
+    if !(43..=128).contains(&bytes.len()) {
+        return false;
+    }
+    bytes
+        .iter()
+        .all(|&b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.' || b == b'_' || b == b'~')
+}
+
+/// Compute RFC 7636 S256 PKCE code challenge (`base64url(sha256(code_verifier))`) without padding.
+pub fn compute_pkce_s256_challenge(code_verifier: &str) -> String {
+    let digest = crate::token::sha256_digest(code_verifier.as_bytes());
+    crate::token::base64url_encode(&digest)
+}
+
+/// Check whether `uri` is a non-empty, bounded redirect URI without ASCII whitespace or control characters.
+pub fn is_valid_redirect_uri(uri: &str) -> bool {
+    let trimmed = uri.trim();
+    if trimmed.is_empty() || trimmed.len() > 512 || trimmed != uri {
+        return false;
+    }
+    // Must contain a scheme delimiter (e.g. "http://", "https://", "gtt://")
+    if !uri.contains("://") {
+        return false;
+    }
+    uri.bytes().all(|b| (0x21..=0x7E).contains(&b))
+}
+
 fn byte_at(bytes: &[u8], index: usize) -> Option<u8> {
     bytes.get(index).copied()
 }

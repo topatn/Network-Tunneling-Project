@@ -109,7 +109,7 @@ fn rate_limiter_enforces_per_key_global_and_bounded_key_table_and_quotas() -> Te
 #[test]
 fn audit_actions_and_log_redaction_leave_zero_tokens_secrets_or_raw_ips() -> TestResult {
     // 1. Every canonical audit action required by SEC-013 is non-empty and distinct.
-    assert_eq!(AuditAction::ALL.len(), 17);
+    assert_eq!(AuditAction::ALL.len(), 18);
     for (idx, action) in AuditAction::ALL.iter().enumerate() {
         assert!(!action.as_str().is_empty());
         if let Some(earlier) = AuditAction::ALL.get(..idx) {

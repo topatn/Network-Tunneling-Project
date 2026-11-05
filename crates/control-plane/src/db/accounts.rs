@@ -282,6 +282,65 @@ pub async fn get_active_session_by_token_hash(
     Ok(session)
 }
 
+/// Look up a session by its token hash, including revoked sessions, for rotation and reuse detection (`SEC-003`).
+pub async fn get_session_by_token_hash_any(
+    pool: &PgPool,
+    refresh_token_hash: &[u8],
+) -> Result<Option<AuthSession>> {
+    let session = sqlx::query_as::<_, AuthSession>(
+        "select id, user_id, family_id, refresh_token_hash, device_label,
+                created_at, last_used_at, expires_at, revoked_at
+         from auth_sessions
+         where refresh_token_hash = $1",
+    )
+    .bind(refresh_token_hash)
+    .fetch_optional(pool)
+    .await?;
+    Ok(session)
+}
+
+/// Atomically rotate a refresh session: marks `old_session_id` revoked and inserts the new session (`SEC-003`).
+pub async fn rotate_session(
+    pool: &PgPool,
+    old_session_id: Uuid,
+    user_id: Uuid,
+    family_id: Uuid,
+    new_refresh_token_hash: &[u8],
+    device_label: Option<&str>,
+    expires_at: DateTime<Utc>,
+) -> Result<AuthSession> {
+    let mut tx = pool.begin().await?;
+    let updated = sqlx::query(
+        "update auth_sessions set revoked_at = now(), last_used_at = now()
+         where id = $1 and revoked_at is null",
+    )
+    .bind(old_session_id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        tx.rollback().await?;
+        return Err(crate::error::PersistenceError::Rejected(
+            crate::error::Rejection::Field("session was already rotated or revoked"),
+        ));
+    }
+    let new_session = sqlx::query_as::<_, AuthSession>(
+        "insert into auth_sessions
+             (user_id, family_id, refresh_token_hash, device_label, expires_at)
+         values ($1, $2, $3, $4, $5)
+         returning id, user_id, family_id, refresh_token_hash, device_label,
+                   created_at, last_used_at, expires_at, revoked_at",
+    )
+    .bind(user_id)
+    .bind(family_id)
+    .bind(new_refresh_token_hash)
+    .bind(device_label)
+    .bind(expires_at)
+    .fetch_one(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(new_session)
+}
+
 /// Record a session's use, for absolute-lifetime enforcement.
 ///
 /// Advances `last_used_at` only. It must not extend `expires_at`: `contracts.md` §9 caps

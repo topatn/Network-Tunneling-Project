@@ -7,8 +7,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::validate::{
-    is_valid_identifier, is_valid_invitation_secret, is_valid_rfc3339_utc, is_valid_tunnel_name,
-    is_valid_uuid, ValidationError,
+    is_valid_identifier, is_valid_invitation_secret, is_valid_pkce_verifier, is_valid_redirect_uri,
+    is_valid_rfc3339_utc, is_valid_tunnel_name, is_valid_uuid, ValidationError,
 };
 
 /// Maximum mappings per tunnel (`contracts.md` §15: 1–8 entries).
@@ -722,6 +722,179 @@ impl ClaimInvitationResponse {
             return Err(ValidationError::InvalidField {
                 field: "admitted_until",
                 issue: "must be a valid RFC 3339 UTC timestamp",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Request body for `POST /v1/auth/exchange` (`contracts.md` §5.1, `api.md` #1, `T-040`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthExchangeRequest {
+    /// Authorization code issued by identity provider (1–512 chars).
+    pub code: String,
+    /// RFC 7636 PKCE code verifier (43–128 unreserved characters).
+    pub code_verifier: String,
+    /// Registered redirect URI matching the initial authorization request.
+    pub redirect_uri: String,
+    /// Optional user-supplied device or client label (1–64 chars).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_label: Option<String>,
+    /// Optional PKCE challenge method. If provided, must be `"S256"` (`ADR-018`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code_challenge_method: Option<String>,
+}
+
+impl AuthExchangeRequest {
+    /// Validate [`AuthExchangeRequest`] against `contracts.md` §5.1 and `ADR-018`.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.code.trim().is_empty() || self.code.len() > 512 {
+            return Err(ValidationError::InvalidField {
+                field: "code",
+                issue: "must be 1-512 non-empty characters",
+            });
+        }
+        if !is_valid_pkce_verifier(&self.code_verifier) {
+            return Err(ValidationError::InvalidField {
+                field: "code_verifier",
+                issue: "must be 43-128 unreserved ASCII characters (RFC 7636)",
+            });
+        }
+        if !is_valid_redirect_uri(&self.redirect_uri) {
+            return Err(ValidationError::InvalidField {
+                field: "redirect_uri",
+                issue: "must be a valid URI (1-512 characters)",
+            });
+        }
+        if let Some(label) = &self.device_label {
+            if label.trim().is_empty() || label.len() > 64 {
+                return Err(ValidationError::InvalidField {
+                    field: "device_label",
+                    issue: "must be 1-64 characters if provided",
+                });
+            }
+        }
+        if let Some(method) = &self.code_challenge_method {
+            if method.eq_ignore_ascii_case("plain") {
+                return Err(ValidationError::InvalidField {
+                    field: "code_challenge_method",
+                    issue: "plain PKCE method is prohibited; S256 is required (ADR-018)",
+                });
+            }
+            if method != "S256" {
+                return Err(ValidationError::InvalidField {
+                    field: "code_challenge_method",
+                    issue: "unsupported code_challenge_method (must be S256)",
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Request body for `POST /v1/auth/refresh` (`contracts.md` §5.2, `api.md` #2, `T-040`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthRefreshRequest {
+    /// High-entropy refresh token issued by the server.
+    pub refresh_token: String,
+}
+
+impl AuthRefreshRequest {
+    /// Validate [`AuthRefreshRequest`] against `contracts.md` §5.2.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.refresh_token.trim().is_empty() || self.refresh_token.len() > 512 {
+            return Err(ValidationError::InvalidField {
+                field: "refresh_token",
+                issue: "must be 1-512 non-empty characters",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Response body for `POST /v1/auth/exchange` and `POST /v1/auth/refresh` (`contracts.md` §§5.1, 5.2, `T-040`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthTokenResponse {
+    /// Short-lived access token used for authenticated routes.
+    pub access_token: String,
+    /// Token type (always `"Bearer"`).
+    pub token_type: String,
+    /// Lifetime of access_token in seconds (e.g. `900`).
+    pub expires_in: u64,
+    /// High-entropy refresh token for session rotation.
+    pub refresh_token: String,
+}
+
+impl AuthTokenResponse {
+    /// Validate [`AuthTokenResponse`].
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.access_token.trim().is_empty() || self.access_token.len() > 4096 {
+            return Err(ValidationError::InvalidField {
+                field: "access_token",
+                issue: "must be 1-4096 characters",
+            });
+        }
+        if self.token_type != "Bearer" {
+            return Err(ValidationError::InvalidField {
+                field: "token_type",
+                issue: "token_type must be Bearer",
+            });
+        }
+        if self.expires_in == 0 {
+            return Err(ValidationError::InvalidField {
+                field: "expires_in",
+                issue: "must be positive non-zero seconds",
+            });
+        }
+        if self.refresh_token.trim().is_empty() || self.refresh_token.len() > 512 {
+            return Err(ValidationError::InvalidField {
+                field: "refresh_token",
+                issue: "must be 1-512 non-empty characters",
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Response body for `GET /v1/me` (`contracts.md` §5.4, `api.md` #4, `T-040`).
+///
+/// Contains NO sensitive personal data (`contracts.md` §5.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UserProfileResponse {
+    /// Canonical user identifier (UUID).
+    pub id: String,
+    /// Optional user display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Account status string (`"active"`, `"suspended"`).
+    pub status: String,
+}
+
+impl UserProfileResponse {
+    /// Validate [`UserProfileResponse`].
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if !is_valid_uuid(&self.id) {
+            return Err(ValidationError::InvalidField {
+                field: "id",
+                issue: "must be a valid UUID",
+            });
+        }
+        if let Some(name) = &self.display_name {
+            if name.len() > 64 {
+                return Err(ValidationError::InvalidField {
+                    field: "display_name",
+                    issue: "must not exceed 64 characters",
+                });
+            }
+        }
+        if self.status != "active" && self.status != "suspended" {
+            return Err(ValidationError::InvalidField {
+                field: "status",
+                issue: "must be active or suspended",
             });
         }
         Ok(())

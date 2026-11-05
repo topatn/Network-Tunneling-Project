@@ -32,10 +32,11 @@ pub use framing::{
     DEFAULT_MAX_DATAGRAM_BYTES, TCP_OPEN_FRAME_TYPE, TCP_OPEN_HEADER_LEN, UDP_HEADER_LEN,
 };
 pub use http::{
-    AllocatedPortDto, AllocationDto, ApiErrorCode, ClaimInvitationRequest, ClaimInvitationResponse,
-    ClaimRelayDto, CreateInvitationRequest, CreateInvitationResponse, CreateTunnelRequest,
-    ErrorBody, ErrorDetail, ErrorResponse, IssueTunnelTokenResponse, MappingRequest, Protocol,
-    RelayEndpointDto, StartTunnelResponse, Tunnel, TunnelMappingDto, TunnelState,
+    AllocatedPortDto, AllocationDto, ApiErrorCode, AuthExchangeRequest, AuthRefreshRequest,
+    AuthTokenResponse, ClaimInvitationRequest, ClaimInvitationResponse, ClaimRelayDto,
+    CreateInvitationRequest, CreateInvitationResponse, CreateTunnelRequest, ErrorBody, ErrorDetail,
+    ErrorResponse, IssueTunnelTokenResponse, MappingRequest, Protocol, RelayEndpointDto,
+    StartTunnelResponse, Tunnel, TunnelMappingDto, TunnelState, UserProfileResponse,
     MAX_TUNNEL_MAPPINGS,
 };
 pub use state::{EngineSessionEvent, EngineSessionState, InvalidSessionTransition};
@@ -48,9 +49,10 @@ pub use token::{
     MAX_OVERLAP_WINDOW_SECS, MAX_TOKEN_LEN, TOKEN_ALG_HS256, TOKEN_TYP_ALLOC,
 };
 pub use validate::{
-    is_local_target_field, is_valid_identifier, is_valid_invitation_secret, is_valid_rfc3339_utc,
-    is_valid_tunnel_name, is_valid_uuid, scan_json_for_local_target, ValidationError,
-    FORBIDDEN_LOCAL_TARGET_STEMS, MAX_JSON_DEPTH,
+    compute_pkce_s256_challenge, is_local_target_field, is_valid_identifier,
+    is_valid_invitation_secret, is_valid_pkce_verifier, is_valid_redirect_uri,
+    is_valid_rfc3339_utc, is_valid_tunnel_name, is_valid_uuid, scan_json_for_local_target,
+    ValidationError, FORBIDDEN_LOCAL_TARGET_STEMS, MAX_JSON_DEPTH,
 };
 
 /// Top-level error returned when validating a JSON payload against one of the `contracts/`

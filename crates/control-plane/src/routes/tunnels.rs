@@ -1730,7 +1730,7 @@ fn token_sign_error_to_failure(err: &TokenSignError, request_id: &str) -> ApiFai
 
 /// Convert a database [`DbTunnel`] + its [`TunnelMapping`] rows into a schema-validated
 /// [`TunnelDto`] (`contracts/tunnel.schema.json`).
-fn assemble_tunnel_dto(
+pub fn assemble_tunnel_dto(
     tunnel: &DbTunnel,
     mappings: &[TunnelMapping],
     request_id: &str,

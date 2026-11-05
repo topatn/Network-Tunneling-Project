@@ -188,6 +188,8 @@ pub enum AuditAction {
     AuthSignedIn,
     /// User signed out (`POST /v1/auth/logout`).
     AuthSignedOut,
+    /// Refresh token reuse detected (`POST /v1/auth/refresh`, `SEC-003`).
+    AuthRefreshReused,
     /// Tunnel record created (`POST /v1/tunnels`).
     TunnelCreated,
     /// Tunnel started and relay allocated (`POST /v1/tunnels/{id}/start`).
@@ -225,6 +227,7 @@ impl AuditAction {
     pub const ALL: &[Self] = &[
         Self::AuthSignedIn,
         Self::AuthSignedOut,
+        Self::AuthRefreshReused,
         Self::TunnelCreated,
         Self::TunnelStarted,
         Self::TunnelStopped,
@@ -247,6 +250,7 @@ impl AuditAction {
         match self {
             Self::AuthSignedIn => "auth.signed_in",
             Self::AuthSignedOut => "auth.signed_out",
+            Self::AuthRefreshReused => "auth.refresh_reused",
             Self::TunnelCreated => "tunnel.created",
             Self::TunnelStarted => "tunnel.started",
             Self::TunnelStopped => "tunnel.stopped",
