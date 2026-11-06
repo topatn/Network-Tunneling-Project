@@ -631,6 +631,49 @@ impl ManagedServerSupervisor {
         Ok(self.paths.resolve(&["servers", profile_id])?)
     }
 
+    /// Discover and recover an existing provisioned server from disk (`SRV-004`, `SRV-010`).
+    ///
+    /// If `server.jar` and `server.properties` exist in `servers/<profile_id>`, restores
+    /// [`ManagedServerState::Configuring`], reads `server-port`, and loads recent log excerpts.
+    /// Returns `Ok(true)` if recovered, `Ok(false)` if not present.
+    pub fn recover_from_disk(&mut self, profile_id: &str) -> Result<bool, ManagedServerError> {
+        let jar_path = self.paths.resolve(&["servers", profile_id, "server.jar"])?;
+        let props_path = self
+            .paths
+            .resolve(&["servers", profile_id, "server.properties"])?;
+
+        if !jar_path.is_file() || !props_path.is_file() {
+            return Ok(false);
+        }
+
+        self.status.profile_id = profile_id.to_owned();
+        self.status.state = ManagedServerState::Configuring;
+
+        if let Ok(contents) = fs::read_to_string(&props_path) {
+            for line in contents.lines() {
+                let trimmed = line.trim();
+                if let Some((k, v)) = trimmed.split_once('=') {
+                    if k.trim() == "server-port" {
+                        if let Ok(p) = v.trim().parse::<u16>() {
+                            self.local_server_port = Some(p);
+                        }
+                    }
+                }
+            }
+        }
+
+        let log_path = self.paths.resolve(&["servers", profile_id, "server.log"])?;
+        if log_path.is_file() {
+            if let Ok(log_text) = fs::read_to_string(&log_path) {
+                for line in log_text.lines() {
+                    self.record_log_line(line);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Provision a Minecraft: Java Edition server inside the confined per-user directory
     /// (`SRV-001`, `SRV-002`, `SRV-003`, `SRV-004`, `SRV-010`, `SRV-015`, `contracts.md` §13
     /// `provision_server`).

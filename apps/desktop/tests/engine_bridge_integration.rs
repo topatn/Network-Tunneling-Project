@@ -296,9 +296,10 @@ fn t076_engine_bridge_managed_server_routes_lifecycle() -> TestResult {
     assert_eq!(status, 200);
     let s_resp: serde_json::Value = serde_json::from_slice(&body)?;
     assert_eq!(s_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
-    assert_eq!(
-        s_resp.get("state").and_then(|v| v.as_str()),
-        Some("not_installed")
+    let initial_state = s_resp.get("state").and_then(|v| v.as_str());
+    assert!(
+        initial_state == Some("not_installed") || initial_state == Some("configuring"),
+        "expected not_installed or persistent configuring state, got: {initial_state:?}"
     );
 
     // 2. Provision with official server.jar if present on host

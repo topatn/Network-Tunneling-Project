@@ -467,10 +467,25 @@ impl EngineBridge {
                 .map_err(|e| format!("failed to parse bundled default profile: {e}"))?,
         };
 
+        let local_app_data = std::env::var("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| std::env::temp_dir());
+        let mut target_port = 25565;
+        let mut initial_supervisor = None;
+        if let Ok(paths) = gtt_engine::DataPaths::new(&local_app_data, "GTT") {
+            let provisionable = gtt_engine::provisionable_with_minecraft_java();
+            let mut supervisor = gtt_engine::ManagedServerSupervisor::new(paths, provisionable);
+            let _ = supervisor.recover_from_disk(default_profile_id);
+            if let Some(p) = supervisor.local_server_port() {
+                target_port = p;
+            }
+            initial_supervisor = Some(supervisor);
+        }
+
         let default_inputs = vec![MappingTargetInput {
             mapping_key: "game".to_owned(),
             local_host: "127.0.0.1".to_owned(),
-            local_port: 25565,
+            local_port: target_port,
             enabled: true,
             confirm_non_loopback: false,
         }];
@@ -478,12 +493,7 @@ impl EngineBridge {
         let mut lifecycle = EngineLifecycle::configure(&profile, &default_inputs, "0.1.0")
             .map_err(|e| format!("initial engine configure failed: {e:?}"))?;
 
-        let local_app_data = std::env::var("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| std::env::temp_dir());
-        if let Ok(paths) = gtt_engine::DataPaths::new(&local_app_data, "GTT") {
-            let provisionable = gtt_engine::provisionable_with_minecraft_java();
-            let supervisor = gtt_engine::ManagedServerSupervisor::new(paths, provisionable);
+        if let Some(supervisor) = initial_supervisor {
             lifecycle.attach_server_supervisor(supervisor);
         }
 

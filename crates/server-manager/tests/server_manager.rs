@@ -884,3 +884,37 @@ fn world_backup_and_restore_preserves_subdirectories() -> TestResult {
     assert_eq!(fs::read(player_dir.join("player.dat"))?, b"player-data-1");
     Ok(())
 }
+
+#[test]
+fn supervisor_persists_and_recovers_provisioned_server_from_disk() -> TestResult {
+    let scratch = Scratch::new("recover-disk")?;
+    let data_paths = DataPaths::new(scratch.dir(), "gtt")?;
+
+    let srv_dir = data_paths.resolve(&["servers", "minecraft-java"])?;
+    fs::create_dir_all(&srv_dir)?;
+    fs::write(srv_dir.join("server.jar"), b"mock-jar-content")?;
+    fs::write(
+        srv_dir.join("server.properties"),
+        b"server-port=25577\nmax-players=20\n",
+    )?;
+
+    let mut supervisor = gtt_server_manager::ManagedServerSupervisor::new(
+        data_paths.clone(),
+        ProvisionableSet::none(),
+    );
+    assert_eq!(
+        supervisor.status().state,
+        gtt_server_manager::ManagedServerState::NotInstalled
+    );
+
+    let recovered = supervisor.recover_from_disk("minecraft-java")?;
+    assert!(recovered);
+    assert_eq!(
+        supervisor.status().state,
+        gtt_server_manager::ManagedServerState::Configuring
+    );
+    assert_eq!(supervisor.local_server_port(), Some(25577));
+    assert_eq!(supervisor.status().profile_id, "minecraft-java");
+
+    Ok(())
+}

@@ -459,6 +459,7 @@ function createInvitation(options = {}) {
     claimUrl,
   };
 
+  savePersistedState();
   render();
   return {
     ok: true,
@@ -506,6 +507,7 @@ function revokeInvitation(invitationId) {
     state.oneTimeInvitationBanner = null;
   }
 
+  savePersistedState();
   render();
   return { ok: true, invitation: { ...target } };
 }
@@ -520,6 +522,7 @@ function revokeAdmission(admissionId) {
     };
   }
   adm.status = "revoked";
+  savePersistedState();
   render();
   return { ok: true, admission: { ...adm } };
 }
@@ -1176,6 +1179,199 @@ function buildTelemetryChartSvg(metric) {
   `;
 }
 
+// State Persistence & Recovery (T-080, T-082, T-084, T-088)
+function savePersistedState() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem("gtt-current-view", state.currentView);
+    if (state.selectedProfile && state.selectedProfile.id) {
+      localStorage.setItem("gtt-selected-profile-id", state.selectedProfile.id);
+    }
+    if (state.mappingConfigs) {
+      localStorage.setItem("gtt-mapping-configs", JSON.stringify(state.mappingConfigs));
+    }
+    const ms = state.managedServer;
+    if (ms) {
+      const msData = {
+        termsAccepted: ms.termsAccepted,
+        jarPath: ms.jarPath,
+        state: ms.state,
+        currentVersion: ms.currentVersion,
+        stepStatuses: ms.stepStatuses,
+        progressPercent: ms.progressPercent,
+        listenAddress: ms.listenAddress,
+        backups: ms.backups,
+        generatedConfig: ms.generatedConfig,
+        crashLogExcerpt: ms.crashLogExcerpt,
+      };
+      localStorage.setItem("gtt-managed-server", JSON.stringify(msData));
+      localStorage.setItem("gtt-ms-terms-accepted", String(ms.termsAccepted));
+      if (ms.jarPath) {
+        localStorage.setItem("gtt-ms-jar-path", ms.jarPath);
+      }
+    }
+    if (Array.isArray(state.invitations)) {
+      localStorage.setItem("gtt-invitations", JSON.stringify(state.invitations));
+    }
+    if (Array.isArray(state.guestAdmissions)) {
+      localStorage.setItem("gtt-guest-admissions", JSON.stringify(state.guestAdmissions));
+    }
+  } catch (_) {}
+}
+
+function loadPersistedState() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const savedView = localStorage.getItem("gtt-current-view");
+    if (savedView && typeof savedView === "string") {
+      state.currentView = savedView;
+    }
+
+    const savedProfileId = localStorage.getItem("gtt-selected-profile-id");
+    if (savedProfileId) {
+      const found = SHIPPED_PROFILES.find((p) => p.id === savedProfileId);
+      if (found) {
+        state.selectedProfile = found;
+      }
+    }
+
+    const savedMappings = localStorage.getItem("gtt-mapping-configs");
+    if (savedMappings) {
+      const parsed = JSON.parse(savedMappings);
+      if (parsed && typeof parsed === "object") {
+        state.mappingConfigs = parsed;
+      }
+    }
+
+    const savedMs = localStorage.getItem("gtt-managed-server");
+    if (savedMs) {
+      const parsedMs = JSON.parse(savedMs);
+      if (parsedMs && typeof parsedMs === "object") {
+        if (typeof parsedMs.termsAccepted === "boolean") {
+          state.managedServer.termsAccepted = parsedMs.termsAccepted;
+        }
+        if (typeof parsedMs.jarPath === "string" && parsedMs.jarPath) {
+          state.managedServer.jarPath = parsedMs.jarPath;
+        }
+        if (typeof parsedMs.state === "string" && parsedMs.state) {
+          state.managedServer.state = parsedMs.state;
+        }
+        if (typeof parsedMs.currentVersion === "string" && parsedMs.currentVersion) {
+          state.managedServer.currentVersion = parsedMs.currentVersion;
+        }
+        if (parsedMs.stepStatuses && typeof parsedMs.stepStatuses === "object") {
+          state.managedServer.stepStatuses = parsedMs.stepStatuses;
+        }
+        if (typeof parsedMs.progressPercent === "number") {
+          state.managedServer.progressPercent = parsedMs.progressPercent;
+        }
+        if (typeof parsedMs.listenAddress === "string" && parsedMs.listenAddress) {
+          state.managedServer.listenAddress = parsedMs.listenAddress;
+        }
+        if (Array.isArray(parsedMs.backups)) {
+          state.managedServer.backups = parsedMs.backups;
+        }
+        if (typeof parsedMs.crashLogExcerpt === "string" && parsedMs.crashLogExcerpt) {
+          state.managedServer.crashLogExcerpt = parsedMs.crashLogExcerpt;
+        }
+        if (parsedMs.generatedConfig && typeof parsedMs.generatedConfig === "object") {
+          state.managedServer.generatedConfig = {
+            ...state.managedServer.generatedConfig,
+            ...parsedMs.generatedConfig,
+          };
+        }
+      }
+    }
+
+    const termsAcceptedStr = localStorage.getItem("gtt-ms-terms-accepted");
+    if (termsAcceptedStr !== null) {
+      state.managedServer.termsAccepted = termsAcceptedStr === "true";
+    }
+
+    const jarPathStr = localStorage.getItem("gtt-ms-jar-path");
+    if (jarPathStr && typeof jarPathStr === "string") {
+      state.managedServer.jarPath = jarPathStr;
+    }
+
+    const savedInvs = localStorage.getItem("gtt-invitations");
+    if (savedInvs) {
+      const parsedInvs = JSON.parse(savedInvs);
+      if (Array.isArray(parsedInvs) && parsedInvs.length > 0) {
+        state.invitations = parsedInvs;
+      }
+    }
+
+    const savedAdms = localStorage.getItem("gtt-guest-admissions");
+    if (savedAdms) {
+      const parsedAdms = JSON.parse(savedAdms);
+      if (Array.isArray(parsedAdms) && parsedAdms.length > 0) {
+        state.guestAdmissions = parsedAdms;
+      }
+    }
+  } catch (_) {}
+}
+
+async function syncBackendState() {
+  if (typeof EngineClient === "undefined") return;
+  const available = await EngineClient.checkAvailable();
+  if (!available) return;
+
+  try {
+    const msRes = await EngineClient.getServerStatus();
+    if (msRes && msRes.ok) {
+      const wireState = String(msRes.state || "").toLowerCase();
+      if (wireState === "running") {
+        state.managedServer.state = "Running";
+        state.managedServer.termsAccepted = true;
+        state.managedServer.progressPercent = 100;
+        state.managedServer.stepStatuses = {
+          download: "completed",
+          verify: "completed",
+          configure: "completed",
+          start: "completed",
+        };
+      } else if (wireState === "configuring") {
+        if (state.managedServer.state !== "Running") {
+          state.managedServer.state = "Configuring";
+        }
+        state.managedServer.termsAccepted = true;
+        state.managedServer.progressPercent = 75;
+        state.managedServer.stepStatuses = {
+          download: "completed",
+          verify: "completed",
+          configure: "completed",
+          start: "pending",
+        };
+      } else if (wireState === "failed") {
+        state.managedServer.state = "Failed";
+      }
+
+      if (msRes.server_port) {
+        state.managedServer.generatedConfig.serverPort = msRes.server_port;
+        state.managedServer.listenAddress = `127.0.0.1:${msRes.server_port}`;
+      }
+      if (msRes.last_log_excerpt) {
+        state.managedServer.crashLogExcerpt = msRes.last_log_excerpt;
+      }
+    }
+
+    const statusRes = await EngineClient.getStatus();
+    if (statusRes) {
+      state.tunnelState = mapEngineTunnelState(statusRes.tunnel_state);
+      state.localServerState = statusRes.local_server_summary;
+      if (statusRes.players_seen) {
+        state.playersSeenCount = statusRes.players_seen.distinct_sources;
+      }
+      if (statusRes.public_endpoints && statusRes.public_endpoints.length > 0) {
+        state.publicAddress = statusRes.public_endpoints[0].display_address;
+      }
+    }
+
+    savePersistedState();
+    render();
+  } catch (_) {}
+}
+
 // Theme Management (UX-007)
 function applyTheme(theme) {
   state.theme = theme;
@@ -1193,6 +1389,7 @@ function applyTheme(theme) {
 // Navigation
 function navigateTo(view) {
   state.currentView = view;
+  savePersistedState();
   closeMobileDrawer();
   render();
 }
@@ -2629,6 +2826,7 @@ function setManagedServerState(nextState, options = {}) {
     }
   }
 
+  savePersistedState();
   render();
   return ms.state;
 }
@@ -2641,6 +2839,7 @@ function acceptManagedServerTerms(accepted) {
       state.managedServer.state = "Not set up";
     }
   }
+  savePersistedState();
   render();
   return state.managedServer.termsAccepted;
 }
@@ -2664,6 +2863,16 @@ function startManagedServerProvisioning() {
   }
   state.managedServer.cancelSummary = null;
   state.managedServer.artifactDiscarded = false;
+
+  // If server is already provisioned and configured on disk, start process directly
+  if (state.managedServer.stepStatuses.configure === "completed" || state.managedServer.state === "Configuring") {
+    setManagedServerState("Starting", { progressPercent: 90 });
+    if (typeof window !== "undefined" && typeof window.fetch === "function") {
+      triggerLiveServerStart();
+    }
+    return { ok: true, state: state.managedServer.state };
+  }
+
   setManagedServerState("Downloading", { progressPercent: 25 });
 
   if (typeof window !== "undefined" && typeof window.fetch === "function") {
@@ -2671,6 +2880,66 @@ function startManagedServerProvisioning() {
   }
 
   return { ok: true, state: state.managedServer.state };
+}
+
+async function triggerLiveServerStart() {
+  if (typeof EngineClient === "undefined") return;
+  const isAvailable = await EngineClient.checkAvailable();
+  if (!isAvailable) return;
+
+  try {
+    setManagedServerState("Starting", { progressPercent: 90 });
+    const startRes = await EngineClient.startServer({
+      profile_id: state.selectedProfile.id,
+    });
+
+    if (!startRes || !startRes.ok) {
+      const errMsg = startRes?.error || "Failed to start Java server process";
+      state.managedServer.crashLogExcerpt = errMsg;
+      setManagedServerState("Failed", { failureCode: "srv_refused_before_ready" });
+      showToast("Start failed: " + errMsg);
+      return;
+    }
+
+    if (state.managedServer.pollInterval) {
+      clearInterval(state.managedServer.pollInterval);
+    }
+
+    state.managedServer.pollInterval = setInterval(async () => {
+      const s = await EngineClient.getServerStatus();
+      if (!s) return;
+
+      if (s.last_log_excerpt) {
+        state.managedServer.crashLogExcerpt = s.last_log_excerpt;
+        const consoleEl = document.getElementById("managed-console-output");
+        if (consoleEl) {
+          consoleEl.textContent = s.last_log_excerpt;
+          consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+      }
+
+      if (s.state === "running") {
+        if (state.managedServer.pollInterval) {
+          clearInterval(state.managedServer.pollInterval);
+          state.managedServer.pollInterval = null;
+        }
+        setManagedServerState("Running", { progressPercent: 100 });
+        state.localServerState = "Reachable";
+        showToast("Minecraft: Java Edition server is running on 127.0.0.1:25565!");
+        render();
+      } else if (s.state === "failed") {
+        if (state.managedServer.pollInterval) {
+          clearInterval(state.managedServer.pollInterval);
+          state.managedServer.pollInterval = null;
+        }
+        setManagedServerState("Failed", { failureCode: "srv_refused_before_ready" });
+        showToast("Server process failed to become ready");
+        render();
+      }
+    }, 500);
+  } catch (e) {
+    setManagedServerState("Failed", { failureCode: "srv_refused_before_ready" });
+  }
 }
 
 async function triggerLiveServerProvisioning() {
@@ -2800,7 +3069,13 @@ function stopManagedServer() {
   if (typeof window !== "undefined" && typeof window.fetch === "function") {
     EngineClient.stopServer().catch(() => {});
   }
-  setManagedServerState("Not set up", { progressPercent: 0 });
+  setManagedServerState("Configuring", { progressPercent: 75 });
+  state.managedServer.stepStatuses = {
+    download: "completed",
+    verify: "completed",
+    configure: "completed",
+    start: "pending",
+  };
   showToast("Managed server stopped cleanly");
   return state.managedServer.state;
 }
@@ -2816,6 +3091,7 @@ function createManagedWorldBackup(label = "Manual world backup") {
     sizeMb: 49.2,
   };
   state.managedServer.backups.unshift(bkp);
+  savePersistedState();
   showToast(`World backup created (${bkp.id})`);
   render();
   return bkp;
@@ -2828,6 +3104,7 @@ function restoreManagedWorldBackup(backupId) {
   }
   state.managedServer.lastRestoredBackupId = found.id;
   state.managedServer.currentVersion = found.version;
+  savePersistedState();
   showToast(`Restored world backup ${found.id}`);
   render();
   return { ok: true, restoredBackup: { ...found } };
@@ -3844,12 +4121,22 @@ function renderManagedServerView() {
   const stateMsg = MANAGED_SERVER_STATE_MESSAGES[ms.state] || MANAGED_SERVER_STATE_MESSAGES["Not set up"];
   const failureGuidance = ms.failureCode ? lookupErrorGuidance(ms.failureCode) : null;
 
+  const isConfiguredReady =
+    ms.state === "Configuring" && ms.stepStatuses && ms.stepStatuses.configure === "completed";
+
   const isInProgress =
     ms.state === "Downloading" ||
     ms.state === "Verifying" ||
-    ms.state === "Configuring" ||
+    (ms.state === "Configuring" && !isConfiguredReady) ||
     ms.state === "Starting" ||
     ms.state === "Updating";
+
+  const stateHeadline = isConfiguredReady
+    ? "Managed server is configured and ready to start"
+    : stateMsg.headline;
+  const stateAction = isConfiguredReady
+    ? "Click Start Server to launch the Minecraft server process."
+    : (failureGuidance ? failureGuidance.action : stateMsg.action);
 
   const stepMeta = [
     { key: "download", label: "1. Download", detail: "Official server.jar + JRE 21" },
@@ -3904,7 +4191,7 @@ function renderManagedServerView() {
           </div>
           <span class="pill ${managedSpec.pill}">v${ms.currentVersion}</span>
         </div>
-        <div class="kpi__sub" data-role="managed-state-headline">${stateMsg.headline}</div>
+        <div class="kpi__sub" data-role="managed-state-headline">${stateHeadline}</div>
       </div>
 
       <div class="kpi">
@@ -3915,7 +4202,7 @@ function renderManagedServerView() {
           <strong>Cause:</strong> ${failureGuidance ? failureGuidance.cause : stateMsg.cause}
         </div>
         <div style="font-size: 13px; color: var(--muted);" data-role="managed-state-action">
-          <strong>Next step:</strong> ${failureGuidance ? failureGuidance.action : stateMsg.action}
+          <strong>Next step:</strong> ${stateAction}
         </div>
       </div>
     </section>
@@ -4042,7 +4329,7 @@ function renderManagedServerView() {
                 ms.state !== "Running"
                   ? `
                 <button type="button" id="btn-start-provisioning" class="gtt-btn gtt-btn-primary" ${!provisionable ? "disabled" : ""}>
-                  Provision &amp; Start Server
+                  ${isConfiguredReady ? "Start Server" : "Provision &amp; Start Server"}
                 </button>
               `
                   : `
@@ -4435,6 +4722,8 @@ window.addEventListener("keydown", handleGlobalKeyDown);
 
 // Global initialization
 window.addEventListener("DOMContentLoaded", () => {
+  loadPersistedState();
+
   const themeSelect = document.getElementById("theme-select");
   if (themeSelect) {
     themeSelect.value = state.theme;
@@ -4486,10 +4775,14 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   render();
+  syncBackendState();
 });
 
 // Export symbols onto globalThis for Node VM unit testing (T-080, T-081, T-082, T-083, T-084, T-085, T-086, T-088)
 Object.assign(globalThis, {
+  savePersistedState,
+  loadPersistedState,
+  syncBackendState,
   startBrowserAuth,
   cancelSignIn,
   failSignIn,

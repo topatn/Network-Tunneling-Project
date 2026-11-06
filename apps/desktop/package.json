@@ -5,7 +5,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node tests/ui_shell_test.js && node tests/onboarding_and_signin_test.js && node tests/accessibility_test.js && node tests/tunnel_dashboard_test.js && node tests/invitations_and_sharing_test.js && node tests/game_selection_and_config_test.js && node tests/errors_and_troubleshooting_test.js && node tests/managed_server_screens_test.js"
+    "test": "node tests/ui_shell_test.js && node tests/onboarding_and_signin_test.js && node tests/accessibility_test.js && node tests/tunnel_dashboard_test.js && node tests/invitations_and_sharing_test.js && node tests/game_selection_and_config_test.js && node tests/errors_and_troubleshooting_test.js && node tests/managed_server_screens_test.js && node tests/data_persistence_test.js"
   },
   "license": "UNLICENSED"
 }

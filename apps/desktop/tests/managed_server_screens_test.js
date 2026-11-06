@@ -309,7 +309,8 @@ assert.strictEqual(state.managedServer.currentVersion, '1.21.4');
 
 // Stop managed server cleanly
 stopManagedServer();
-assert.strictEqual(state.managedServer.state, 'Not set up');
+assert.strictEqual(state.managedServer.state, 'Configuring');
+assert.strictEqual(state.managedServer.termsAccepted, true);
 console.log('[OK] SRV-009: Crash log details, world backup/restore, and active-tunnel update confirmation gate verified.');
 
 // 6. Verify Opt-in Confirmed In-Game Presence Never Merges with Observed Traffic Count (SRV-011, UX-002)
