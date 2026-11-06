@@ -1096,6 +1096,57 @@ code, pre, [data-ui] {
   cursor: pointer;
 }
 
+/* Feature in Development Blocked Card (No VPS) */
+.dev-feature-card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--gtt-radius-card);
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dev-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dev-card-badge-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dev-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.dev-card-icon {
+  color: var(--warning);
+  flex-shrink: 0;
+}
+
+.dev-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dev-card-alternatives {
+  background-color: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--gtt-radius-control);
+  padding: 12px 14px;
+}
+
 /* ============================================================================
  * 8. MODAL DIALOG & TOASTS (No resting card shadows; 1px border separation)
  * ============================================================================ */

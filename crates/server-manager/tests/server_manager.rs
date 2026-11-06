@@ -389,6 +389,25 @@ fn a_generated_config_has_rcon_and_query_off() -> TestResult {
 }
 
 #[test]
+fn a_generated_config_disables_whitelist_by_default() -> TestResult {
+    let profile = minecraft_java_profile();
+    let generated = generate(&ServerConfigRequest {
+        profile: &profile,
+        max_players: 20,
+        rcon_secret: None,
+        enable_query: false,
+        query_secret: None,
+    })?;
+
+    assert_eq!(property(&generated.contents, "white-list"), Some("false"));
+    assert_eq!(
+        property(&generated.contents, "enforce-whitelist"),
+        Some("false")
+    );
+    Ok(())
+}
+
+#[test]
 fn regenerating_over_a_hand_edited_file_turns_rcon_back_off() -> TestResult {
     // The reason the flags are written unconditionally. A host who edits `enable-rcon=true`
     // by hand must not have it survive the next regeneration.
@@ -829,5 +848,39 @@ fn the_secret_floor_is_enforced_exactly_at_its_boundary() -> TestResult {
         }
         Err(other) => return Err(format!("expected WeakSecret, got {other}").into()),
     }
+    Ok(())
+}
+
+#[test]
+fn world_backup_and_restore_preserves_subdirectories() -> TestResult {
+    let scratch = Scratch::new("backup-subdirs")?;
+    let data_paths = DataPaths::new(scratch.dir(), "gtt")?;
+    let mut supervisor = gtt_server_manager::ManagedServerSupervisor::new(
+        data_paths.clone(),
+        ProvisionableSet::none(),
+    );
+
+    let world_dir = data_paths.resolve(&["servers", "minecraft-java", "world"])?;
+    let region_dir = world_dir.join("region");
+    let player_dir = world_dir.join("playerdata");
+    fs::create_dir_all(&region_dir)?;
+    fs::create_dir_all(&player_dir)?;
+
+    fs::write(world_dir.join("level.dat"), b"level-data")?;
+    fs::write(region_dir.join("r.0.0.mca"), b"chunk-data-1")?;
+    fs::write(player_dir.join("player.dat"), b"player-data-1")?;
+
+    supervisor.backup_world("minecraft-java", "backup-01")?;
+
+    // Corrupt / modify world
+    fs::write(world_dir.join("level.dat"), b"corrupted")?;
+    fs::write(region_dir.join("r.0.0.mca"), b"corrupted-chunk")?;
+    fs::remove_file(player_dir.join("player.dat"))?;
+
+    supervisor.restore_world("minecraft-java", "backup-01")?;
+
+    assert_eq!(fs::read(world_dir.join("level.dat"))?, b"level-data");
+    assert_eq!(fs::read(region_dir.join("r.0.0.mca"))?, b"chunk-data-1");
+    assert_eq!(fs::read(player_dir.join("player.dat"))?, b"player-data-1");
     Ok(())
 }

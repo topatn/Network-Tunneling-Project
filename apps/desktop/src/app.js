@@ -1240,7 +1240,7 @@ function render() {
   }
   const navDashBadge = document.getElementById("nav-badge-dashboard");
   if (navDashBadge) {
-    navDashBadge.textContent = state.tunnelState === "Connected" ? "LIVE" : "IDLE";
+    navDashBadge.textContent = state.tunnelState === "Connected" ? "LIVE" : "IN DEV";
   }
   const navInvBadge = document.getElementById("nav-badge-invitations");
   if (navInvBadge) {
@@ -2967,13 +2967,46 @@ function renderDashboardView() {
         </button>
         ${
           !isTunnelActive
-            ? `<button id="btn-start-tunnel" class="gtt-btn gtt-btn-primary" ${isTunnelConnecting ? "disabled" : ""}>
-                ${isTunnelConnecting ? "Starting..." : "Start Tunnel"}
+            ? `<button id="btn-start-tunnel" class="gtt-btn gtt-btn-secondary" disabled title="Network tunneling is blocked: feature is still in development because we don't have a VPS yet.">
+                Start Tunnel (Blocked · No VPS)
                </button>`
             : `<button id="btn-stop-tunnel" class="gtt-btn gtt-btn-destructive">
                 Stop Tunnel
                </button>`
         }
+      </div>
+    </div>
+
+    <!-- Network Tunneling Blocked Card (Feature in Development) -->
+    <div class="gtt-card dev-feature-card" id="card-tunneling-in-dev" role="region" aria-label="Network tunneling development status">
+      <div class="dev-card-header">
+        <div class="dev-card-badge-row">
+          <span class="pill pill--warn">Feature in Development</span>
+          <span class="pill pill--idle">Relay Offline · No VPS</span>
+        </div>
+        <div class="dev-card-title-row">
+          <svg class="dev-card-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          <h3 class="gtt-card-title" style="margin: 0; font-size: 15px;">Network Tunneling is Blocked</h3>
+        </div>
+      </div>
+      <div class="dev-card-body">
+        <p style="margin: 0 0 8px 0; color: var(--text); line-height: 1.5; font-size: 14px;">
+          <strong>Network tunneling is currently blocked for all users because we do not have a VPS (relay server) deployed yet.</strong>
+        </p>
+        <p style="margin: 0 0 12px 0; color: var(--muted); font-size: 13px; line-height: 1.5;">
+          Public network tunneling requires remote relay infrastructure (a VPS) to securely route packets between external players and your host PC without opening router ports. This feature is actively in development and will be enabled once relay servers are provisioned.
+        </p>
+        <div class="dev-card-alternatives" style="background-color: var(--subtle); border: 1px solid var(--border); border-radius: var(--gtt-radius-control); padding: 12px 14px;">
+          <div style="font-weight: 600; font-size: 13px; color: var(--text); margin-bottom: 6px;">Available Alternatives:</div>
+          <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); line-height: 1.6;">
+            <li><strong>Managed Server:</strong> Run and supervise your Minecraft Java server locally on this PC using the <a href="#managed-server" id="link-to-managed-server" style="color: var(--accent); text-decoration: underline;">Managed Server</a> tab.</li>
+            <li><strong>Tailscale Node Sharing:</strong> Host on your local IP and invite friends using Tailscale's free peer-to-peer network (no VPS required).</li>
+          </ul>
+        </div>
       </div>
     </div>
 
@@ -3301,38 +3334,16 @@ function bindDashboardEvents() {
     });
   });
 
-  // Start tunnel
-  document.getElementById("btn-start-tunnel")?.addEventListener("click", () => {
-    state.tunnelState = "Connecting";
-    render();
+  // Link inside dev card to navigate to Managed Server
+  document.getElementById("link-to-managed-server")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    navigateTo("managed-server");
+  });
 
-    EngineClient.startTunnel({
-      mode: "relay",
-      tunnel_id: state.activeTunnelId || "11111111-1111-4111-8111-111111111111",
-      relay_host: "relay.us-east.example.test",
-      public_port: 25565,
-    }).then((dto) => {
-      if (dto) {
-        state.tunnelState = dto.tunnel_state;
-        state.localServerState = dto.local_server_summary;
-        state.playersSeenCount = dto.players_seen.distinct_sources;
-        if (dto.public_endpoints && dto.public_endpoints.length > 0) {
-          state.publicAddress = dto.public_endpoints[0].display_address;
-        }
-        showToast("Tunnel started successfully");
-        render();
-      }
-    });
-
-    setTimeout(() => {
-      if (state.tunnelState === "Connecting") {
-        state.tunnelState = "Connected";
-        state.localServerState = "Reachable";
-        state.playersSeenCount = ACTIVE_GUEST_FLOWS.length;
-        showToast("Tunnel started successfully");
-        render();
-      }
-    }, 600);
+  // Start tunnel (blocked from users while in development without VPS)
+  document.getElementById("btn-start-tunnel")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showToast("Network tunneling is currently blocked: feature is still in development (no VPS available).");
   });
 
   // Stop tunnel (enforces UX-006 confirmation if players seen)

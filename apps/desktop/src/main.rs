@@ -8,7 +8,7 @@
 
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -17,6 +17,7 @@ use std::thread;
 use std::time::Duration;
 
 use gtt_desktop::engine_bridge::EngineBridge;
+use gtt_desktop::http_server::{read_http_request, HttpReadError};
 use gtt_desktop::packaging::{
     verify_manifest_as_invoker, PerUserInstaller, PerUserPaths, UninstallOptions, Uninstaller,
     WebView2Probe, APPLICATION_MANIFEST_XML,
@@ -32,13 +33,6 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         .find(|w| w.first().map(String::as_str) == Some(flag))
         .and_then(|w| w.get(1))
         .map(String::as_str)
-}
-
-fn find_header_end(bytes: &[u8]) -> Option<usize> {
-    bytes
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|p| p + 4)
 }
 
 fn main() -> ExitCode {
@@ -233,33 +227,35 @@ fn handle_connection(mut stream: TcpStream, bridge: &EngineBridge) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
 
-    let mut buffer = [0u8; 8192];
-    let bytes_read = match stream.read(&mut buffer) {
-        Ok(n) => n,
-        Err(_) => return,
+    let req = match read_http_request(&mut stream) {
+        Ok(r) => r,
+        Err(e) => {
+            let (status, msg) = match e {
+                HttpReadError::PayloadTooLarge { .. } => {
+                    ("413 Payload Too Large", "413 Payload Too Large")
+                }
+                HttpReadError::HeaderTooLarge => (
+                    "431 Request Header Fields Too Large",
+                    "431 Request Header Fields Too Large",
+                ),
+                _ => ("400 Bad Request", "400 Bad Request"),
+            };
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{msg}",
+                msg.len()
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            return;
+        }
     };
 
-    let req_str = match std::str::from_utf8(buffer.get(..bytes_read).unwrap_or(&[])) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-
-    let first_line = req_str.lines().next().unwrap_or("");
-    let mut parts = first_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let full_path = parts.next().unwrap_or("");
-    let clean_path = full_path.split('?').next().unwrap_or(full_path);
+    let method = req.method.as_str();
+    let clean_path = req.path.as_str();
 
     // 1. Dispatch Engine API endpoints (`/api/engine/*`, `contracts.md` §13)
     if clean_path.starts_with("/api/engine") {
-        let body_bytes = if let Some(pos) = buffer.get(..bytes_read).and_then(find_header_end) {
-            buffer.get(pos..bytes_read).unwrap_or(&[])
-        } else {
-            &[]
-        };
-
         let (status, content_type, body) =
-            bridge.handle_http_request(method, clean_path, body_bytes);
+            bridge.handle_http_request(method, clean_path, &req.body);
         let status_text = match status {
             200 => "OK",
             204 => "No Content",

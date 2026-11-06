@@ -493,12 +493,27 @@ impl TailscaleDetector for CliTailscaleDetector {
                 Ok(buf)
             });
 
-            let status = match child.wait() {
-                Ok(s) => s,
-                Err(err) => {
-                    return Err(TailscaleError::CliExecutionFailed {
-                        reason: err.to_string(),
-                    });
+            let deadline = std::time::Instant::now() + DEFAULT_TAILSCALE_CLI_TIMEOUT;
+            let status = loop {
+                match child.try_wait() {
+                    Ok(Some(s)) => break s,
+                    Ok(None) => {
+                        if std::time::Instant::now() >= deadline {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            return Err(TailscaleError::CliExecutionFailed {
+                                reason: format!(
+                                    "tailscale status --json timed out after {DEFAULT_TAILSCALE_CLI_TIMEOUT:?}"
+                                ),
+                            });
+                        }
+                        thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(err) => {
+                        return Err(TailscaleError::CliExecutionFailed {
+                            reason: err.to_string(),
+                        });
+                    }
                 }
             };
 

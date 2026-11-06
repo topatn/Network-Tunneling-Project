@@ -217,6 +217,8 @@ pub fn generate(request: &ServerConfigRequest<'_>) -> Result<GeneratedConfig, Co
     push_kv(&mut out, "server-port", &server_port.to_string());
     push_kv(&mut out, "max-players", &request.max_players.to_string());
     push_kv(&mut out, "online-mode", "false");
+    push_kv(&mut out, "white-list", "false");
+    push_kv(&mut out, "enforce-whitelist", "false");
 
     // The two flags whose default matters most. Written unconditionally so that regenerating a
     // file that someone edited by hand turns them back off.

@@ -324,7 +324,35 @@ fn t076_engine_bridge_managed_server_routes_lifecycle() -> TestResult {
             Some(25565)
         );
 
-        // 3. Stop
+        // 3. Backup world
+        let bkp_payload = serde_json::json!({
+            "profile_id": "minecraft-java",
+            "backup_id": "test-bkp-01"
+        });
+        let (status, _, body) = bridge.handle_http_request(
+            "POST",
+            "/api/engine/server/backup",
+            &serde_json::to_vec(&bkp_payload)?,
+        );
+        assert_eq!(status, 200);
+        let bkp_resp: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(bkp_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
+
+        // 4. Restore world
+        let restore_payload = serde_json::json!({
+            "profile_id": "minecraft-java",
+            "backup_id": "test-bkp-01"
+        });
+        let (status, _, body) = bridge.handle_http_request(
+            "POST",
+            "/api/engine/server/restore",
+            &serde_json::to_vec(&restore_payload)?,
+        );
+        assert_eq!(status, 200);
+        let restore_resp: serde_json::Value = serde_json::from_slice(&body)?;
+        assert_eq!(restore_resp.get("ok").and_then(|v| v.as_bool()), Some(true));
+
+        // 5. Stop
         let (status, _, body) =
             bridge.handle_http_request("POST", "/api/engine/server/stop", b"{}");
         assert_eq!(status, 200);

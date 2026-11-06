@@ -321,6 +321,20 @@ pub struct StopManagedServerRequestDto {
     pub timeout_secs: Option<u64>,
 }
 
+/// Request payload to backup a managed world (`contracts.md` §13 `backup_world`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupWorldRequestDto {
+    pub profile_id: Option<String>,
+    pub backup_id: Option<String>,
+}
+
+/// Request payload to restore a managed world (`contracts.md` §13 `restore_world`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoreWorldRequestDto {
+    pub profile_id: Option<String>,
+    pub backup_id: String,
+}
+
 /// Response payload for managed server lifecycle actions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedServerActionResponseDto {
@@ -838,12 +852,17 @@ impl EngineBridge {
             .map_err(|e| format!("failed to start managed server: {e}"))?;
 
         let status = inner.lifecycle.get_managed_server_status();
+        let port = inner
+            .lifecycle
+            .server_supervisor()
+            .and_then(|s| s.local_server_port())
+            .unwrap_or(25565);
         Ok(ManagedServerActionResponseDto {
             ok: true,
             state: state.as_str().to_owned(),
             profile_id: Some(req.profile_id),
             version: status.version.clone(),
-            server_port: Some(25565),
+            server_port: Some(port),
             message: Some("Managed Minecraft server process started".to_owned()),
             last_log_excerpt: Some(status.last_log_excerpt.clone()),
         })
@@ -877,6 +896,86 @@ impl EngineBridge {
         })
     }
 
+    /// Create a world backup (`contracts.md` §13 `backup_world`, `SRV-008`).
+    pub fn backup_managed_world(
+        &self,
+        req: BackupWorldRequestDto,
+    ) -> Result<ManagedServerActionResponseDto, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?;
+
+        let profile_id = req
+            .profile_id
+            .unwrap_or_else(|| "minecraft-java".to_owned());
+        let backup_id = req.backup_id.unwrap_or_else(|| {
+            format!(
+                "bkp_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0)
+            )
+        });
+
+        let _ = inner
+            .lifecycle
+            .backup_world(&profile_id, &backup_id)
+            .map_err(|e| format!("failed to backup world: {e}"))?;
+
+        let status = inner.lifecycle.get_managed_server_status();
+        let port = inner
+            .lifecycle
+            .server_supervisor()
+            .and_then(|s| s.local_server_port());
+        Ok(ManagedServerActionResponseDto {
+            ok: true,
+            state: status.state.as_str().to_owned(),
+            profile_id: Some(profile_id),
+            version: status.version.clone(),
+            server_port: port,
+            message: Some(format!("World backup {backup_id} created")),
+            last_log_excerpt: Some(status.last_log_excerpt.clone()),
+        })
+    }
+
+    /// Restore a world backup (`contracts.md` §13 `restore_world`, `SRV-008`).
+    pub fn restore_managed_world(
+        &self,
+        req: RestoreWorldRequestDto,
+    ) -> Result<ManagedServerActionResponseDto, String> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| format!("mutex poisoned: {e}"))?;
+
+        let profile_id = req
+            .profile_id
+            .unwrap_or_else(|| "minecraft-java".to_owned());
+        let backup_id = req.backup_id;
+
+        let _ = inner
+            .lifecycle
+            .restore_world(&profile_id, &backup_id)
+            .map_err(|e| format!("failed to restore world: {e}"))?;
+
+        let status = inner.lifecycle.get_managed_server_status();
+        let port = inner
+            .lifecycle
+            .server_supervisor()
+            .and_then(|s| s.local_server_port());
+        Ok(ManagedServerActionResponseDto {
+            ok: true,
+            state: status.state.as_str().to_owned(),
+            profile_id: Some(profile_id),
+            version: status.version.clone(),
+            server_port: port,
+            message: Some(format!("World restored from backup {backup_id}")),
+            last_log_excerpt: Some(status.last_log_excerpt.clone()),
+        })
+    }
+
     /// Retrieve latest managed server status and poll child logs (`contracts.md` §13 `get_managed_server_status`).
     pub fn get_managed_server_status(&self) -> Result<ManagedServerActionResponseDto, String> {
         let mut inner = self
@@ -886,12 +985,17 @@ impl EngineBridge {
 
         let _ = inner.lifecycle.poll_managed_server();
         let status = inner.lifecycle.get_managed_server_status();
+        let port = inner
+            .lifecycle
+            .server_supervisor()
+            .and_then(|s| s.local_server_port())
+            .unwrap_or(25565);
         Ok(ManagedServerActionResponseDto {
             ok: true,
             state: status.state.as_str().to_owned(),
             profile_id: Some(status.profile_id.clone()),
             version: status.version.clone(),
-            server_port: Some(25565),
+            server_port: Some(port),
             message: None,
             last_log_excerpt: Some(status.last_log_excerpt.clone()),
         })
@@ -1129,6 +1233,52 @@ impl EngineBridge {
                 let req: StopManagedServerRequestDto =
                     serde_json::from_slice(body_bytes).unwrap_or_default();
                 match self.stop_managed_server(req) {
+                    Ok(resp) => match serde_json::to_vec(&resp) {
+                        Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
+                        Err(e) => (
+                            500,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                        ),
+                    },
+                    Err(e) => (
+                        400,
+                        "application/json; charset=utf-8",
+                        format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                    ),
+                }
+            }
+            ("POST", "/api/engine/server/backup") => {
+                let req: BackupWorldRequestDto =
+                    serde_json::from_slice(body_bytes).unwrap_or_default();
+                match self.backup_managed_world(req) {
+                    Ok(resp) => match serde_json::to_vec(&resp) {
+                        Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
+                        Err(e) => (
+                            500,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                        ),
+                    },
+                    Err(e) => (
+                        400,
+                        "application/json; charset=utf-8",
+                        format!("{{\"error\":\"{e}\"}}").into_bytes(),
+                    ),
+                }
+            }
+            ("POST", "/api/engine/server/restore") => {
+                let req: RestoreWorldRequestDto = match serde_json::from_slice(body_bytes) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        return (
+                            400,
+                            "application/json; charset=utf-8",
+                            format!("{{\"error\":\"invalid restore request: {e}\"}}").into_bytes(),
+                        );
+                    }
+                };
+                match self.restore_managed_world(req) {
                     Ok(resp) => match serde_json::to_vec(&resp) {
                         Ok(bytes) => (200, "application/json; charset=utf-8", bytes),
                         Err(e) => (

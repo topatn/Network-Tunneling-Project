@@ -950,7 +950,7 @@ impl ManagedServerSupervisor {
         } else {
             // Even on clean exit, ensure any auxiliary child JVM in the process tree is cleaned up
             // (`SRV-007` requirement (c)).
-            kill_windows_process_tree_by_pid(pid);
+            kill_process_tree_by_pid(pid);
         }
 
         // Read final shutdown/save log lines (`Saving worlds`, `Saving chunks`).
@@ -1204,12 +1204,12 @@ impl Drop for ManagedServerSupervisor {
 }
 
 fn terminate_process_tree(pid: u32, child: &mut Child) {
-    kill_windows_process_tree_by_pid(pid);
+    kill_process_tree_by_pid(pid);
     let _ = child.kill();
     let _ = child.wait();
 }
 
-fn kill_windows_process_tree_by_pid(pid: u32) {
+fn kill_process_tree_by_pid(pid: u32) {
     if cfg!(windows) {
         let _ = Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
@@ -1217,25 +1217,51 @@ fn kill_windows_process_tree_by_pid(pid: u32) {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+    } else {
+        let _ = Command::new("pkill")
+            .args(["-P", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
 }
 
-const MAX_BACKUP_FILES: usize = 512;
+const MAX_BACKUP_FILES: usize = 4096;
+const MAX_BACKUP_DEPTH: usize = 8;
 
 fn copy_dir_bounded(src: &Path, dst: &Path) -> Result<(), ManagedServerError> {
+    let mut copied_files = 0usize;
+    copy_dir_bounded_recursive(src, dst, &mut copied_files, 0)
+}
+
+fn copy_dir_bounded_recursive(
+    src: &Path,
+    dst: &Path,
+    copied_files: &mut usize,
+    depth: usize,
+) -> Result<(), ManagedServerError> {
+    if depth > MAX_BACKUP_DEPTH {
+        return Err(ManagedServerError::DiskExhaustion {
+            reason: "world directory exceeds maximum directory depth for backup".to_owned(),
+        });
+    }
+
     fs::create_dir_all(dst).map_err(|e| ManagedServerError::DiskExhaustion {
         reason: format!("failed to create backup destination directory: {e}"),
     })?;
-    let mut copied_files = 0usize;
+
     let entries = fs::read_dir(src).map_err(|e| ManagedServerError::DiskExhaustion {
         reason: format!("failed to read source directory for backup: {e}"),
     })?;
+
     for entry_res in entries {
-        if copied_files >= MAX_BACKUP_FILES {
-            return Err(ManagedServerError::DiskExhaustion {
-                reason: "world directory exceeds bounded file count for backup".to_owned(),
-            });
-        }
         let entry = entry_res.map_err(|e| ManagedServerError::DiskExhaustion {
             reason: format!("failed to read directory entry: {e}"),
         })?;
@@ -1244,13 +1270,30 @@ fn copy_dir_bounded(src: &Path, dst: &Path) -> Result<(), ManagedServerError> {
             .map_err(|e| ManagedServerError::DiskExhaustion {
                 reason: format!("failed to inspect file type: {e}"),
             })?;
-        if file_type.is_file() {
-            let dest_file = dst.join(entry.file_name());
-            fs::copy(entry.path(), dest_file).map_err(|e| ManagedServerError::DiskExhaustion {
+
+        // Refuse symlinks to prevent directory traversal or loops (SRV-010).
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let name = entry.file_name();
+        let src_child = entry.path();
+        let dst_child = dst.join(name);
+
+        if file_type.is_dir() {
+            copy_dir_bounded_recursive(&src_child, &dst_child, copied_files, depth + 1)?;
+        } else if file_type.is_file() {
+            if *copied_files >= MAX_BACKUP_FILES {
+                return Err(ManagedServerError::DiskExhaustion {
+                    reason: "world directory exceeds bounded file count for backup".to_owned(),
+                });
+            }
+            fs::copy(&src_child, &dst_child).map_err(|e| ManagedServerError::DiskExhaustion {
                 reason: format!("failed to copy world file: {e}"),
             })?;
-            copied_files = copied_files.saturating_add(1);
+            *copied_files = copied_files.saturating_add(1);
         }
     }
+
     Ok(())
 }

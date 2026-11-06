@@ -7,4 +7,5 @@
 
 pub mod credentials;
 pub mod engine_bridge;
+pub mod http_server;
 pub mod packaging;
