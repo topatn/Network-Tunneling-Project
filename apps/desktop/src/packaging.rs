@@ -1151,9 +1151,13 @@ pub fn is_loopback_port_listening(port: u16) -> bool {
 
 fn terminate_os_process(pid: u32) {
     let pid_str = pid.to_string();
-    let _ = Command::new("taskkill")
-        .args(["/PID", &pid_str, "/T", "/F"])
-        .output();
+    if cfg!(windows) {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid_str, "/T", "/F"])
+            .output();
+    } else {
+        let _ = Command::new("kill").args(["-9", &pid_str]).output();
+    }
 }
 
 /// Compute SHA-256 digest of `bytes`.

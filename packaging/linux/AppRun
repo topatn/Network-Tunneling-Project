@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+export PATH="${HERE}/usr/bin:${PATH}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
+# If running in terminal or --headless flag supplied, run directly
+if [ ! -t 0 ] && [ "$#" -eq 0 ]; then
+    exec "${HERE}/usr/bin/gtt" "$@"
+else
+    exec "${HERE}/usr/bin/gtt" "$@"
+fi

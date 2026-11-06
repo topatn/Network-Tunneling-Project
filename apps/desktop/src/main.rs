@@ -151,32 +151,33 @@ fn main() -> ExitCode {
         }
     };
 
-    let no_open = args.iter().any(|a| a == "--no-open");
+    let no_open = args.iter().any(|a| a == "--no-open" || a == "--headless");
+    let bind_host = flag_value(&args, "--host").unwrap_or("127.0.0.1");
     let target_port: Option<u16> = flag_value(&args, "--port").and_then(|p| p.parse().ok());
 
-    // Bind loopback listener (try target port, then 5173..=5180, then auto-assigned 0)
+    // Bind listener (try target port, then 5173..=5180, then auto-assigned 0)
     let listener = match target_port {
-        Some(p) => match TcpListener::bind(("127.0.0.1", p)) {
+        Some(p) => match TcpListener::bind((bind_host, p)) {
             Ok(l) => l,
             Err(e) => {
-                eprintln!("[ERROR] Could not bind to requested port {p}: {e}");
+                eprintln!("[ERROR] Could not bind to requested host {bind_host}:{p}: {e}");
                 return ExitCode::FAILURE;
             }
         },
         None => {
             let mut bound = None;
             for p in 5173..=5180 {
-                if let Ok(l) = TcpListener::bind(("127.0.0.1", p)) {
+                if let Ok(l) = TcpListener::bind((bind_host, p)) {
                     bound = Some(l);
                     break;
                 }
             }
             match bound {
                 Some(l) => l,
-                None => match TcpListener::bind(("127.0.0.1", 0)) {
+                None => match TcpListener::bind((bind_host, 0)) {
                     Ok(l) => l,
                     Err(e) => {
-                        eprintln!("[ERROR] Could not bind loopback listener: {e}");
+                        eprintln!("[ERROR] Could not bind listener on {bind_host}: {e}");
                         return ExitCode::FAILURE;
                     }
                 },
@@ -193,7 +194,7 @@ fn main() -> ExitCode {
     };
 
     let port = local_addr.port();
-    let url = format!("http://127.0.0.1:{port}");
+    let url = format!("http://{bind_host}:{port}");
 
     println!("\n======================================================");
     println!(" Game Tunnel Tooling (GTT) Desktop Shell Running!     ");
@@ -203,7 +204,7 @@ fn main() -> ExitCode {
     println!(" Press Ctrl+C to stop.                                ");
     println!("======================================================\n");
 
-    // Launch standalone window in Edge app mode if requested
+    // Launch standalone window in app mode if requested
     if !no_open {
         launch_window(&url);
     } else {
@@ -308,39 +309,64 @@ fn handle_connection(mut stream: TcpStream, bridge: &EngineBridge) {
 }
 
 fn launch_window(url: &str) {
-    let edge_paths = [
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-    ];
+    if cfg!(windows) {
+        let edge_paths = [
+            "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        ];
 
-    let user_data_dir = env::var("LOCALAPPDATA")
-        .map(|p| Path::new(&p).join("GTT").join("webview-profile"))
-        .unwrap_or_else(|_| env::temp_dir().join("gtt-webview-profile"));
+        let user_data_dir = env::var("LOCALAPPDATA")
+            .map(|p| Path::new(&p).join("GTT").join("webview-profile"))
+            .unwrap_or_else(|_| env::temp_dir().join("gtt-webview-profile"));
 
-    let _ = fs::create_dir_all(&user_data_dir);
-    let user_data_arg = format!("--user-data-dir={}", user_data_dir.display());
+        let _ = fs::create_dir_all(&user_data_dir);
+        let user_data_arg = format!("--user-data-dir={}", user_data_dir.display());
 
-    for path in edge_paths {
-        if Path::new(path).exists() {
-            println!("[INFO] Opening GTT standalone window via WebView2/Edge...");
-            let app_arg = format!("--app={url}");
-            if Command::new(path)
-                .args([
-                    &app_arg,
-                    &user_data_arg,
-                    "--window-size=980,720",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                ])
+        for path in edge_paths {
+            if Path::new(path).exists() {
+                println!("[INFO] Opening GTT standalone window via WebView2/Edge...");
+                let app_arg = format!("--app={url}");
+                if Command::new(path)
+                    .args([
+                        &app_arg,
+                        &user_data_arg,
+                        "--window-size=980,720",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                    ])
+                    .spawn()
+                    .is_ok()
+                {
+                    return;
+                }
+            }
+        }
+
+        // Windows fallback: system browser
+        println!("[INFO] Opening in default web browser: {url}");
+        let _ = Command::new("cmd").args(["/c", "start", url]).spawn();
+    } else {
+        // Linux / Unix desktop environments: try app-mode browser first, then xdg-open
+        let linux_app_browsers = [
+            "google-chrome",
+            "chromium-browser",
+            "chromium",
+            "microsoft-edge",
+            "brave-browser",
+        ];
+        let app_arg = format!("--app={url}");
+        for browser in linux_app_browsers {
+            if Command::new(browser)
+                .args([&app_arg, "--window-size=980,720", "--no-first-run"])
                 .spawn()
                 .is_ok()
             {
+                println!("[INFO] Opening GTT standalone window via {browser}...");
                 return;
             }
         }
-    }
 
-    // Fallback: system browser
-    println!("[INFO] Opening in default web browser: {url}");
-    let _ = Command::new("cmd").args(["/c", "start", url]).spawn();
+        println!("[INFO] Opening in default web browser via xdg-open: {url}");
+        let _ = Command::new("xdg-open").arg(url).spawn();
+    }
 }

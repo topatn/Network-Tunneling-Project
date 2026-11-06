@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="tunnelGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#16a34a"/>
+      <stop offset="50%" stop-color="#22c55e"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Rect -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bgGrad)" stroke="#334155" stroke-width="4"/>
+  
+  <!-- Tunnel Outer Rings -->
+  <ellipse cx="64" cy="64" rx="46" ry="24" fill="none" stroke="#334155" stroke-width="3" stroke-dasharray="6,4"/>
+  <ellipse cx="64" cy="64" rx="36" ry="18" fill="none" stroke="#22c55e" stroke-width="3" opacity="0.8"/>
+  <ellipse cx="64" cy="64" rx="24" ry="12" fill="none" stroke="#38bdf8" stroke-width="2.5" opacity="0.9"/>
+  <ellipse cx="64" cy="64" rx="12" ry="6" fill="#22c55e" opacity="0.6"/>
+
+  <!-- Controller Symbol / Game Pad -->
+  <path d="M 44,48 C 36,48 30,56 32,70 C 33,78 37,84 44,82 C 48,81 52,75 56,75 L 72,75 C 76,75 80,81 84,82 C 91,84 95,78 96,70 C 98,56 92,48 84,48 Z" 
+        fill="#0f172a" stroke="url(#tunnelGrad)" stroke-width="4"/>
+
+  <!-- D-Pad -->
+  <rect x="42" y="59" width="10" height="4" rx="1.5" fill="#f8fafc"/>
+  <rect x="45" y="56" width="4" height="10" rx="1.5" fill="#f8fafc"/>
+
+  <!-- Action Buttons -->
+  <circle cx="80" cy="59" r="2.5" fill="#22c55e"/>
+  <circle cx="86" cy="63" r="2.5" fill="#38bdf8"/>
+</svg>

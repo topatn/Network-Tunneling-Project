@@ -13,6 +13,7 @@ A Windows desktop application that lets people host multiplayer game servers on 
 - **Host Experience:** The host chooses a game profile, customizes ports or settings, starts a tunnel, and shares a private invitation link.
 - **Guest Experience:** Guests claim the invitation link via a web browser; the relay admits the guest's IP address on a strict default-deny basis (`SEC-009`) and forwards game traffic over authenticated UDP and TCP flows.
 - **In-Process Engine Bridge:** The native desktop shell communicates directly with the tunnel engine lifecycle across loopback (`127.0.0.1`) with zero external service leakage (`contracts.md` §13, `INV-1`).
+- **Integrated Server Management:** Supports verified one-click provisioning and child-process supervision for games like Minecraft: Java Edition (`SRV-001`–`SRV-018`).
 
 ---
 
@@ -34,7 +35,181 @@ The codebase is organized into modular Rust crates, desktop application frontend
 
 ---
 
-## 3. Game Compatibility Status (`T-090`, `T-091`, `TEST-005`)
+## 3. Installation Guide
+
+GTT is designed to run with **zero administrator privileges** (`SEC-012`). All application binaries, per-user configurations, and game server directories are strictly confined to `%LOCALAPPDATA%` (`SRV-010`, `INST-001`).
+
+### 3.1 System Requirements
+
+- **Operating System:** Windows 10 (version 1809+) or Windows 11 64-bit.
+- **Web Browser / Runtime:** Microsoft Edge or Microsoft Edge WebView2 Evergreen Runtime (pre-installed on Windows 10 and 11).
+- **Java Runtime (Optional):** Java 25 or newer (`SRV-018`). Only required if using the built-in managed Minecraft: Java Edition server.
+- **Network:** Standard broadband internet connection. Router port forwarding and static public IPs are **not** needed.
+
+### 3.2 Method A: Quick Start from Source (Developer Mode)
+
+To build and run the application directly:
+
+```powershell
+# 1. Ensure Rust toolchain is available (stable x86_64)
+rustc --version
+cargo --version
+
+# 2. Run the desktop application with embedded assets and local engine bridge
+cargo run -p gtt-desktop
+```
+
+GTT will:
+1. Start the native engine HTTP bridge on `http://127.0.0.1:5173`.
+2. Automatically launch the desktop standalone window using Edge / WebView2.
+
+### 3.3 Method B: Per-User Installation (`INST-001`, `INST-002`)
+
+To install GTT as a standalone desktop app for the current Windows user without elevation:
+
+```powershell
+# 1. Build the release binary
+cargo build --release -p gtt-desktop
+
+# 2. Execute per-user installation into %LOCALAPPDATA%\Programs\GTT\
+.\target\release\gtt-desktop.exe --install-per-user "$env:LOCALAPPDATA"
+```
+
+**Where files are stored:**
+- **Executable:** `%LOCALAPPDATA%\Programs\GTT\gtt-desktop.exe`
+- **Start Menu Shortcut:** `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Game Tunnel Tooling.lnk`
+- **Server Worlds & Data:** `%LOCALAPPDATA%\GTT\servers\`
+- **Application Logs & State:** `%LOCALAPPDATA%\GTT\`
+
+### 3.4 Verifying the Installation
+
+```powershell
+# Verify embedded assets and asInvoker security manifest (exit 0)
+gtt-desktop.exe --self-check
+
+# Verify WebView2 browser runtime status
+gtt-desktop.exe --verify-webview2
+```
+
+### 3.5 Uninstalling GTT (`INST-004`)
+
+```powershell
+# Remove application executable and Start Menu shortcut (preserves your worlds and data)
+gtt-desktop.exe --uninstall-per-user "$env:LOCALAPPDATA"
+
+# Completely remove all files including worlds, server data, and credentials
+gtt-desktop.exe --uninstall-per-user "$env:LOCALAPPDATA" --remove-user-data
+```
+
+### 3.6 Linux Distribution Packages (.deb, tarball, AppImage, systemd)
+
+GTT packages natively for Linux desktop and headless servers:
+
+```bash
+# Debian / Ubuntu package (.deb)
+sudo apt install ./gtt_0.1.0_amd64.deb
+
+# Standalone binary tarball (installs to /usr/local/bin or ~/.local/bin)
+tar -xzf gtt-v0.1.0-linux-x86_64.tar.gz && cd gtt-v0.1.0 && ./install.sh
+
+# Headless server daemon (systemd service included)
+gtt --headless --port 5173
+```
+
+Detailed Linux instructions are in [`docs/linux-distribution-guide.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/docs/linux-distribution-guide.md).
+
+---
+
+## 4. User Guide: How to Use GTT
+
+### Step 1: Launch the Application
+
+Launch GTT from the Start Menu or via PowerShell:
+```powershell
+cargo run -p gtt-desktop
+```
+The GTT dashboard will open in a clean, dark-themed desktop window.
+
+### Step 2: Choose Your Game Profile
+
+Click **Switch Game** or **Choose Game** on the dashboard. GTT comes with pre-configured profiles:
+- **Minecraft: Java Edition** (Default: TCP port 25565)
+- **Minecraft: Bedrock Edition** (Default: UDP port 19132)
+- **Terraria** (Default: TCP port 7777)
+- **Left 4 Dead 2** (Default: UDP port 27015)
+
+Select **Minecraft: Java Edition**.
+
+### Step 3: Set Up Your Game Server
+
+You can host a server in two ways:
+
+#### Option A: Built-in Managed Server ("Set this up for me")
+GTT can verify, configure, and supervise your server process automatically:
+1. Under **Local Server Configuration**, click **"Set this up for me"**.
+2. **Server Jar Path:** GTT defaults to `C:\Users\<YourUsername>\Downloads\server.jar`, or enter your custom path.
+3. **Integrity Verification:** GTT streams the jar and verifies its SHA-256 hash (`SRV-002`) against Mojang's published release manifest before executing.
+4. **Accept EULA:** Review and accept the official Minecraft End User License Agreement (`SRV-015`).
+5. **Start Server:** Click **Start Server**. GTT validates Java 25+, spawns the server process strictly bound to `127.0.0.1:25565`, and tracks its readiness marker (`Done (X.Xs)!`).
+6. **Live Console:** Monitor startup progress and logs in real time via the integrated console window.
+
+#### Option B: External / Hand-Managed Server
+If you already run a local server (vanilla, Paper, Fabric, Forge, Bedrock, Terraria, etc.):
+1. Start your dedicated server normally on your PC.
+2. In GTT, leave the local port as `25565` (or enter your custom port).
+3. GTT's local probe indicator will confirm that `127.0.0.1:25565` is reachable.
+
+### Step 4: Connecting as the Host
+
+Because the server is running locally on your computer:
+1. Open your game client (e.g., Minecraft: Java Edition).
+2. Go to **Multiplayer** → **Direct Connection** (or **Add Server**).
+3. In the Server Address field, enter:
+   ```text
+   localhost
+   ```
+   *(or `127.0.0.1`)*.
+4. Click **Join Server**.
+
+> **Managing Whitelist & Operators:**
+> Managed server files are located at `%LOCALAPPDATA%\GTT\servers\minecraft-java\`.
+> To whitelist players or grant operator permissions, edit `whitelist.json` and `ops.json` in that directory.
+
+### Step 5: Sharing with Friends Over the Internet
+
+GTT supports two ways to share your local server with friends without port-forwarding:
+
+#### Mode 1: Free Tier via Tailscale Node Sharing (`ADR-022`)
+Uses Tailscale's encrypted WireGuard mesh network directly between PCs:
+1. Ensure Tailscale is signed in on your PC:
+   ```powershell
+   tailscale up
+   ```
+2. Open the Tailscale Admin Console ([login.tailscale.com/admin/machines](https://login.tailscale.com/admin/machines)).
+3. Locate this PC, click the `...` menu, and select **Share machine...** to generate an invite link.
+4. Send the invite link to your friend.
+5. Once your friend accepts, they connect in Minecraft using your Tailscale IP:
+   ```text
+   <your-tailscale-ip>:25565
+   ```
+   *(e.g. `100.85.120.44:25565` or your Tailscale machine name).*
+
+#### Mode 2: GTT Managed Relay Tier
+Uses GTT high-throughput authenticated relays:
+1. Click **Start Tunnel** on the GTT dashboard.
+2. GTT establishes an authenticated QUIC connection to the relay and reserves a public port.
+3. Click **Create Invitation** to generate a private 128-bit claim link.
+4. Send the link to your friend. When they open it in their browser, the relay grants firewall admission for their IP address (`SEC-009`).
+5. Your friend copies the public address (e.g. `relay.region.gtt.gg:25565`) into their game client to join.
+
+### Step 6: Graceful Stop
+
+- **Stop Server:** Click **Stop Server**. GTT writes `stop\n` to the server's stdin, allowing Minecraft to save all world chunks to disk before exiting cleanly.
+- **Stop Tunnel:** Click **Stop Tunnel** to release relay allocations and close network forwarders.
+
+---
+
+## 5. Game Compatibility Status (`T-090`, `T-091`, `TEST-005`)
 
 | Game | Profile | L0 (Connect) | L1 (Protocol Status) | L2 (Real Client) | Status |
 |---|---|:---:|:---:|:---:|---|
@@ -48,7 +223,7 @@ The codebase is organized into modular Rust crates, desktop application frontend
 
 ---
 
-## 4. Development Environment & Prerequisites
+## 6. Development Environment & Prerequisites
 
 The following toolchain versions are verified in local development and CI:
 
@@ -60,11 +235,11 @@ The following toolchain versions are verified in local development and CI:
 
 ---
 
-## 5. Verified Commands
+## 7. Verified Commands
 
 Every command listed below has been executed and verified in this repository.
 
-### 5.1 Code Quality & Formatting
+### 7.1 Code Quality & Formatting
 
 ```powershell
 # Check code formatting (exit 0, 0 diff)
@@ -86,7 +261,7 @@ python scripts/audit_traceability.py --self-test
 python scripts/check_contrast.py --strict
 ```
 
-### 5.2 Unit & Integration Tests
+### 7.2 Unit & Integration Tests
 
 ```powershell
 # Run the entire workspace unit and integration test suite
@@ -102,7 +277,7 @@ cargo test -p gtt-desktop --test packaging_lifecycle
 cargo test -p gtt-desktop --test engine_bridge_integration
 ```
 
-### 5.3 Unified Verification Suites
+### 7.3 Unified Verification Suites
 
 ```powershell
 # Client-side tunnel session & engine bridge verification (T-070, T-073)
@@ -129,6 +304,9 @@ python scripts/verify_security_and_privacy.py
 # Packaging, signed updater, rollback & uninstall staging (T-100, T-101, T-102)
 python scripts/verify_packaging_and_updater.py
 
+# Linux distribution packaging (.deb, tarball, AppImage, systemd unit)
+python scripts/verify_linux_packaging.py
+
 # Staging observability, alerting & egress cost dashboards (T-103, OPS-002, OPS-006)
 python scripts/verify_observability.py
 
@@ -136,25 +314,9 @@ python scripts/verify_observability.py
 python scripts/backup_restore_test.py --dry-run
 ```
 
-### 5.4 Running the Desktop Application Locally
-
-```powershell
-# Run the standalone desktop UI development server (Node.js)
-npm run dev --prefix apps/desktop
-
-# Run the native desktop executable with embedded assets and loopback engine bridge
-cargo run -p gtt-desktop
-
-# Verify executable self-check and zero-elevation asInvoker policy
-cargo run -p gtt-desktop -- --self-check
-
-# Verify WebView2 evergreen runtime detection
-cargo run -p gtt-desktop -- --verify-webview2
-```
-
 ---
 
-## 6. Security & Invariant Rules
+## 8. Security & Invariant Rules
 
 - **Zero Elevation (`SEC-012`):** The desktop application enforces `<requestedExecutionLevel level="asInvoker" uiAccess="false" />` and never requests administrator privileges.
 - **Local Target Immutability (`SEC-005`, `SEC-006`, `INV-1`):** The control plane rejects all local destination addresses and ports in requests. Relays never connect to destinations chosen by clients. The engine dials strictly from its own configuration.
@@ -164,7 +326,7 @@ cargo run -p gtt-desktop -- --verify-webview2
 
 ---
 
-## 7. Documentation Map
+## 9. Documentation Map
 
 | Document | Description |
 |---|---|
@@ -176,4 +338,5 @@ cargo run -p gtt-desktop -- --verify-webview2
 | [`requirements.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/requirements.md) | Complete inventory of functional, security, and quality requirements |
 | [`DESIGN.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/DESIGN.md), [`user-flows.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/user-flows.md) | UI design system, color tokens, contrast ratios, user journeys |
 | [`tasks.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/tasks.md), [`plan.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/plan.md) | Implementation tasks, prerequisites, and milestone verification checklist |
+| [`docs/linux-distribution-guide.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/docs/linux-distribution-guide.md) | Linux packages (.deb, tarball, AppImage), systemd unit, and headless server usage |
 | [`AGENTS.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/AGENTS.md), [`CLAUDE.md`](file:///c:/Users/chris/Documents/Network%20Tunneling%20Project/CLAUDE.md) | Workflow rules, safety boundaries, and engineering standards for AI agents |

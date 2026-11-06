@@ -1,0 +1,19 @@
+[Unit]
+Description=Game Tunnel Tooling (GTT) Headless Service
+Documentation=https://github.com/org/gtt
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/gtt --headless --port 5173
+Restart=on-failure
+RestartSec=5s
+Environment=LOCALAPPDATA=%h/.local/share
+WorkingDirectory=%h
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+[Install]
+WantedBy=default.target

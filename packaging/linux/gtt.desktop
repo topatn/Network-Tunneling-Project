@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Game Tunnel Tooling
+GenericName=Game Server Tunneling
+Comment=Host and share multiplayer game servers without port forwarding or public IPs
+Exec=gtt %u
+Icon=gtt
+Terminal=false
+Categories=Network;Game;Utility;
+StartupNotify=true
+MimeType=x-scheme-handler/gtt;
+Keywords=game;server;tunnel;minecraft;terraria;relay;multiplayer;
